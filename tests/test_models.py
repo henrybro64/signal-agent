@@ -1,8 +1,17 @@
+from datetime import datetime, timezone
+
 from app.core import SignalItem
+
+OBSERVED_AT = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 
 
 def test_signal_item_defaults() -> None:
-    item = SignalItem(source="manual", item_type="job", title="Backend Engineer")
+    item = SignalItem(
+        source="manual",
+        item_type="job",
+        title="Backend Engineer",
+        observed_at=OBSERVED_AT,
+    )
 
     assert item.source == "manual"
     assert item.item_type == "job"
@@ -11,6 +20,7 @@ def test_signal_item_defaults() -> None:
     assert item.external_id is None
     assert item.content is None
     assert item.metadata == {}
+    assert item.observed_at == OBSERVED_AT
 
 
 def test_signal_item_job_metadata() -> None:
@@ -18,6 +28,7 @@ def test_signal_item_job_metadata() -> None:
         source="linkedin",
         item_type="job",
         title="Python Engineer",
+        observed_at=OBSERVED_AT,
         external_id="li-123",
         url="https://www.linkedin.com/jobs/view/123",
         metadata={
@@ -39,6 +50,7 @@ def test_signal_item_stock_mover_metadata() -> None:
         source="twse",
         item_type="tw_stock_mover",
         title="TSMC rises 4.2%",
+        observed_at=OBSERVED_AT,
         external_id="2330-2026-06-15",
         metadata={
             "stock_code": "2330",
@@ -57,8 +69,12 @@ def test_signal_item_stock_mover_metadata() -> None:
 
 
 def test_signal_item_metadata_uses_new_dict_per_instance() -> None:
-    first = SignalItem(source="manual", item_type="job", title="First")
-    second = SignalItem(source="manual", item_type="job", title="Second")
+    first = SignalItem(
+        source="manual", item_type="job", title="First", observed_at=OBSERVED_AT
+    )
+    second = SignalItem(
+        source="manual", item_type="job", title="Second", observed_at=OBSERVED_AT
+    )
 
     first.metadata["seen"] = True
 
