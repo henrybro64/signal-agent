@@ -67,9 +67,7 @@ class AppConfig:
                 tw_stocks=TwStocksSourceConfig(**data["sources"]["tw_stocks"]),
             ),
             notifiers=NotifiersConfig(
-                telegram=TelegramNotifierConfig(
-                    **data["notifiers"]["telegram"]
-                ),
+                telegram=TelegramNotifierConfig(**data["notifiers"]["telegram"]),
             ),
             scoring=ScoringConfig(**data["scoring"]),
         )

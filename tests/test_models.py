@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core import SignalItem
 
-OBSERVED_AT = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+OBSERVED_AT = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
 
 
 def test_signal_item_defaults() -> None:
