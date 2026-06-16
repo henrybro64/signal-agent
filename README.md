@@ -1,17 +1,60 @@
 # signal-agent
 
-Generic starter repository for the `signal-agent` project.
+`signal-agent` is a personal Python agent for collecting and ranking signals
+such as job openings and Taiwan stock mover reports, then sending Telegram
+digests.
 
-## Overview
+## Status
 
-This repository is currently being initialized. Use it to store source code, documentation, and related assets for the project.
+This repository is in bootstrap mode. It includes a working Python entrypoint,
+sample configuration files, and the initial package layout for future source
+collectors, scoring, and notifier integrations.
 
-## Getting Started
+The bootstrap intentionally does not include live collectors, Docker, or LLM
+logic yet.
 
-1. Clone the repository.
-2. Add the project files.
-3. Commit and push changes to `main`.
+## Quick Start
 
-## License
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+cp .env.example .env
+python main.py --help
+python main.py --task dummy
+signal-agent --help
+pytest
+```
 
-Add a license here if needed.
+## Project Layout
+
+```text
+signal-agent/
+├── README.md
+├── .env.example
+├── .gitignore
+├── config.yaml
+├── main.py
+├── pyproject.toml
+├── app/
+│   ├── core/
+│   ├── config.py
+│   ├── notifiers/
+│   ├── scorers/
+│   ├── sources/
+│   └── tasks/
+└── tests/
+```
+
+## Bootstrap CLI
+
+- `python main.py --help` or `signal-agent --help` shows the available options.
+- `python main.py --task dummy` loads `config.yaml`, reads `.env`, and prints a
+  short bootstrap summary that proves the entrypoint wiring works.
+
+## Configuration
+
+- `config.yaml` is loaded by bootstrap tasks through `app.config.load_config`.
+- `.env.example` documents notifier environment variables loaded by
+  `app.config.load_env_settings`.
+
