@@ -9,9 +9,9 @@ test:
 	$(PYTHON) -m pytest
 
 lint:
-	ruff check .
+	$(PYTHON) -m ruff check .
 
 format:
-	ruff format .
+	$(PYTHON) -m ruff format .
 
 check: test lint

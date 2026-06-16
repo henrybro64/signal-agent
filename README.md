@@ -63,14 +63,21 @@ signal-agent/
 Use either the documented commands directly or the `Makefile` targets:
 
 ```bash
-python -m pip install -e '.[dev]'
-python -m pytest
-ruff check .
-ruff format .
+make install-dev
 make test
 make lint
 make format
+make check
 ```
 
-If your Ubuntu environment exposes `python3` instead of `python`, use
-`python3` consistently or run the `Makefile` targets directly.
+Equivalent direct commands:
+
+```bash
+python3 -m pip install -e '.[dev]'
+python3 -m pytest
+python3 -m ruff check .
+python3 -m ruff format .
+```
+
+The `Makefile` defaults to `python3`, which matches typical Ubuntu setups. To
+use a different interpreter, run `make test PYTHON=python3.12`.
