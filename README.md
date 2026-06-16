@@ -18,12 +18,12 @@ logic yet.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .[dev]
+python -m pip install -e '.[dev]'
 cp .env.example .env
 python main.py --help
 python main.py --task dummy
 signal-agent --help
-pytest
+python -m pytest
 ```
 
 ## Project Layout
@@ -58,3 +58,26 @@ signal-agent/
 - `.env.example` documents notifier environment variables loaded by
   `app.config.load_env_settings`.
 
+## Development
+
+Use either the documented commands directly or the `Makefile` targets:
+
+```bash
+make install-dev
+make test
+make lint
+make format
+make check
+```
+
+Equivalent direct commands:
+
+```bash
+python3 -m pip install -e '.[dev]'
+python3 -m pytest
+python3 -m ruff check .
+python3 -m ruff format .
+```
+
+The `Makefile` defaults to `python3`, which matches typical Ubuntu setups. To
+use a different interpreter, run `make test PYTHON=python3.12`.
