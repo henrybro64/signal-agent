@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from typing import ClassVar
 
 from app.core import SignalItem
 
@@ -11,17 +12,29 @@ from app.core import SignalItem
 class BaseSource(ABC):
     """Common interface for any signal source plugin."""
 
-    name: str
+    name: ClassVar[str]
 
     @abstractmethod
     def fetch(self) -> list[SignalItem]:
         """Fetch and return normalized signal items."""
 
 
-def fetch_from_sources(sources: Iterable[BaseSource]) -> list[SignalItem]:
+SourceErrorHandler = Callable[[BaseSource, Exception], None]
+
+
+def fetch_from_sources(
+    sources: Iterable[BaseSource],
+    *,
+    on_error: SourceErrorHandler | None = None,
+) -> list[SignalItem]:
     """Run a simple source pipeline and flatten all fetched items."""
 
     items: list[SignalItem] = []
     for source in sources:
-        items.extend(source.fetch())
+        try:
+            items.extend(source.fetch())
+        except Exception as exc:
+            if on_error is None:
+                raise
+            on_error(source, exc)
     return items

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.config import load_config, load_env_settings
+from app.sources import DummySource, fetch_from_sources
 
 TaskHandler = Callable[[str], str]
 
@@ -26,8 +27,23 @@ def run_dummy_task(config_path: str) -> str:
     )
 
 
+def run_fetch_task(config_path: str) -> str:
+    """Fetch sample signals through the source plugin pipeline."""
+
+    load_config(config_path)
+    items = fetch_from_sources([DummySource()])
+
+    lines = [
+        f"fetch task executed using {config_path}:",
+        f"fetched {len(items)} signal(s) from dummy source:",
+    ]
+    lines.extend(f"- [{item.item_type}] {item.title}" for item in items)
+    return "\n".join(lines)
+
+
 TASKS: dict[str, TaskHandler] = {
     "dummy": run_dummy_task,
+    "fetch": run_fetch_task,
 }
 
 

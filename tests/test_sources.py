@@ -1,5 +1,8 @@
+import pytest
+
 from app.core import SignalItem
 from app.sources import BaseSource, DummySource, fetch_from_sources
+from app.sources.dummy import SAMPLE_OBSERVED_AT
 
 
 def test_dummy_source_fetch_returns_signal_items() -> None:
@@ -32,7 +35,7 @@ def test_fetch_from_sources_accepts_any_base_source() -> None:
                     source=self.name,
                     item_type="job",
                     title="Single item",
-                    observed_at=DummySource().fetch()[0].observed_at,
+                    observed_at=SAMPLE_OBSERVED_AT,
                 )
             ]
 
@@ -40,3 +43,35 @@ def test_fetch_from_sources_accepts_any_base_source() -> None:
 
     assert len(items) == 1
     assert items[0].source == "single"
+
+
+def test_fetch_from_sources_propagates_source_errors() -> None:
+    class FailingSource(BaseSource):
+        name = "failing"
+
+        def fetch(self) -> list[SignalItem]:
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        fetch_from_sources([FailingSource()])
+
+
+def test_fetch_from_sources_can_skip_failed_sources() -> None:
+    class FailingSource(BaseSource):
+        name = "failing"
+
+        def fetch(self) -> list[SignalItem]:
+            raise RuntimeError("boom")
+
+    errors: list[str] = []
+
+    def on_error(source: BaseSource, exc: Exception) -> None:
+        errors.append(f"{source.name}: {exc}")
+
+    items = fetch_from_sources(
+        [DummySource(), FailingSource()],
+        on_error=on_error,
+    )
+
+    assert len(items) == 2
+    assert errors == ["failing: boom"]

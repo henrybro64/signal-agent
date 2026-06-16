@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import ClassVar
 
 from app.core import SignalItem
 
@@ -14,7 +15,7 @@ SAMPLE_OBSERVED_AT = datetime(2026, 6, 16, 9, 0, tzinfo=UTC)
 class DummySource(BaseSource):
     """In-memory source that returns stable sample signals."""
 
-    name = "dummy"
+    name: ClassVar[str] = "dummy"
 
     def fetch(self) -> list[SignalItem]:
         return [
