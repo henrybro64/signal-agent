@@ -2,16 +2,20 @@ agent:
   timezone: Asia/Taipei
   digest_time: "20:00"
 
-sources:
-  jobs:
+tasks:
+  job_search:
     enabled: true
+    sources:
+      - job104
+      - linkedin_email
     keywords:
       - python
       - backend
       - agent
-  tw_stocks:
+  tw_stock_movers:
     enabled: true
-    movers_limit: 10
+    top_n: 20
+    timezone: Asia/Taipei
 
 notifiers:
   telegram:
@@ -20,4 +24,3 @@ notifiers:
 scoring:
   freshness_weight: 0.6
   priority_weight: 0.4
-
