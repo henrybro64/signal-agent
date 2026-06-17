@@ -20,15 +20,20 @@ def build_parser() -> argparse.ArgumentParser:
             "Run the bootstrap signal-agent CLI for local development checks."
         ),
     )
+    action_group = parser.add_mutually_exclusive_group()
+    action_group.add_argument(
+        "--task",
+        help="Run one named bootstrap task.",
+    )
+    action_group.add_argument(
+        "--list-tasks",
+        action="store_true",
+        help="List the available bootstrap tasks and exit.",
+    )
     parser.add_argument(
         "--config",
         default=DEFAULT_CONFIG_PATH,
         help="Path to the YAML config file. Default: %(default)s",
-    )
-    parser.add_argument(
-        "--task",
-        choices=list_tasks(),
-        help="Run one named bootstrap task.",
     )
     return parser
 
@@ -39,12 +44,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.list_tasks:
+        print("\n".join(list_tasks()))
+        return 0
+
     if args.task is None:
         parser.print_help()
         return 0
 
     try:
-        print(run_task(args.task, config_path=args.config))
+        run_task(args.task, config_path=args.config)
     except (FileNotFoundError, ConfigError, ValueError) as exc:
         print(exc, file=sys.stderr)
         return 1

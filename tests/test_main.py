@@ -27,6 +27,14 @@ def test_main_help_command() -> None:
     assert result.returncode == 0
     assert "signal-agent" in result.stdout
     assert "--task" in result.stdout
+    assert "--list-tasks" in result.stdout
+
+
+def test_main_list_tasks_command() -> None:
+    result = run_main("--list-tasks")
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["dummy", "fetch"]
 
 
 def test_main_dummy_task_command() -> None:
@@ -89,3 +97,11 @@ def test_main_missing_config_returns_error() -> None:
 
     assert result.returncode == 1
     assert "Config file not found: missing.yaml" in result.stderr
+
+
+def test_main_invalid_task_returns_error() -> None:
+    result = run_main("--task", "missing-task")
+
+    assert result.returncode == 1
+    assert "Unknown task: missing-task" in result.stderr
+    assert "Available tasks: dummy, fetch" in result.stderr

@@ -21,6 +21,7 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 cp .env.example .env
 python main.py --help
+python main.py --list-tasks
 python main.py --task dummy
 python main.py --task fetch
 signal-agent --help
@@ -71,6 +72,7 @@ signal-agent/
 ## Bootstrap CLI
 
 - `python main.py --help` or `signal-agent --help` shows the available options.
+- `python main.py --list-tasks` shows the registered CLI task names.
 - `python main.py --task dummy` loads `config.yaml`, reads `.env`, and prints a
   short bootstrap summary that proves the entrypoint wiring works.
 - `python main.py --task fetch` runs the dummy source plugin and prints fetched
@@ -87,6 +89,19 @@ samples for local development and tests.
 from app.sources import DummySource, fetch_from_sources
 
 items = fetch_from_sources([DummySource()])
+```
+
+## Task runner
+
+Each workflow implements `BaseTask` in `app/tasks/` and executes from the CLI
+through the task registry. Register new tasks in `app/tasks/__init__.py`, then
+run them with `--task` or list them with `--list-tasks`.
+
+```python
+from app.tasks import TASKS, build_task
+
+task = build_task("dummy", config_path="config.yaml")
+task.run()
 ```
 
 ## Configuration
