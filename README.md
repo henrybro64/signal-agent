@@ -21,6 +21,7 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 cp .env.example .env
 python main.py --help
+python main.py --list-tasks
 python main.py --task dummy
 python main.py --task fetch
 signal-agent --help
@@ -50,6 +51,7 @@ signal-agent/
 ## Bootstrap CLI
 
 - `python main.py --help` or `signal-agent --help` shows the available options.
+- `python main.py --list-tasks` shows the registered CLI task names.
 - `python main.py --task dummy` loads `config.yaml`, reads `.env`, and prints a
   short bootstrap summary that proves the entrypoint wiring works.
 - `python main.py --task fetch` runs the dummy source plugin and prints fetched
