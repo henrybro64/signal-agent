@@ -122,6 +122,10 @@ tasks:
     sources:
       - job104
       - linkedin_email
+    keywords:
+      - python
+      - backend
+      - agent
   tw_stock_movers:
     enabled: true
     top_n: 20
@@ -130,6 +134,10 @@ tasks:
 notifiers:
   telegram:
     enabled: true
+
+scoring:
+  freshness_weight: 0.6
+  priority_weight: 0.4
 ```
 
 Load config in code with:
