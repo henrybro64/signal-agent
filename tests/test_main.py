@@ -35,6 +35,7 @@ def test_main_dummy_task_command() -> None:
     assert result.returncode == 0
     assert "dummy task executed using config.yaml" in result.stdout
     assert "timezone=Asia/Taipei" in result.stdout
+    assert "job_search_enabled=True" in result.stdout
     assert "telegram_ready=False" in result.stdout
 
 
@@ -46,6 +47,41 @@ def test_main_fetch_task_command() -> None:
     assert "fetched 2 signal(s) from dummy source" in result.stdout
     assert "Python Backend Engineer" in result.stdout
     assert "TSMC gains 3.1%" in result.stdout
+
+
+def test_main_invalid_config_returns_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "agent:",
+                '  digest_time: "20:00"',
+                "tasks:",
+                "  job_search:",
+                "    enabled: true",
+                "    sources:",
+                "      - job104",
+                "    keywords:",
+                "      - python",
+                "  tw_stock_movers:",
+                "    enabled: true",
+                "    top_n: 20",
+                "    timezone: Asia/Taipei",
+                "notifiers:",
+                "  telegram:",
+                "    enabled: true",
+                "scoring:",
+                "  freshness_weight: 0.6",
+                "  priority_weight: 0.4",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_main("--config", str(config_path), "--task", "dummy")
+
+    assert result.returncode == 1
+    assert "Missing required config value 'agent.timezone'" in result.stderr
 
 
 def test_main_missing_config_returns_error() -> None:

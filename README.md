@@ -27,6 +27,26 @@ signal-agent --help
 python -m pytest
 ```
 
+## Architecture
+
+`signal-agent` is organized around independent workflows that collect signals,
+score them, and send digests:
+
+```text
+config.yaml          # non-secret runtime settings
+.env                 # secrets such as Telegram credentials
+app/core/            # shared models and config loading
+app/sources/         # collectors that return SignalItem objects
+app/tasks/           # workflows such as job_search and tw_stock_movers
+app/scorers/         # ranking logic
+app/notifiers/       # outbound delivery such as Telegram
+```
+
+- **Config** (`config.yaml`) describes what the agent should do.
+- **Sources** fetch normalized `SignalItem` data from one provider.
+- **Tasks** orchestrate one workflow end to end.
+- **Secrets** stay in environment variables, not in git.
+
 ## Project Layout
 
 ```text
@@ -39,7 +59,8 @@ signal-agent/
 ├── pyproject.toml
 ├── app/
 │   ├── core/
-│   ├── config.py
+│   │   ├── config.py
+│   │   └── models.py
 │   ├── notifiers/
 │   ├── scorers/
 │   ├── sources/
@@ -70,9 +91,42 @@ items = fetch_from_sources([DummySource()])
 
 ## Configuration
 
-- `config.yaml` is loaded by bootstrap tasks through `app.config.load_config`.
-- `.env.example` documents notifier environment variables loaded by
-  `app.config.load_env_settings`.
+`config.yaml` holds non-secret runtime settings. Secrets such as Telegram
+credentials are loaded from `.env` through `load_env_settings()`.
+
+Example shape:
+
+```yaml
+agent:
+  timezone: Asia/Taipei
+  digest_time: "20:00"
+
+tasks:
+  job_search:
+    enabled: true
+    sources:
+      - job104
+      - linkedin_email
+  tw_stock_movers:
+    enabled: true
+    top_n: 20
+    timezone: Asia/Taipei
+
+notifiers:
+  telegram:
+    enabled: true
+```
+
+Load config in code with:
+
+```python
+from app.core.config import load_config, load_env_settings
+
+config = load_config("config.yaml")
+env = load_env_settings()
+```
+
+- `.env.example` documents notifier environment variables.
 
 ## Development
 

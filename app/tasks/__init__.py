@@ -21,8 +21,8 @@ def run_dummy_task(config_path: str) -> str:
         f"dummy task executed using {config_path}: "
         f"timezone={config.agent.timezone}, "
         f"digest_time={config.agent.digest_time}, "
-        f"jobs_enabled={config.sources.jobs.enabled}, "
-        f"tw_stocks_enabled={config.sources.tw_stocks.enabled}, "
+        f"job_search_enabled={config.tasks.job_search.enabled}, "
+        f"tw_stock_movers_enabled={config.tasks.tw_stock_movers.enabled}, "
         f"telegram_ready={telegram_ready}"
     )
 

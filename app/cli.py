@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from app.config import ConfigError
 from app.tasks import list_tasks, run_task
 
 DEFAULT_CONFIG_PATH = "config.yaml"
@@ -44,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         print(run_task(args.task, config_path=args.config))
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ConfigError, ValueError) as exc:
         print(exc, file=sys.stderr)
         return 1
 
