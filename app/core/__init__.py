@@ -13,6 +13,7 @@ from .secrets import (
     has_telegram_credentials,
     load_env_settings,
     validate_llm_scoring_secrets,
+    validate_telegram_notifier_secrets,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "load_config",
     "load_env_settings",
     "validate_llm_scoring_secrets",
+    "validate_telegram_notifier_secrets",
 ]

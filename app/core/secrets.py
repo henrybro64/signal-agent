@@ -58,3 +58,18 @@ def validate_llm_scoring_secrets(
         raise SecretError(
             "OPENAI_API_KEY is required when scoring.llm_enabled is true"
         )
+
+
+
+def validate_telegram_notifier_secrets(
+    *,
+    telegram_enabled: bool,
+    env: EnvSettings,
+) -> None:
+    """Ensure Telegram credentials exist before enabling Telegram notifier."""
+
+    if telegram_enabled and not has_telegram_credentials(env):
+        raise SecretError(
+            "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required "
+            "when notifiers.telegram.enabled is true"
+        )

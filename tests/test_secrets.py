@@ -9,6 +9,7 @@ from app.core.secrets import (
     has_telegram_credentials,
     load_env_settings,
     validate_llm_scoring_secrets,
+    validate_telegram_notifier_secrets,
 )
 
 
@@ -102,3 +103,33 @@ def test_validate_llm_scoring_secrets_allows_disabled_llm_without_key() -> None:
     )
 
     validate_llm_scoring_secrets(llm_enabled=False, env=env)
+
+
+
+def test_validate_telegram_notifier_secrets_requires_telegram_credentials() -> None:
+    env = EnvSettings(
+        openai_api_key="sk-test",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        signal_agent_env="test",
+    )
+
+    with pytest.raises(
+        SecretError,
+        match=(
+            "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required "
+            "when notifiers.telegram.enabled is true"
+        ),
+    ):
+        validate_telegram_notifier_secrets(telegram_enabled=True, env=env)
+
+
+def test_validate_telegram_notifier_secrets_allows_disabled_notifier() -> None:
+    env = EnvSettings(
+        openai_api_key="sk-test",
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        signal_agent_env="test",
+    )
+
+    validate_telegram_notifier_secrets(telegram_enabled=False, env=env)
