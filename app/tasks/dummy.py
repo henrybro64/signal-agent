@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from app.config import load_config, load_env_settings
+from app.config import (
+    has_telegram_credentials,
+    load_config,
+    load_env_settings,
+    validate_llm_scoring_secrets,
+)
 
 from .base import BaseTask
 
@@ -17,7 +22,11 @@ class DummyTask(BaseTask):
     def run(self) -> None:
         config = load_config(self.config_path)
         env = load_env_settings()
-        telegram_ready = bool(env.telegram_bot_token and env.telegram_chat_id)
+        validate_llm_scoring_secrets(
+            llm_enabled=config.scoring.llm_enabled,
+            env=env,
+        )
+        telegram_ready = has_telegram_credentials(env)
 
         print(
             f"dummy task executed using {self.config_path}: "

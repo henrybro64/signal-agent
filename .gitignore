@@ -3,8 +3,10 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+*.env
+data/
+*.db
 build/
 dist/
 *.egg-info/
 .DS_Store
-

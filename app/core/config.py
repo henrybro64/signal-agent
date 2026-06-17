@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
-from dotenv import load_dotenv
+
+from .secrets import EnvSettings as EnvSettings
+from .secrets import load_env_settings as load_env_settings
 
 
 class ConfigError(ValueError):
@@ -55,6 +56,7 @@ class NotifiersConfig:
 class ScoringConfig:
     freshness_weight: float
     priority_weight: float
+    llm_enabled: bool = False
 
 
 @dataclass(slots=True)
@@ -174,15 +176,15 @@ class AppConfig:
                     parent_path="scoring",
                     source_name=source_name,
                 ),
+                llm_enabled=_optional_bool(
+                    scoring,
+                    "llm_enabled",
+                    default=False,
+                    parent_path="scoring",
+                    source_name=source_name,
+                ),
             ),
         )
-
-
-@dataclass(slots=True)
-class EnvSettings:
-    telegram_bot_token: str | None
-    telegram_chat_id: str | None
-    signal_agent_env: str
 
 
 def _join_path(parent_path: str | None, key: str) -> str:
@@ -250,6 +252,24 @@ def _require_bool(
             f"Config value '{config_path}' must be a boolean in {source_name}"
         )
     return value
+
+
+def _optional_bool(
+    data: dict[str, Any],
+    key: str,
+    *,
+    default: bool,
+    source_name: str,
+    parent_path: str | None = None,
+) -> bool:
+    if key not in data:
+        return default
+    return _require_bool(
+        data,
+        key,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
 
 
 def _require_str(
@@ -359,16 +379,3 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         raise ConfigError(f"Config file must contain a mapping: {config_path}")
 
     return AppConfig.from_dict(data, source_name=str(config_path))
-
-
-def load_env_settings(env_path: str | Path | None = ".env") -> EnvSettings:
-    """Load environment variables used by notifier integrations."""
-
-    if env_path is not None:
-        load_dotenv(env_path)
-
-    return EnvSettings(
-        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
-        telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
-        signal_agent_env=os.getenv("SIGNAL_AGENT_ENV", "development"),
-    )
