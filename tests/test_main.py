@@ -32,6 +32,16 @@ def test_main_dummy_task_command() -> None:
     assert "telegram_ready=False" in result.stdout
 
 
+def test_main_fetch_task_command() -> None:
+    result = run_main("--task", "fetch")
+
+    assert result.returncode == 0
+    assert "fetch task executed using config.yaml" in result.stdout
+    assert "fetched 2 signal(s) from dummy source" in result.stdout
+    assert "Python Backend Engineer" in result.stdout
+    assert "TSMC gains 3.1%" in result.stdout
+
+
 def test_main_missing_config_returns_error() -> None:
     result = run_main("--config", "missing.yaml", "--task", "dummy")
 

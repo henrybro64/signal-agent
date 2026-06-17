@@ -22,6 +22,7 @@ python -m pip install -e '.[dev]'
 cp .env.example .env
 python main.py --help
 python main.py --task dummy
+python main.py --task fetch
 signal-agent --help
 python -m pytest
 ```
@@ -51,6 +52,21 @@ signal-agent/
 - `python main.py --help` or `signal-agent --help` shows the available options.
 - `python main.py --task dummy` loads `config.yaml`, reads `.env`, and prints a
   short bootstrap summary that proves the entrypoint wiring works.
+- `python main.py --task fetch` runs the dummy source plugin and prints fetched
+  `SignalItem` titles.
+
+## Source plugins
+
+Each data source implements `BaseSource` in `app/sources/` and returns normalized
+`SignalItem` objects from `fetch()`. Use `fetch_from_sources()` to run one or more
+sources through the bootstrap pipeline. `DummySource` provides stable in-memory
+samples for local development and tests.
+
+```python
+from app.sources import DummySource, fetch_from_sources
+
+items = fetch_from_sources([DummySource()])
+```
 
 ## Configuration
 
