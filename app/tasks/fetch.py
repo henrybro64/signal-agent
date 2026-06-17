@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from app.config import load_config
 from app.sources import DummySource, fetch_from_sources
 
@@ -11,7 +13,7 @@ from .base import BaseTask
 class FetchTask(BaseTask):
     """Fetch sample signals from the dummy source."""
 
-    name = "fetch"
+    name: ClassVar[str] = "fetch"
 
     def run(self) -> None:
         load_config(self.config_path)

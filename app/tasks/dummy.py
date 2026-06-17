@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from app.config import load_config, load_env_settings
 
 from .base import BaseTask
@@ -10,7 +12,7 @@ from .base import BaseTask
 class DummyTask(BaseTask):
     """Print a bootstrap summary for local development checks."""
 
-    name = "dummy"
+    name: ClassVar[str] = "dummy"
 
     def run(self) -> None:
         config = load_config(self.config_path)

@@ -70,6 +70,19 @@ from app.sources import DummySource, fetch_from_sources
 items = fetch_from_sources([DummySource()])
 ```
 
+## Task runner
+
+Each workflow implements `BaseTask` in `app/tasks/` and executes from the CLI
+through the task registry. Register new tasks in `app/tasks/__init__.py`, then
+run them with `--task` or list them with `--list-tasks`.
+
+```python
+from app.tasks import TASKS, build_task
+
+task = build_task("dummy", config_path="config.yaml")
+task.run()
+```
+
 ## Configuration
 
 - `config.yaml` is loaded by bootstrap tasks through `app.config.load_config`.
