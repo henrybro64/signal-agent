@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -6,10 +7,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_main(*args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["TELEGRAM_BOT_TOKEN"] = ""
+    env["TELEGRAM_CHAT_ID"] = ""
+
     return subprocess.run(
         [sys.executable, "main.py", *args],
         cwd=ROOT,
         capture_output=True,
+        env=env,
         text=True,
         check=False,
     )
