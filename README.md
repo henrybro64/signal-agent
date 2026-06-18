@@ -35,8 +35,8 @@ score them, and send digests:
 
 ```text
 config.yaml          # non-secret runtime settings
-.env                 # secrets such as Telegram credentials
-app/core/            # shared models and config loading
+.env                 # secrets such as OpenAI and Telegram credentials
+app/core/            # shared models, config, and secret loading
 app/sources/         # collectors that return SignalItem objects
 app/tasks/           # workflows such as job_search and tw_stock_movers
 app/scorers/         # ranking logic
@@ -61,11 +61,15 @@ signal-agent/
 ├── app/
 │   ├── core/
 │   │   ├── config.py
-│   │   └── models.py
+│   │   ├── models.py
+│   │   └── secrets.py
 │   ├── notifiers/
 │   ├── scorers/
 │   ├── sources/
 │   └── tasks/
+├── deploy/
+│   └── k3s/
+│       └── secret.example.yaml
 └── tests/
 ```
 
@@ -106,8 +110,9 @@ task.run()
 
 ## Configuration
 
-`config.yaml` holds non-secret runtime settings. Secrets such as Telegram
-credentials are loaded from `.env` through `load_env_settings()`.
+`config.yaml` holds non-secret runtime settings. Secrets such as
+`OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID` are loaded from
+`.env` through `load_env_settings()`.
 
 Example shape:
 
@@ -138,6 +143,7 @@ notifiers:
 scoring:
   freshness_weight: 0.6
   priority_weight: 0.4
+  llm_enabled: false
 ```
 
 Load config in code with:
@@ -149,7 +155,11 @@ config = load_config("config.yaml")
 env = load_env_settings()
 ```
 
-- `.env.example` documents notifier environment variables.
+- Put local secrets in `.env`, not in `config.yaml` or committed files.
+- Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`.
+- `.env.example` documents the expected local secret variables.
+- `deploy/k3s/secret.example.yaml` shows the Kubernetes Secret shape for later
+  deployment work.
 
 ## Development
 

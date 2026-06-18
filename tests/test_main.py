@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def run_main(*args: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
+    env["OPENAI_API_KEY"] = ""
     env["TELEGRAM_BOT_TOKEN"] = ""
     env["TELEGRAM_CHAT_ID"] = ""
 
@@ -90,6 +91,45 @@ def test_main_invalid_config_returns_error(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "Missing required config value 'agent.timezone'" in result.stderr
+
+
+def test_main_requires_openai_key_when_llm_scoring_enabled(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "llm.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "agent:",
+                "  timezone: Asia/Taipei",
+                '  digest_time: "20:00"',
+                "tasks:",
+                "  job_search:",
+                "    enabled: true",
+                "    sources:",
+                "      - job104",
+                "    keywords:",
+                "      - python",
+                "  tw_stock_movers:",
+                "    enabled: true",
+                "    top_n: 20",
+                "    timezone: Asia/Taipei",
+                "notifiers:",
+                "  telegram:",
+                "    enabled: true",
+                "scoring:",
+                "  freshness_weight: 0.6",
+                "  priority_weight: 0.4",
+                "  llm_enabled: true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_main("--config", str(config_path), "--task", "dummy")
+
+    assert result.returncode == 1
+    assert "OPENAI_API_KEY is required" in result.stderr
 
 
 def test_main_missing_config_returns_error() -> None:

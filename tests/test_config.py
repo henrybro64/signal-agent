@@ -22,6 +22,7 @@ def test_load_config_reads_sample_file() -> None:
     assert config.notifiers.telegram.enabled is True
     assert config.scoring.freshness_weight == 0.6
     assert config.scoring.priority_weight == 0.4
+    assert config.scoring.llm_enabled is False
 
 
 def test_load_config_missing_file_raises() -> None:
@@ -171,24 +172,31 @@ def test_app_config_from_dict() -> None:
                 },
             },
             "notifiers": {"telegram": {"enabled": False}},
-            "scoring": {"freshness_weight": 0.5, "priority_weight": 0.5},
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+                "llm_enabled": True,
+            },
         }
     )
 
     assert config.agent.timezone == "UTC"
     assert config.tasks.job_search.keywords == ["data"]
     assert config.tasks.tw_stock_movers.top_n == 5
+    assert config.scoring.llm_enabled is True
 
 
 def test_load_env_settings_reads_variables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
     monkeypatch.setenv("SIGNAL_AGENT_ENV", "test")
 
     env = load_env_settings(env_path=None)
 
+    assert env.openai_api_key == "sk-test"
     assert env.telegram_bot_token == "token-123"
     assert env.telegram_chat_id == "chat-456"
     assert env.signal_agent_env == "test"
@@ -202,6 +210,7 @@ def test_load_env_settings_reads_dotenv_file(
     env_path.write_text(
         "\n".join(
             [
+                "OPENAI_API_KEY=sk-dotenv",
                 "TELEGRAM_BOT_TOKEN=dotenv-token",
                 "TELEGRAM_CHAT_ID=dotenv-chat",
                 "SIGNAL_AGENT_ENV=local",
@@ -209,12 +218,14 @@ def test_load_env_settings_reads_dotenv_file(
         ),
         encoding="utf-8",
     )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.delenv("SIGNAL_AGENT_ENV", raising=False)
 
     env = load_env_settings(env_path=env_path)
 
+    assert env.openai_api_key == "sk-dotenv"
     assert env.telegram_bot_token == "dotenv-token"
     assert env.telegram_chat_id == "dotenv-chat"
     assert env.signal_agent_env == "local"
@@ -223,10 +234,12 @@ def test_load_env_settings_reads_dotenv_file(
 def test_load_env_settings_treats_blank_values_as_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "")
 
     env = load_env_settings(env_path=None)
 
+    assert env.openai_api_key is None
     assert env.telegram_bot_token is None
     assert env.telegram_chat_id is None
