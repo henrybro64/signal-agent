@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from app.core import SignalItem, init_db, update_signal_status, upsert_signal
+from app.core import (
+    SignalItem,
+    finish_signal_run,
+    init_db,
+    start_signal_run,
+    update_signal_status,
+    upsert_signal,
+)
 
 OBSERVED_AT = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
 
@@ -42,6 +49,7 @@ def test_init_db_matches_schema_contract(tmp_path: Path) -> None:
         "external_id",
         "title",
         "url",
+        "content",
         "content_hash",
         "metadata_json",
         "first_seen_at",
@@ -58,6 +66,7 @@ def test_init_db_matches_schema_contract(tmp_path: Path) -> None:
     assert signal_columns["title"]["type"] == "TEXT"
     assert signal_columns["title"]["notnull"] is True
     assert signal_columns["url"]["type"] == "TEXT"
+    assert signal_columns["content"]["type"] == "TEXT"
     assert signal_columns["content_hash"]["type"] == "TEXT"
     assert signal_columns["metadata_json"]["type"] == "TEXT"
     assert signal_columns["metadata_json"]["notnull"] is True
@@ -74,9 +83,9 @@ def test_init_db_matches_schema_contract(tmp_path: Path) -> None:
     signal_indexes = _table_indexes(db_path, "signals")
 
     assert signal_indexes == {
-        "idx_signals_content_hash": ["content_hash"],
-        "idx_signals_source_external_id": ["source", "external_id"],
-        "idx_signals_url": ["url"],
+        "idx_signals_content_hash_unique": ["content_hash"],
+        "idx_signals_source_external_id_unique": ["source", "external_id"],
+        "idx_signals_url_unique": ["url"],
     }
 
     signal_run_columns = _table_columns(db_path, "signal_runs")
@@ -133,6 +142,7 @@ def test_upsert_signal_inserts_new_signal(tmp_path: Path) -> None:
     assert result.matched_on is None
     assert row["source"] == "linkedin"
     assert row["title"] == "Backend Engineer"
+    assert row["content"] == "Design and ship backend systems."
     assert row["status"] == "new"
     assert row["first_seen_at"] == "2026-06-15T12:00:00Z"
     assert row["last_seen_at"] == "2026-06-15T12:00:00Z"
@@ -171,6 +181,7 @@ def test_upsert_signal_dedups_by_url_and_refreshes_timestamps(tmp_path: Path) ->
     assert result.matched_on == "url"
     assert _count_signals(db_path) == 1
     assert row["title"] == "AI round-up updated"
+    assert row["content"] == "Morning AI digest with late edits."
     assert row["first_seen_at"] == "2026-06-15T12:00:00Z"
     assert row["last_seen_at"] == "2026-06-16T08:30:00Z"
 
@@ -272,6 +283,42 @@ def test_update_signal_status_rejects_invalid_value(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Invalid signal status: archived"):
         update_signal_status(result.signal_id, "archived", db_path=db_path)  # type: ignore[arg-type]
+
+
+def test_signal_run_lifecycle_persists_counts(tmp_path: Path) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+
+    init_db(db_path)
+    run_id = start_signal_run("linkedin", db_path=db_path)
+    finish_signal_run(
+        run_id,
+        status="completed",
+        fetched_count=3,
+        inserted_count=2,
+        updated_count=1,
+        db_path=db_path,
+    )
+
+    row = _fetch_signal_run(db_path, run_id)
+
+    assert row["source"] == "linkedin"
+    assert row["status"] == "completed"
+    assert row["fetched_count"] == 3
+    assert row["inserted_count"] == 2
+    assert row["updated_count"] == 1
+    assert row["finished_at"] is not None
+
+
+def _fetch_signal_run(db_path: Path, run_id: int) -> sqlite3.Row:
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT * FROM signal_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+
+    assert row is not None
+    return row
 
 
 def _fetch_signal(db_path: Path, signal_id: int) -> sqlite3.Row:

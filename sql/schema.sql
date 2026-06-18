@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS signals (
     external_id TEXT,
     title TEXT NOT NULL,
     url TEXT,
+    content TEXT,
     content_hash TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}',
     first_seen_at TEXT NOT NULL,
@@ -14,13 +15,15 @@ CREATE TABLE IF NOT EXISTS signals (
     reason TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_signals_url
-ON signals(url);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_url_unique
+ON signals(url)
+WHERE url IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_signals_source_external_id
-ON signals(source, external_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_source_external_id_unique
+ON signals(source, external_id)
+WHERE external_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_signals_content_hash
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_content_hash_unique
 ON signals(content_hash);
 
 CREATE TABLE IF NOT EXISTS signal_runs (

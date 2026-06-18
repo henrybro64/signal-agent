@@ -36,16 +36,18 @@ score them, and send digests:
 ```text
 config.yaml          # non-secret runtime settings
 .env                 # secrets such as OpenAI and Telegram credentials
-app/core/            # shared models, config, and secret loading
+app/core/            # shared models, config, secrets, and SQLite storage
 app/sources/         # collectors that return SignalItem objects
 app/tasks/           # workflows such as job_search and tw_stock_movers
 app/scorers/         # ranking logic
 app/notifiers/       # outbound delivery such as Telegram
+sql/                 # SQLite schema for signals and run history
 ```
 
 - **Config** (`config.yaml`) describes what the agent should do.
 - **Sources** fetch normalized `SignalItem` data from one provider.
 - **Tasks** orchestrate one workflow end to end.
+- **Storage** persists signals, deduplicates repeats, and tracks status.
 - **Secrets** stay in environment variables, not in git.
 
 ## Project Layout
@@ -61,6 +63,7 @@ signal-agent/
 ├── app/
 │   ├── core/
 │   │   ├── config.py
+│   │   ├── db.py
 │   │   ├── models.py
 │   │   └── secrets.py
 │   ├── notifiers/
@@ -70,6 +73,8 @@ signal-agent/
 ├── deploy/
 │   └── k3s/
 │       └── secret.example.yaml
+├── sql/
+│   └── schema.sql
 └── tests/
 ```
 
@@ -107,6 +112,42 @@ from app.tasks import TASKS, build_task
 task = build_task("dummy", config_path="config.yaml")
 task.run()
 ```
+
+## Storage
+
+Signals are persisted in SQLite through `app/core/db.py`. Local databases typically
+live under `data/` and are ignored by git.
+
+```python
+from app.core import SignalItem, finish_signal_run, init_db, start_signal_run, upsert_signal
+from datetime import UTC, datetime
+
+init_db("data/signals.sqlite3")
+run_id = start_signal_run("linkedin")
+result = upsert_signal(
+    SignalItem(
+        source="linkedin",
+        item_type="job",
+        title="Backend Engineer",
+        observed_at=datetime.now(UTC),
+        url="https://example.com/jobs/1",
+        content="Build backend services.",
+    )
+)
+finish_signal_run(
+    run_id,
+    status="completed",
+    fetched_count=1,
+    inserted_count=1 if result.action == "inserted" else 0,
+    updated_count=1 if result.action == "updated" else 0,
+)
+```
+
+Dedup priority is:
+
+1. `url`
+2. `(source, external_id)`
+3. `content_hash`
 
 ## Configuration
 

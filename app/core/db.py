@@ -46,6 +46,9 @@ class UpsertResult:
     matched_on: DedupMatch | None = None
 
 
+SignalRunStatus = Literal["completed", "failed"]
+
+
 def init_db(db_path: str | Path) -> None:
     """Create the SQLite database and required tables if they do not exist."""
 
@@ -72,6 +75,7 @@ def upsert_signal(
     observed_at_text = _format_timestamp(observed_at)
     url = _clean_optional_text(item.url)
     external_id = _clean_optional_text(item.external_id)
+    content = _clean_optional_text(item.content)
     content_hash = _build_content_hash(item)
     metadata_json = json.dumps(
         item.metadata,
@@ -98,6 +102,7 @@ def upsert_signal(
                     external_id,
                     title,
                     url,
+                    content,
                     content_hash,
                     metadata_json,
                     first_seen_at,
@@ -106,7 +111,7 @@ def upsert_signal(
                     score,
                     reason
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.source,
@@ -114,6 +119,7 @@ def upsert_signal(
                     external_id,
                     item.title,
                     url,
+                    content,
                     content_hash,
                     metadata_json,
                     observed_at_text,
@@ -143,6 +149,7 @@ def upsert_signal(
                 external_id = ?,
                 title = ?,
                 url = ?,
+                content = ?,
                 content_hash = ?,
                 metadata_json = ?,
                 first_seen_at = ?,
@@ -154,6 +161,7 @@ def upsert_signal(
                 external_id or existing_row["external_id"],
                 item.title,
                 url or existing_row["url"],
+                content or existing_row["content"],
                 content_hash or existing_row["content_hash"],
                 metadata_json,
                 _format_timestamp(first_seen_at),
@@ -191,6 +199,78 @@ def update_signal_status(
         )
         if cursor.rowcount == 0:
             raise ValueError(f"Unknown signal id: {signal_id}")
+
+
+def start_signal_run(
+    source: str,
+    *,
+    started_at: datetime | None = None,
+    db_path: str | Path | None = None,
+) -> int:
+    """Record the start of a source collection run."""
+
+    resolved_path = _resolve_db_path(db_path)
+    started_at_text = _format_timestamp(started_at or datetime.now(UTC))
+
+    with _connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO signal_runs (
+                source,
+                started_at,
+                status
+            )
+            VALUES (?, ?, ?)
+            """,
+            (source, started_at_text, "running"),
+        )
+        return int(cursor.lastrowid)
+
+
+def finish_signal_run(
+    run_id: int,
+    *,
+    status: SignalRunStatus,
+    fetched_count: int = 0,
+    inserted_count: int = 0,
+    updated_count: int = 0,
+    error: str | None = None,
+    finished_at: datetime | None = None,
+    db_path: str | Path | None = None,
+) -> None:
+    """Record the completion of a source collection run."""
+
+    if status not in {"completed", "failed"}:
+        raise ValueError(f"Invalid signal run status: {status}")
+
+    resolved_path = _resolve_db_path(db_path)
+    finished_at_text = _format_timestamp(finished_at or datetime.now(UTC))
+
+    with _connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE signal_runs
+            SET
+                finished_at = ?,
+                status = ?,
+                fetched_count = ?,
+                inserted_count = ?,
+                updated_count = ?,
+                error = ?
+            WHERE id = ?
+            """,
+            (
+                finished_at_text,
+                status,
+                fetched_count,
+                inserted_count,
+                updated_count,
+                error,
+                run_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Unknown signal run id: {run_id}")
 
 
 def _resolve_db_path(db_path: str | Path | None) -> Path:
