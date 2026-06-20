@@ -88,3 +88,24 @@ def test_cli_telegram_test_uses_custom_message(
 
     assert exit_code == 0
     assert sent_messages == ["custom smoke test"]
+
+
+def test_cli_telegram_test_missing_credentials_returns_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "app.cli.load_env_settings",
+        lambda: EnvSettings(
+            openai_api_key=None,
+            telegram_bot_token=None,
+            telegram_chat_id=None,
+            signal_agent_env="test",
+        ),
+    )
+
+    exit_code = main(["--telegram-test"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required" in captured.err

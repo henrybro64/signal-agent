@@ -68,6 +68,7 @@ signal-agent/
 │   │   ├── models.py
 │   │   └── secrets.py
 │   ├── notifiers/
+│   │   └── telegram.py
 │   ├── scorers/
 │   ├── sources/
 │   └── tasks/
@@ -89,6 +90,22 @@ signal-agent/
   `SignalItem` titles.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
+
+## Telegram notifier
+
+`app/notifiers/telegram.py` sends plain-text messages through the Telegram Bot API.
+Long payloads are split into Telegram-safe chunks automatically.
+
+```python
+from app.core import load_env_settings
+from app.notifiers import build_telegram_notifier
+
+env = load_env_settings()
+notifier = build_telegram_notifier(env=env)
+notifier.send_message("Daily job digest\n- 3 new matches")
+```
+
+Use `python main.py --telegram-test "hello from signal-agent"` for a manual smoke test.
 
 ## Source plugins
 

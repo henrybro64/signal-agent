@@ -37,47 +37,55 @@ class TelegramNotifier:
         if not text.strip():
             raise ValueError("Telegram message text must not be empty")
 
-        session = self.session or requests.Session()
+        session = self.session
+        owns_session = session is None
+        if owns_session:
+            session = requests.Session()
+
         url = f"{self.api_base_url}/bot{self.bot_token}/sendMessage"
 
-        for chunk in split_telegram_message(text):
-            try:
-                response = session.post(
-                    url,
-                    json={
-                        "chat_id": self.chat_id,
-                        "text": chunk,
-                    },
-                    timeout=_REQUEST_TIMEOUT_SECONDS,
-                )
-            except requests.RequestException as exc:
-                detail = self._redact_secrets(str(exc))
-                raise TelegramNotifierError(
-                    f"Telegram send failed: {detail}"
-                ) from exc
+        try:
+            for chunk in split_telegram_message(text):
+                try:
+                    response = session.post(
+                        url,
+                        json={
+                            "chat_id": self.chat_id,
+                            "text": chunk,
+                        },
+                        timeout=_REQUEST_TIMEOUT_SECONDS,
+                    )
+                except requests.RequestException as exc:
+                    detail = self._redact_secrets(str(exc))
+                    raise TelegramNotifierError(
+                        f"Telegram send failed: {detail}"
+                    ) from exc
 
-            if response.status_code >= 400:
-                raise TelegramNotifierError(
-                    "Telegram send failed with "
-                    f"status {response.status_code}: "
-                    f"{self._extract_error_detail(response)}"
-                )
+                if response.status_code >= 400:
+                    raise TelegramNotifierError(
+                        "Telegram send failed with "
+                        f"status {response.status_code}: "
+                        f"{self._extract_error_detail(response)}"
+                    )
 
-            try:
-                payload = response.json()
-            except ValueError as exc:
-                raise TelegramNotifierError(
-                    "Telegram send failed: API returned invalid JSON"
-                ) from exc
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    raise TelegramNotifierError(
+                        "Telegram send failed: API returned invalid JSON"
+                    ) from exc
 
-            if payload.get("ok") is not True:
-                description = payload.get(
-                    "description",
-                    "Telegram API rejected the request",
-                )
-                raise TelegramNotifierError(
-                    f"Telegram send failed: {description}"
-                )
+                if payload.get("ok") is not True:
+                    description = payload.get(
+                        "description",
+                        "Telegram API rejected the request",
+                    )
+                    raise TelegramNotifierError(
+                        f"Telegram send failed: {description}"
+                    )
+        finally:
+            if owns_session:
+                session.close()
 
     def _extract_error_detail(self, response: requests.Response) -> str:
         try:
