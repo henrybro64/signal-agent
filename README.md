@@ -24,6 +24,7 @@ python main.py --help
 python main.py --list-tasks
 python main.py --task dummy
 python main.py --task fetch
+python main.py --telegram-test
 signal-agent --help
 python -m pytest
 ```
@@ -86,6 +87,8 @@ signal-agent/
   short bootstrap summary that proves the entrypoint wiring works.
 - `python main.py --task fetch` runs the dummy source plugin and prints fetched
   `SignalItem` titles.
+- `python main.py --telegram-test` sends a one-off Telegram test message using
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
 ## Source plugins
 
@@ -198,6 +201,8 @@ env = load_env_settings()
 
 - Put local secrets in `.env`, not in `config.yaml` or committed files.
 - Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`.
+- Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before using
+  `--telegram-test` or the Telegram notifier.
 - `.env.example` documents the expected local secret variables.
 - `deploy/k3s/secret.example.yaml` shows the Kubernetes Secret shape for later
   deployment work.
