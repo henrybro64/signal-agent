@@ -73,6 +73,7 @@ signal-agent/
 │   ├── profiles/
 │   │   └── henry_job_profile.md
 │   ├── scorers/
+│   │   ├── job_rule_scorer.py
 │   │   └── job_search.py
 │   ├── sources/
 │   └── tasks/
@@ -275,8 +276,8 @@ print(rule_result.score, rule_result.recommendation, rule_result.reason)
 - Keep the file free of secrets, phone numbers, and private credentials.
 - `Notes for scorer` is stored for human and future LLM guidance; the bootstrap
   rule-based scorer does not use it yet.
-- `score_job_posting()` is the lower-level profile match scorer used by tests
-  and future ranking flows.
+- `score_job_posting()` is a lower-level bootstrap float scorer used by tests
+  and future ranking flows. Prefer `JobRuleScorer` for the offline MVP output.
 - `JobRuleScorer` is the offline MVP scorer that returns a clamped 0-100 score,
   recommendation, and human-readable reasons without using `OPENAI_API_KEY`.
 

@@ -1,5 +1,7 @@
+import pytest
+
 from app.core import SignalItem
-from app.scorers import JobRuleScorer
+from app.scorers import JobRuleScorer, parse_job_search_profile
 from app.sources.dummy import SAMPLE_OBSERVED_AT
 
 
@@ -49,7 +51,7 @@ def test_job_rule_scorer_returns_reject_for_bad_fit_job() -> None:
 
     assert result.score == 0
     assert result.recommendation == "reject"
-    assert result.reasons == ["Matched location preference: Taipei (+5)"]
+    assert result.reasons == []
     assert len(result.concerns) >= 4
     assert any("Helpdesk" in concern for concern in result.concerns)
     assert any("SLA-heavy support" in concern for concern in result.concerns)
@@ -64,18 +66,61 @@ def test_job_rule_scorer_returns_maybe_for_mixed_fit_job() -> None:
         title="Test Automation Engineer",
         observed_at=SAMPLE_OBSERVED_AT,
         content=(
-            "Hybrid Python and Cypress automation role, but the team also runs "
-            "an on-call-heavy support rotation."
+            "Hybrid Python, Pytest, and Cypress automation role, but the team "
+            "also runs an on-call-heavy support rotation."
         ),
     )
 
     result = scorer.score(item)
 
-    assert 25 <= result.score < 60
+    assert result.score == 30
     assert result.recommendation == "maybe"
     assert any("Python" in reason for reason in result.reasons)
+    assert any("Pytest" in reason for reason in result.reasons)
     assert any("Cypress" in reason for reason in result.reasons)
     assert any(
         "on-call-heavy support" in concern.casefold()
         for concern in result.concerns
     )
+
+
+def test_job_rule_scorer_rejects_non_job_items() -> None:
+    scorer = JobRuleScorer()
+    item = SignalItem(
+        source="manual",
+        item_type="tw_stock_mover",
+        title="TSMC gains 3.1%",
+        observed_at=SAMPLE_OBSERVED_AT,
+    )
+
+    with pytest.raises(ValueError, match="item_type='job'"):
+        scorer.score(item)
+
+
+def test_job_rule_scorer_applies_devsecops_weight_override() -> None:
+    profile = parse_job_search_profile(
+        """
+        ## Target roles
+        - DevSecOps Engineer
+        - Cloud SDET
+
+        ## Strong skills
+        - Python
+        """
+    )
+    scorer = JobRuleScorer(profile)
+    item = SignalItem(
+        source="manual",
+        item_type="job",
+        title="DevSecOps Engineer",
+        observed_at=SAMPLE_OBSERVED_AT,
+        content="Build secure CI/CD pipelines with Python.",
+    )
+
+    result = scorer.score(item)
+
+    assert result.score == 25
+    assert result.recommendation == "maybe"
+    assert "Matched target role: DevSecOps Engineer (+15)" in result.reasons
+    assert "Matched target role: Cloud SDET (+20)" not in result.reasons
+    assert "Matched strong skill: Python (+10)" in result.reasons

@@ -74,6 +74,8 @@ class JobRuleScorer:
 
     def score(self, item: SignalItem) -> JobRuleScore:
         matches = match_job_posting(item, self.profile)
+        if _has_critical_negative_matches(matches):
+            matches = _strip_secondary_positive_matches(matches)
         reasons = _build_positive_reasons(matches)
         concerns = _build_negative_concerns(matches)
 
@@ -93,6 +95,27 @@ class JobRuleScorer:
             reasons=[entry.text for entry in reasons],
             concerns=[entry.text for entry in concerns],
         )
+
+
+def _has_critical_negative_matches(matches: JobProfileMatches) -> bool:
+    return bool(
+        matches.negative_matches.get("avoid_roles")
+        or matches.negative_matches.get("reject_keywords")
+    )
+
+
+def _strip_secondary_positive_matches(
+    matches: JobProfileMatches,
+) -> JobProfileMatches:
+    positive_matches = {
+        section: signals
+        for section, signals in matches.positive_matches.items()
+        if section not in {"location_preferences", "remote_hybrid_preferences"}
+    }
+    return JobProfileMatches(
+        positive_matches=positive_matches,
+        negative_matches=matches.negative_matches,
+    )
 
 
 def _build_positive_reasons(matches: JobProfileMatches) -> list[_ScoredReason]:

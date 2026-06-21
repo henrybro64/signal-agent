@@ -136,7 +136,11 @@ def parse_job_search_profile(
 
 
 def score_job_posting(item: SignalItem, profile: JobSearchProfile) -> JobScore:
-    """Score one job posting against the profile using phrase and token matches."""
+    """Return a bootstrap float score for profile matches.
+
+    Prefer ``JobRuleScorer`` for the offline MVP scorer that returns a clamped
+    0-100 score, recommendation, and human-readable reasons.
+    """
 
     matches = match_job_posting(item, profile)
     score = 0.0
