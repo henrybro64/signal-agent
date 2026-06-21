@@ -10,6 +10,7 @@ from app.sources import (
     LinkedInEmailSource,
     fetch_from_sources,
 )
+from app.sources import linkedin_email as linkedin_email_module
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "linkedin_alert_sample.eml"
@@ -76,6 +77,153 @@ def test_linkedin_email_source_dedups_jobs_across_multiple_emails(
         "linkedin-email-1234567890",
         "linkedin-email-9876543210",
     ]
+
+
+def test_linkedin_email_source_filters_by_keywords_and_locations() -> None:
+    source = LinkedInEmailSource(
+        keywords=["nonexistent-keyword"],
+        locations=["Japan"],
+        email_paths=[FIXTURE_PATH],
+    )
+
+    assert source.fetch() == []
+
+
+def test_linkedin_email_source_parses_plain_text_only_email(tmp_path: Path) -> None:
+    email_path = tmp_path / "plain_text_only.eml"
+    email_path.write_text(
+        "\n".join(
+            [
+                "From: LinkedIn Jobs <jobs-noreply@linkedin.com>",
+                "Subject: LinkedIn Job Alerts: 1 job in Taiwan",
+                "Date: Sun, 21 Jun 2026 09:15:00 +0800",
+                "MIME-Version: 1.0",
+                "Content-Type: text/plain; charset=utf-8",
+                "",
+                "Job Title: Senior Python Backend Engineer",
+                "Company: Appier",
+                "Location: Taipei, Taiwan",
+                "Snippet: Build backend APIs and automation workflows.",
+                "Apply: https://www.linkedin.com/jobs/view/1234567890/?trackingId=abc",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    source = LinkedInEmailSource(
+        keywords=["python"],
+        email_paths=[email_path],
+    )
+
+    items = source.fetch()
+
+    assert len(items) == 1
+    assert items[0].title == "Senior Python Backend Engineer"
+    assert items[0].external_id == "linkedin-email-1234567890"
+
+
+def test_linkedin_email_source_parses_html_only_email(tmp_path: Path) -> None:
+    email_path = tmp_path / "html_only.eml"
+    email_path.write_text(
+        "\n".join(
+            [
+                "From: LinkedIn Jobs <jobs-noreply@linkedin.com>",
+                "Subject: LinkedIn Job Alerts: 1 job in Taiwan",
+                "Date: Sun, 21 Jun 2026 09:15:00 +0800",
+                "MIME-Version: 1.0",
+                "Content-Type: text/html; charset=utf-8",
+                "",
+                "<html><body>",
+                '<a href="https://www.linkedin.com/jobs/view/1234567890/">',
+                "Senior Python Backend Engineer",
+                "</a>",
+                "<div>Appier</div>",
+                "<div>Taipei, Taiwan</div>",
+                "<div>Build backend APIs and automation workflows.</div>",
+                "</body></html>",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    source = LinkedInEmailSource(
+        keywords=["python"],
+        email_paths=[email_path],
+    )
+
+    items = source.fetch()
+
+    assert len(items) == 1
+    assert items[0].title == "Senior Python Backend Engineer"
+    assert items[0].metadata["company"] == "Appier"
+
+
+def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    linkedin_message = FIXTURE_PATH.read_bytes()
+    other_message = (
+        b"From: Other Sender <other@example.com>\r\n"
+        b"Subject: Weekly newsletter\r\n"
+        b"Date: Sun, 21 Jun 2026 09:15:00 +0800\r\n"
+        b"\r\n"
+        b"Not a LinkedIn job alert.\r\n"
+    )
+
+    class FakeIMAPClient:
+        def __init__(self, host: str) -> None:
+            self.host = host
+            self.selected_mailbox: str | None = None
+
+        def __enter__(self) -> FakeIMAPClient:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def login(self, username: str, password: str) -> tuple[str, list[bytes]]:
+            assert username == "user@example.com"
+            assert password == "app-password"
+            return ("OK", [b"Logged in"])
+
+        def select(self, mailbox: str) -> tuple[str, list[bytes]]:
+            self.selected_mailbox = mailbox
+            return ("OK", [b"2"])
+
+        def search(self, *criteria: object) -> tuple[str, list[bytes | None]]:
+            assert criteria[1:] == ("SINCE", criteria[-1])
+            return ("OK", [b"1 2"])
+
+        def fetch(
+            self,
+            message_id: bytes,
+            query: str,
+        ) -> tuple[str, list[tuple[bytes, bytes] | bytes | None]]:
+            if message_id == b"1":
+                return ("OK", [(b"1 (RFC822)", linkedin_message)])
+            if message_id == b"2":
+                return ("OK", [(b"2 (RFC822)", other_message)])
+            raise AssertionError(f"unexpected message id: {message_id!r}")
+
+    monkeypatch.setattr(
+        linkedin_email_module.imaplib,
+        "IMAP4_SSL",
+        FakeIMAPClient,
+    )
+
+    source = LinkedInEmailSource(
+        keywords=["python", "agent"],
+        locations=["Taiwan"],
+        imap_host="imap.gmail.com",
+        imap_username="user@example.com",
+        imap_password="app-password",
+        imap_mailbox="INBOX",
+        lookback_days=14,
+    )
+
+    items = source.fetch()
+
+    assert len(items) == 2
+    assert items[0].source == "linkedin_email"
+    assert items[0].external_id == "linkedin-email-1234567890"
 
 
 def test_linkedin_email_source_requires_local_path_or_imap_credentials() -> None:

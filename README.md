@@ -81,7 +81,8 @@ signal-agent/
 │   ├── sources/
 │   │   ├── job104.py
 │   │   ├── indeed.py
-│   │   └── glassdoor.py
+│   │   ├── glassdoor.py
+│   │   └── linkedin_email.py
 │   └── tasks/
 ├── deploy/
 │   └── k3s/
