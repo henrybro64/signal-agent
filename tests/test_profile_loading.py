@@ -1,3 +1,4 @@
+from importlib.resources import files
 from textwrap import dedent
 
 import pytest
@@ -10,6 +11,12 @@ from app.scorers import (
     score_job_posting,
 )
 from app.sources.dummy import SAMPLE_OBSERVED_AT
+
+
+def _default_profile_text() -> str:
+    return files("app.profiles").joinpath("henry_job_profile.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_parse_job_search_profile_reads_markdown_sections() -> None:
@@ -86,7 +93,7 @@ def test_parse_job_search_profile_handles_numbered_and_blockquote_lines() -> Non
 
 def test_load_default_henry_job_profile() -> None:
     profile = load_job_search_profile()
-    profile_text = DEFAULT_JOB_PROFILE_PATH.read_text(encoding="utf-8")
+    profile_text = _default_profile_text()
 
     assert profile.source_path == DEFAULT_JOB_PROFILE_PATH
     assert "Cloud SDET" in profile.target_roles
@@ -94,6 +101,12 @@ def test_load_default_henry_job_profile() -> None:
     assert "Remote" in profile.remote_hybrid_preferences
     assert "OPENAI_API_KEY" not in profile_text
     assert "TELEGRAM_BOT_TOKEN" not in profile_text
+
+
+def test_load_default_profile_uses_packaged_resource() -> None:
+    resource = files("app.profiles").joinpath("henry_job_profile.md")
+    assert resource.is_file()
+    assert load_job_search_profile().target_roles
 
 
 def test_score_job_posting_uses_loaded_profile() -> None:
@@ -175,3 +188,41 @@ def test_score_job_posting_rejects_non_job_items() -> None:
 
     with pytest.raises(ValueError, match="item_type='job'"):
         score_job_posting(item, profile)
+
+
+def test_score_job_posting_avoids_acronym_substring_false_positives() -> None:
+    profile = parse_job_search_profile(
+        dedent(
+            """
+            ## Strong skills
+            - AWS
+            - DLP
+
+            ## Reject keywords
+            - Intune
+            """
+        ).strip()
+    )
+    false_positive_job = SignalItem(
+        source="manual",
+        item_type="job",
+        title="Customer Success Manager",
+        observed_at=SAMPLE_OBSERVED_AT,
+        content="Draws on empathy, paws-on demos, and continuous improvement.",
+    )
+    matching_job = SignalItem(
+        source="manual",
+        item_type="job",
+        title="Cloud SDET",
+        observed_at=SAMPLE_OBSERVED_AT,
+        content="Requires AWS, DLP experience, and API security ownership.",
+    )
+
+    false_positive_score = score_job_posting(false_positive_job, profile)
+    matching_score = score_job_posting(matching_job, profile)
+
+    assert false_positive_score.score == 0
+    assert false_positive_score.matched_positive_signals == []
+    assert false_positive_score.matched_negative_signals == []
+    assert "AWS" in matching_score.matched_positive_signals
+    assert "DLP" in matching_score.matched_positive_signals

@@ -40,8 +40,8 @@ app/core/            # shared models, config, secrets, and SQLite storage
 app/sources/         # collectors that return SignalItem objects
 app/tasks/           # workflows such as job_search and tw_stock_movers
 app/scorers/         # ranking logic
+app/profiles/        # packaged job-scoring profiles
 app/notifiers/       # outbound delivery such as Telegram
-profiles/            # human-editable job-scoring profiles
 sql/                 # SQLite schema for signals and run history
 ```
 
@@ -68,12 +68,12 @@ signal-agent/
 │   │   ├── models.py
 │   │   └── secrets.py
 │   ├── notifiers/
+│   ├── profiles/
+│   │   └── henry_job_profile.md
 │   ├── scorers/
 │   │   └── job_search.py
 │   ├── sources/
 │   └── tasks/
-├── profiles/
-│   └── henry_job_profile.md
 ├── deploy/
 │   └── k3s/
 │       └── secret.example.yaml
@@ -209,8 +209,10 @@ env = load_env_settings()
 ## Job Profile
 
 Job matching reads a human-edited Markdown profile at
-`profiles/henry_job_profile.md`. Keep the section headings below and use short
-bullets so the rule-based scorer can parse them consistently.
+`app/profiles/henry_job_profile.md`. The file ships with the package, so
+`load_job_search_profile()` works from editable installs and wheels. Keep the
+section headings below and use short bullets so the rule-based scorer can parse
+them consistently.
 
 Expected headings:
 

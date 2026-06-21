@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from importlib.resources import files
 from pathlib import Path
 from typing import Final
 
 from app.core import SignalItem
 
-DEFAULT_JOB_PROFILE_PATH = (
-    Path(__file__).resolve().parents[2] / "profiles" / "henry_job_profile.md"
-)
+DEFAULT_JOB_PROFILE_PATH = Path("app/profiles/henry_job_profile.md")
+_DEFAULT_PROFILE_PACKAGE = "app.profiles"
+_DEFAULT_PROFILE_FILENAME = "henry_job_profile.md"
 
 _SECTION_ALIASES: Final[dict[str, str]] = {
     "target roles": "target_roles",
@@ -68,9 +69,16 @@ class JobScore:
 
 
 def load_job_search_profile(
-    path: str | Path = DEFAULT_JOB_PROFILE_PATH,
+    path: str | Path | None = None,
 ) -> JobSearchProfile:
-    """Load a Markdown job-search profile from disk."""
+    """Load a Markdown job-search profile from disk or the bundled default."""
+
+    if path is None:
+        resource = files(_DEFAULT_PROFILE_PACKAGE).joinpath(_DEFAULT_PROFILE_FILENAME)
+        return parse_job_search_profile(
+            resource.read_text(encoding="utf-8"),
+            source_path=DEFAULT_JOB_PROFILE_PATH,
+        )
 
     profile_path = Path(path).expanduser()
     return parse_job_search_profile(
@@ -120,7 +128,7 @@ def parse_job_search_profile(
 
 
 def score_job_posting(item: SignalItem, profile: JobSearchProfile) -> JobScore:
-    """Score one job posting against the profile using substring matches."""
+    """Score one job posting against the profile using phrase and token matches."""
 
     if item.item_type != "job":
         msg = "Job scoring only supports item_type='job'"
@@ -180,9 +188,22 @@ def _find_matches(search_text: str, signals: list[str]) -> list[str]:
     matches: list[str] = []
     for signal in signals:
         normalized_signal = _normalize_search_text(signal)
-        if normalized_signal and normalized_signal in search_text:
+        if _signal_matches(search_text, normalized_signal):
             matches.append(signal)
     return matches
+
+
+def _signal_matches(search_text: str, normalized_signal: str) -> bool:
+    if not normalized_signal:
+        return False
+    if re.search(r"\s", normalized_signal):
+        return normalized_signal in search_text
+
+    pattern = re.compile(
+        rf"(?<![\w]){re.escape(normalized_signal)}(?![\w])",
+        re.ASCII,
+    )
+    return pattern.search(search_text) is not None
 
 
 def _normalize_heading(heading: str) -> str:
