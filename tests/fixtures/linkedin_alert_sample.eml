@@ -1,0 +1,51 @@
+From: LinkedIn Jobs <jobs-noreply@linkedin.com>
+To: user@example.com
+Subject: LinkedIn Job Alerts: 2 jobs in Taiwan
+Date: Sun, 21 Jun 2026 09:15:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="linkedin-boundary"
+
+--linkedin-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Job Title: Senior Python Backend Engineer
+Company: Appier
+Location: Taipei, Taiwan
+Snippet: Build backend APIs and automation workflows.
+Apply: https://www.linkedin.com/jobs/view/1234567890/?trackingId=abc
+
+Job Title: Staff AI Agent Engineer
+Company: Gogolook
+Location: Taipei, Taiwan
+Snippet: Build Python agent orchestration and ranking systems.
+Apply: https://www.linkedin.com/jobs/view/9876543210/
+
+--linkedin-boundary
+Content-Type: text/html; charset="utf-8"
+
+<html>
+  <body>
+    <div class="job-card">
+      <a href="https://www.linkedin.com/jobs/view/1234567890/?trackingId=abc">
+        Senior Python Backend Engineer
+      </a>
+      <div>Appier</div>
+      <div>Taipei, Taiwan</div>
+      <div>Build backend APIs and automation workflows.</div>
+      <a href="https://www.linkedin.com/jobs/view/1234567890/?trackingId=abc">
+        View job
+      </a>
+    </div>
+
+    <div class="job-card">
+      <a href="https://www.linkedin.com/jobs/view/9876543210/">
+        Staff AI Agent Engineer
+      </a>
+      <div>Gogolook</div>
+      <div>Taipei, Taiwan</div>
+      <div>Build Python agent orchestration and ranking systems.</div>
+    </div>
+  </body>
+</html>
+
+--linkedin-boundary--

@@ -15,9 +15,11 @@ from app.core.config import (
 from app.core.secrets import (
     EnvSettings,
     SecretError,
+    has_linkedin_email_source_config,
     has_openai_api_key,
     has_telegram_credentials,
     load_env_settings,
+    validate_linkedin_email_source_secrets,
     validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
@@ -34,10 +36,12 @@ __all__ = [
     "TasksConfig",
     "TelegramNotifierConfig",
     "TwStockMoversTaskConfig",
+    "has_linkedin_email_source_config",
     "has_openai_api_key",
     "has_telegram_credentials",
     "load_config",
     "load_env_settings",
+    "validate_linkedin_email_source_secrets",
     "validate_llm_scoring_secrets",
     "validate_telegram_notifier_secrets",
 ]

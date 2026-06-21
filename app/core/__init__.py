@@ -18,9 +18,11 @@ from .models import SignalItem
 from .secrets import (
     EnvSettings,
     SecretError,
+    has_linkedin_email_source_config,
     has_openai_api_key,
     has_telegram_credentials,
     load_env_settings,
+    validate_linkedin_email_source_secrets,
     validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
@@ -34,6 +36,7 @@ __all__ = [
     "UpsertResult",
     "VALID_SIGNAL_STATUSES",
     "finish_signal_run",
+    "has_linkedin_email_source_config",
     "has_openai_api_key",
     "has_telegram_credentials",
     "init_db",
@@ -42,6 +45,7 @@ __all__ = [
     "start_signal_run",
     "update_signal_status",
     "upsert_signal",
+    "validate_linkedin_email_source_secrets",
     "validate_llm_scoring_secrets",
     "validate_telegram_notifier_secrets",
 ]

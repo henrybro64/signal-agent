@@ -10,10 +10,11 @@ This repository is in bootstrap mode. It includes a working Python entrypoint,
 sample configuration files, and the initial package layout for future source
 collectors, scoring, and notifier integrations.
 
-It now includes early best-effort job collectors for `job104`, `indeed`, and
-`glassdoor`. Some live runs can still be blocked by provider anti-bot
-challenges, so the fetch pipeline persists successful sources and records
-source-level failures without aborting the whole run.
+It now includes early best-effort job collectors for `job104`, `indeed`,
+`glassdoor`, and `linkedin_email`. Some live runs can still be blocked by
+provider anti-bot challenges or missing email credentials, so the fetch
+pipeline persists successful sources and records source-level failures without
+aborting the whole run.
 
 ## Quick Start
 
@@ -123,8 +124,10 @@ Each data source implements `BaseSource` in `app/sources/` and returns normalize
 `SignalItem` objects from `fetch()`. Use `fetch_from_sources()` to run one or more
 sources through the bootstrap pipeline. `DummySource` provides stable in-memory
 samples for local development and tests, while `job104`, `indeed`, and
-`glassdoor` provide live job-search integrations. The global sources default to
-the Taiwan region when `tasks.job_search.locations` is not set.
+`glassdoor` provide live job-search integrations. `linkedin_email` parses
+LinkedIn job-alert emails from a local `.eml` file or IMAP inbox without
+requiring a LinkedIn browser login. The global search sources default to the
+Taiwan region when `tasks.job_search.locations` is not set.
 
 `job104` uses 104's public JSON search API over HTTP (no browser automation).
 When `locations` are configured, the MVP folds them into the keyword query
@@ -211,6 +214,7 @@ tasks:
       - job104
       - indeed
       - glassdoor
+      - linkedin_email
     keywords:
       - python
       - backend
@@ -245,6 +249,10 @@ env = load_env_settings()
 - Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`.
 - Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before using
   `--telegram-test` or the Telegram notifier.
+- For `linkedin_email`, either set `LINKEDIN_EMAIL_SOURCE_PATH` to a local
+  `.eml` file or directory, or set `LINKEDIN_EMAIL_IMAP_HOST`,
+  `LINKEDIN_EMAIL_IMAP_USERNAME`, and `LINKEDIN_EMAIL_IMAP_PASSWORD`. Optional:
+  `LINKEDIN_EMAIL_IMAP_MAILBOX` defaults to `INBOX`.
 - `.env.example` documents the expected local secret variables.
 - `deploy/k3s/secret.example.yaml` shows the Kubernetes Secret shape for later
   deployment work.

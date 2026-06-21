@@ -11,6 +11,7 @@ from .dummy import DummySource
 from .glassdoor import GlassdoorSource, GlassdoorSourceError
 from .indeed import IndeedSource, IndeedSourceError
 from .job104 import Job104Source, Job104SourceError
+from .linkedin_email import LinkedInEmailSource, LinkedInEmailSourceError
 
 SourceFactory = Callable[[AppConfig], BaseSource]
 UnknownSourceHandler = Callable[[str], None]
@@ -25,6 +26,7 @@ SOURCE_FACTORIES: dict[str, SourceFactory] = {
     GlassdoorSource.name: GlassdoorSource.from_config,
     IndeedSource.name: IndeedSource.from_config,
     Job104Source.name: Job104Source.from_config,
+    LinkedInEmailSource.name: LinkedInEmailSource.from_config,
 }
 
 
@@ -85,6 +87,8 @@ __all__ = [
     "IndeedSourceError",
     "Job104Source",
     "Job104SourceError",
+    "LinkedInEmailSource",
+    "LinkedInEmailSourceError",
     "list_source_names",
     "SOURCE_FACTORIES",
     "SourceErrorHandler",
