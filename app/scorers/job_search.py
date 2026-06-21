@@ -54,6 +54,7 @@ class JobSearchProfile:
     reject_keywords: list[str] = field(default_factory=list)
     location_preferences: list[str] = field(default_factory=list)
     remote_hybrid_preferences: list[str] = field(default_factory=list)
+    # Parsed for human/LLM guidance; not used by rule-based scoring yet.
     notes_for_scorer: list[str] = field(default_factory=list)
 
 

@@ -69,9 +69,11 @@ signal-agent/
 │   │   └── secrets.py
 │   ├── notifiers/
 │   ├── scorers/
+│   │   └── job_search.py
 │   ├── sources/
 │   └── tasks/
 ├── profiles/
+│   └── henry_job_profile.md
 ├── deploy/
 │   └── k3s/
 │       └── secret.example.yaml
@@ -207,18 +209,45 @@ env = load_env_settings()
 ## Job Profile
 
 Job matching reads a human-edited Markdown profile at
-`profiles/henry_job_profile.md`. Keep the existing headings and short bullets so
-the rule-based scorer can parse them consistently.
+`profiles/henry_job_profile.md`. Keep the section headings below and use short
+bullets so the rule-based scorer can parse them consistently.
+
+Expected headings:
+
+```text
+## Target roles
+## Strong skills
+## Preferred companies / industries
+## Avoid roles
+## Reject keywords
+## Location preferences
+## Remote / hybrid preferences
+## Notes for scorer
+```
 
 ```python
+from datetime import UTC, datetime
+
+from app.core import SignalItem
 from app.scorers import load_job_search_profile, score_job_posting
 
 profile = load_job_search_profile()
+item = SignalItem(
+    source="manual",
+    item_type="job",
+    title="Cloud SDET",
+    observed_at=datetime.now(UTC),
+    content="Remote Python and Pytest automation with Kubernetes.",
+)
+result = score_job_posting(item, profile)
+print(result.score, result.matched_positive_signals)
 ```
 
 - Update the bullets when target roles, strong skills, preferred industries, or
   reject signals change.
 - Keep the file free of secrets, phone numbers, and private credentials.
+- `Notes for scorer` is stored for human and future LLM guidance; the bootstrap
+  rule-based scorer does not use it yet.
 - `app/scorers/job_search.py` contains the loader and the current bootstrap
   scoring logic.
 
