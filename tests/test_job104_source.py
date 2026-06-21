@@ -177,3 +177,24 @@ def test_job104_source_surfaces_non_json_responses_cleanly() -> None:
 
     with pytest.raises(Job104SourceError, match="non-JSON content"):
         source.fetch()
+
+
+def test_job104_items_dedup_by_url_and_external_id(tmp_path: Path) -> None:
+    from app.core import init_db, upsert_signal
+
+    session = FakeSession([FakeResponse(json_payload=_load_fixture())])
+    source = Job104Source(
+        keywords=["python"],
+        session=session,
+        request_delay_seconds=0.0,
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+    items = source.fetch()
+
+    first = upsert_signal(items[0], db_path=db_path)
+    second = upsert_signal(items[0], db_path=db_path)
+
+    assert first.action == "inserted"
+    assert second.action == "updated"
+    assert first.signal_id == second.signal_id

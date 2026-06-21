@@ -16,7 +16,7 @@ def test_load_config_reads_sample_file() -> None:
     assert config.tasks.job_search.enabled is True
     assert config.tasks.job_search.sources == ["job104", "linkedin_email"]
     assert config.tasks.job_search.keywords == ["python", "backend", "agent"]
-    assert config.tasks.job_search.locations == []
+    assert config.tasks.job_search.locations == ["Taiwan"]
     assert config.tasks.tw_stock_movers.enabled is True
     assert config.tasks.tw_stock_movers.top_n == 20
     assert config.tasks.tw_stock_movers.timezone == "Asia/Taipei"

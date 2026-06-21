@@ -1,11 +1,18 @@
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 
-from app.sources import Job104Source
+from app.core.config import AppConfig
+from app.sources import SOURCE_FACTORIES, Job104Source
 from app.tasks import BaseTask, DummyTask, FetchTask, build_task, list_tasks
 from app.tasks import fetch as fetch_task_module
+from tests.source_fakes import FakeResponse, FakeSession
+
+FIXTURE_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "job104_search_response.json"
+)
 
 
 def test_list_tasks_returns_registered_task_names() -> None:
@@ -81,6 +88,47 @@ def test_fetch_task_skips_failed_and_unsupported_sources(
     assert "source failed: job104: cloudflare challenge" in captured.out
     assert _count_rows(db_path, "signals") == 2
     assert _signal_run_statuses(db_path) == ["completed", "failed"]
+
+
+def test_fetch_task_persists_and_dedups_job104_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["job104"],
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(fetch_task_module, "DEFAULT_DB_PATH", db_path)
+
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    session = FakeSession(
+        [
+            FakeResponse(json_payload=fixture),
+            FakeResponse(json_payload=fixture),
+        ]
+    )
+
+    def build_job104_source(config: AppConfig) -> Job104Source:
+        return Job104Source(
+            keywords=config.tasks.job_search.keywords,
+            session=session,
+            request_delay_seconds=0.0,
+        )
+
+    monkeypatch.setitem(SOURCE_FACTORIES, "job104", build_job104_source)
+
+    FetchTask(str(config_path)).run()
+    first_run = capsys.readouterr()
+    assert "persisted 2 inserted / 0 updated" in first_run.out
+    assert _count_rows(db_path, "signals") == 2
+
+    FetchTask(str(config_path)).run()
+    second_run = capsys.readouterr()
+    assert "persisted 0 inserted / 2 updated" in second_run.out
+    assert _count_rows(db_path, "signals") == 2
+    assert _signal_run_statuses(db_path) == ["completed", "completed"]
 
 
 def _write_config(

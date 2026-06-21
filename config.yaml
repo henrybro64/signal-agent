@@ -12,6 +12,8 @@ tasks:
       - python
       - backend
       - agent
+    locations:
+      - Taiwan
   tw_stock_movers:
     enabled: true
     top_n: 20

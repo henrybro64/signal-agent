@@ -78,6 +78,9 @@ signal-agent/
 │   │   ├── job_rule_scorer.py
 │   │   └── job_search.py
 │   ├── sources/
+│   │   ├── job104.py
+│   │   ├── indeed.py
+│   │   └── glassdoor.py
 │   └── tasks/
 ├── deploy/
 │   └── k3s/
@@ -123,6 +126,12 @@ samples for local development and tests, while `job104`, `indeed`, and
 `glassdoor` provide live job-search integrations. The global sources default to
 the Taiwan region when `tasks.job_search.locations` is not set.
 
+`job104` uses 104's public JSON search API over HTTP (no browser automation).
+When `locations` are configured, the MVP folds them into the keyword query
+string until explicit 104 area codes are configured. Live fetches can still be
+blocked by anti-bot challenges that return HTML instead of JSON; the fetch task
+records source-level failures and continues with other configured sources.
+
 ```python
 from app.sources import DummySource, fetch_from_sources
 
@@ -141,6 +150,10 @@ from app.tasks import TASKS, build_task
 task = build_task("dummy", config_path="config.yaml")
 task.run()
 ```
+
+`python main.py --task fetch` runs the configured `tasks.job_search.sources`,
+persists each successful source to SQLite, and skips unsupported or failed
+sources without aborting the whole run.
 
 ## Storage
 
