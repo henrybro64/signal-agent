@@ -26,6 +26,9 @@ signal-agent = "app.cli:main"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+[tool.setuptools.package-data]
+"app.profiles" = ["*.md"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 88
