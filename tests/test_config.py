@@ -16,6 +16,7 @@ def test_load_config_reads_sample_file() -> None:
     assert config.tasks.job_search.enabled is True
     assert config.tasks.job_search.sources == ["job104", "linkedin_email"]
     assert config.tasks.job_search.keywords == ["python", "backend", "agent"]
+    assert config.tasks.job_search.locations == ["Taiwan"]
     assert config.tasks.tw_stock_movers.enabled is True
     assert config.tasks.tw_stock_movers.top_n == 20
     assert config.tasks.tw_stock_movers.timezone == "Asia/Taipei"
@@ -182,8 +183,37 @@ def test_app_config_from_dict() -> None:
 
     assert config.agent.timezone == "UTC"
     assert config.tasks.job_search.keywords == ["data"]
+    assert config.tasks.job_search.locations == []
     assert config.tasks.tw_stock_movers.top_n == 5
     assert config.scoring.llm_enabled is True
+
+
+def test_app_config_from_dict_reads_optional_job_search_locations() -> None:
+    config = AppConfig.from_dict(
+        {
+            "agent": {"timezone": "UTC", "digest_time": "09:00"},
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "sources": ["job104"],
+                    "keywords": ["python"],
+                    "locations": ["Taipei", "Remote"],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 5,
+                    "timezone": "UTC",
+                },
+            },
+            "notifiers": {"telegram": {"enabled": False}},
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+            },
+        }
+    )
+
+    assert config.tasks.job_search.locations == ["Taipei", "Remote"]
 
 
 def test_load_env_settings_reads_variables(

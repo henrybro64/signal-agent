@@ -1,0 +1,34 @@
+{
+  "status": "success",
+  "data": {
+    "totalCount": 2,
+    "list": [
+      {
+        "jobNo": "84ph6",
+        "jobName": "AD10601 Senior Python Backend Engineer",
+        "custName": "華碩電腦股份有限公司",
+        "jobAddrNoDesc": "台北市北投區",
+        "salaryDesc": "待遇面議",
+        "jobDescription": "Design and implement scalable backend services and high-concurrency APIs using Python.",
+        "appearDateDesc": "12/16",
+        "coIndustryDesc": "電腦及其週邊設備製造業",
+        "periodDesc": "5年以上",
+        "optionEdu": "大學",
+        "link": {
+          "job": "//www.104.com.tw/job/84ph6?jobsource=cs_2018indexpoc"
+        }
+      },
+      {
+        "jobNo": "8abcd",
+        "jobName": "Python Automation for Platform/QA Engineer",
+        "custName": "台灣利優資訊科技有限公司",
+        "jobAddrNoDesc": "台北市南港區",
+        "salaryDesc": "年薪800,000~1,100,000元",
+        "jobDescription": "Familiar with Playwright or Pytest and CI/CD pipeline integration.",
+        "appearDateDesc": "6/11",
+        "coIndustryDesc": "人力派遣服務",
+        "jobUrl": "https://www.104.com.tw/job/8abcd?jobsource=index_s"
+      }
+    ]
+  }
+}

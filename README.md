@@ -10,8 +10,10 @@ This repository is in bootstrap mode. It includes a working Python entrypoint,
 sample configuration files, and the initial package layout for future source
 collectors, scoring, and notifier integrations.
 
-The bootstrap intentionally does not include live collectors, Docker, or LLM
-logic yet.
+It now includes early best-effort job collectors for `job104`, `indeed`, and
+`glassdoor`. Some live runs can still be blocked by provider anti-bot
+challenges, so the fetch pipeline persists successful sources and records
+source-level failures without aborting the whole run.
 
 ## Quick Start
 
@@ -76,6 +78,9 @@ signal-agent/
 │   │   ├── job_rule_scorer.py
 │   │   └── job_search.py
 │   ├── sources/
+│   │   ├── job104.py
+│   │   ├── indeed.py
+│   │   └── glassdoor.py
 │   └── tasks/
 ├── deploy/
 │   └── k3s/
@@ -91,8 +96,8 @@ signal-agent/
 - `python main.py --list-tasks` shows the registered CLI task names.
 - `python main.py --task dummy` loads `config.yaml`, reads `.env`, and prints a
   short bootstrap summary that proves the entrypoint wiring works.
-- `python main.py --task fetch` runs the dummy source plugin and prints fetched
-  `SignalItem` titles.
+- `python main.py --task fetch` runs the configured job-search sources,
+  persists results to SQLite, and prints a source-by-source summary.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
@@ -117,7 +122,15 @@ Use `python main.py --telegram-test "hello from signal-agent"` for a manual smok
 Each data source implements `BaseSource` in `app/sources/` and returns normalized
 `SignalItem` objects from `fetch()`. Use `fetch_from_sources()` to run one or more
 sources through the bootstrap pipeline. `DummySource` provides stable in-memory
-samples for local development and tests.
+samples for local development and tests, while `job104`, `indeed`, and
+`glassdoor` provide live job-search integrations. The global sources default to
+the Taiwan region when `tasks.job_search.locations` is not set.
+
+`job104` uses 104's public JSON search API over HTTP (no browser automation).
+When `locations` are configured, the MVP folds them into the keyword query
+string until explicit 104 area codes are configured. Live fetches can still be
+blocked by anti-bot challenges that return HTML instead of JSON; the fetch task
+records source-level failures and continues with other configured sources.
 
 ```python
 from app.sources import DummySource, fetch_from_sources
@@ -137,6 +150,10 @@ from app.tasks import TASKS, build_task
 task = build_task("dummy", config_path="config.yaml")
 task.run()
 ```
+
+`python main.py --task fetch` runs the configured `tasks.job_search.sources`,
+persists each successful source to SQLite, and skips unsupported or failed
+sources without aborting the whole run.
 
 ## Storage
 
@@ -192,11 +209,14 @@ tasks:
     enabled: true
     sources:
       - job104
-      - linkedin_email
+      - indeed
+      - glassdoor
     keywords:
       - python
       - backend
       - agent
+    locations:
+      - Taiwan
   tw_stock_movers:
     enabled: true
     top_n: 20

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ class JobSearchTaskConfig:
     enabled: bool
     sources: list[str]
     keywords: list[str]
+    locations: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -128,6 +129,13 @@ class AppConfig:
                     keywords=_require_str_list(
                         job_search,
                         "keywords",
+                        parent_path="tasks.job_search",
+                        source_name=source_name,
+                    ),
+                    locations=_optional_str_list(
+                        job_search,
+                        "locations",
+                        default=[],
                         parent_path="tasks.job_search",
                         source_name=source_name,
                     ),
@@ -360,6 +368,24 @@ def _require_str_list(
                 f"'{config_path}[{index}]' must be a string in {source_name}"
             )
     return value
+
+
+def _optional_str_list(
+    data: dict[str, Any],
+    key: str,
+    *,
+    default: list[str],
+    source_name: str,
+    parent_path: str | None = None,
+) -> list[str]:
+    if key not in data:
+        return list(default)
+    return _require_str_list(
+        data,
+        key,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
