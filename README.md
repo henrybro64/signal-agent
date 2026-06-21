@@ -41,6 +41,7 @@ app/sources/         # collectors that return SignalItem objects
 app/tasks/           # workflows such as job_search and tw_stock_movers
 app/scorers/         # ranking logic
 app/notifiers/       # outbound delivery such as Telegram
+profiles/            # human-editable job-scoring profiles
 sql/                 # SQLite schema for signals and run history
 ```
 
@@ -70,6 +71,7 @@ signal-agent/
 │   ├── scorers/
 │   ├── sources/
 │   └── tasks/
+├── profiles/
 ├── deploy/
 │   └── k3s/
 │       └── secret.example.yaml
@@ -201,6 +203,24 @@ env = load_env_settings()
 - `.env.example` documents the expected local secret variables.
 - `deploy/k3s/secret.example.yaml` shows the Kubernetes Secret shape for later
   deployment work.
+
+## Job Profile
+
+Job matching reads a human-edited Markdown profile at
+`profiles/henry_job_profile.md`. Keep the existing headings and short bullets so
+the rule-based scorer can parse them consistently.
+
+```python
+from app.scorers import load_job_search_profile, score_job_posting
+
+profile = load_job_search_profile()
+```
+
+- Update the bullets when target roles, strong skills, preferred industries, or
+  reject signals change.
+- Keep the file free of secrets, phone numbers, and private credentials.
+- `app/scorers/job_search.py` contains the loader and the current bootstrap
+  scoring logic.
 
 ## Development
 
