@@ -6,6 +6,12 @@ import argparse
 import sys
 
 from app.config import ConfigError, SecretError
+from app.core import load_env_settings
+from app.notifiers import (
+    TelegramNotifierError,
+    build_default_test_message,
+    build_telegram_notifier,
+)
 from app.tasks import list_tasks, run_task
 
 DEFAULT_CONFIG_PATH = "config.yaml"
@@ -30,6 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="List the available bootstrap tasks and exit.",
     )
+    action_group.add_argument(
+        "--telegram-test",
+        nargs="?",
+        const="",
+        metavar="TEXT",
+        help="Send a Telegram test message, optionally using custom text.",
+    )
     parser.add_argument(
         "--config",
         default=DEFAULT_CONFIG_PATH,
@@ -48,14 +61,36 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(list_tasks()))
         return 0
 
-    if args.task is None:
-        parser.print_help()
-        return 0
-
     try:
+        if args.telegram_test is not None:
+            send_telegram_test_message(args.telegram_test)
+            return 0
+
+        if args.task is None:
+            parser.print_help()
+            return 0
+
         run_task(args.task, config_path=args.config)
-    except (FileNotFoundError, ConfigError, SecretError, ValueError) as exc:
+    except (
+        FileNotFoundError,
+        ConfigError,
+        SecretError,
+        TelegramNotifierError,
+        ValueError,
+    ) as exc:
         print(exc, file=sys.stderr)
         return 1
 
     return 0
+
+
+def send_telegram_test_message(text: str) -> None:
+    """Send a one-off Telegram test message from the CLI."""
+
+    env = load_env_settings()
+    notifier = build_telegram_notifier(env=env)
+    message = text or build_default_test_message(
+        signal_agent_env=env.signal_agent_env
+    )
+    notifier.send_message(message)
+    print("telegram test message sent")

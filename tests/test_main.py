@@ -29,6 +29,7 @@ def test_main_help_command() -> None:
     assert "signal-agent" in result.stdout
     assert "--task" in result.stdout
     assert "--list-tasks" in result.stdout
+    assert "--telegram-test" in result.stdout
 
 
 def test_main_list_tasks_command() -> None:
@@ -145,3 +146,10 @@ def test_main_invalid_task_returns_error() -> None:
     assert result.returncode == 1
     assert "Unknown task: missing-task" in result.stderr
     assert "Available tasks: dummy, fetch" in result.stderr
+
+
+def test_main_telegram_test_missing_credentials_returns_error() -> None:
+    result = run_main("--telegram-test")
+
+    assert result.returncode == 1
+    assert "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required" in result.stderr
