@@ -198,3 +198,35 @@ def test_job104_items_dedup_by_url_and_external_id(tmp_path: Path) -> None:
     assert first.action == "inserted"
     assert second.action == "updated"
     assert first.signal_id == second.signal_id
+
+
+def test_job104_source_expands_keyword_location_search_terms() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(json_payload={"data": {"list": []}}),
+            FakeResponse(json_payload={"data": {"list": []}}),
+        ]
+    )
+    source = Job104Source(
+        keywords=["python"],
+        locations=["Taipei", "Remote"],
+        session=session,
+        request_delay_seconds=0.0,
+    )
+
+    assert source.fetch() == []
+    assert len(session.calls) == 2
+    assert session.calls[0]["params"]["keyword"] == "python Taipei"
+    assert session.calls[1]["params"]["keyword"] == "python Remote"
+
+
+def test_job104_source_returns_empty_list_for_empty_keywords() -> None:
+    session = FakeSession([])
+    source = Job104Source(
+        keywords=["", "   "],
+        session=session,
+        request_delay_seconds=0.0,
+    )
+
+    assert source.fetch() == []
+    assert session.calls == []
