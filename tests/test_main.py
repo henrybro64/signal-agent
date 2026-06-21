@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -49,12 +51,48 @@ def test_main_dummy_task_command() -> None:
     assert "telegram_ready=False" in result.stdout
 
 
-def test_main_fetch_task_command() -> None:
-    result = run_main("--task", "fetch")
+def test_main_fetch_task_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "fetch.yaml"
+    db_path = tmp_path / "signals.sqlite3"
+    config_path.write_text(
+        "\n".join(
+            [
+                "agent:",
+                "  timezone: Asia/Taipei",
+                '  digest_time: "20:00"',
+                "tasks:",
+                "  job_search:",
+                "    enabled: true",
+                "    sources:",
+                "      - dummy",
+                "    keywords:",
+                "      - python",
+                "  tw_stock_movers:",
+                "    enabled: true",
+                "    top_n: 20",
+                "    timezone: Asia/Taipei",
+                "notifiers:",
+                "  telegram:",
+                "    enabled: true",
+                "scoring:",
+                "  freshness_weight: 0.6",
+                "  priority_weight: 0.4",
+                "  llm_enabled: false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SIGNAL_AGENT_DB_PATH", str(db_path))
+
+    result = run_main("--config", str(config_path), "--task", "fetch")
 
     assert result.returncode == 0
-    assert "fetch task executed using config.yaml" in result.stdout
-    assert "fetched 2 signal(s) from dummy source" in result.stdout
+    assert f"fetch task executed using {config_path}" in result.stdout
+    assert "fetched 2 signal(s) from 1 successful source(s)" in result.stdout
+    assert "persisted 2 inserted / 0 updated" in result.stdout
     assert "Python Backend Engineer" in result.stdout
     assert "TSMC gains 3.1%" in result.stdout
 
