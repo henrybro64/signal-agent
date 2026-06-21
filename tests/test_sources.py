@@ -7,6 +7,7 @@ from app.sources import (
     GlassdoorSource,
     IndeedSource,
     Job104Source,
+    LinkedInEmailSource,
     build_job_search_sources,
     fetch_from_sources,
     list_source_names,
@@ -87,11 +88,19 @@ def test_fetch_from_sources_can_skip_failed_sources() -> None:
 
 
 def test_list_source_names_returns_supported_sources() -> None:
-    assert list_source_names() == ["dummy", "glassdoor", "indeed", "job104"]
+    assert list_source_names() == [
+        "dummy",
+        "glassdoor",
+        "indeed",
+        "job104",
+        "linkedin_email",
+    ]
 
 
 def test_build_job_search_sources_builds_configured_sources() -> None:
-    config = _build_config(["dummy", "job104", "indeed", "glassdoor"])
+    config = _build_config(
+        ["dummy", "job104", "indeed", "glassdoor", "linkedin_email"]
+    )
 
     sources = build_job_search_sources(config)
 
@@ -100,15 +109,17 @@ def test_build_job_search_sources_builds_configured_sources() -> None:
         "job104",
         "indeed",
         "glassdoor",
+        "linkedin_email",
     ]
     assert isinstance(sources[0], DummySource)
     assert isinstance(sources[1], Job104Source)
     assert isinstance(sources[2], IndeedSource)
     assert isinstance(sources[3], GlassdoorSource)
+    assert isinstance(sources[4], LinkedInEmailSource)
 
 
 def test_build_job_search_sources_can_skip_unknown_sources() -> None:
-    config = _build_config(["dummy", "linkedin_email"])
+    config = _build_config(["dummy", "missing_source"])
     skipped: list[str] = []
 
     sources = build_job_search_sources(
@@ -117,15 +128,15 @@ def test_build_job_search_sources_can_skip_unknown_sources() -> None:
     )
 
     assert [source.name for source in sources] == ["dummy"]
-    assert skipped == ["linkedin_email"]
+    assert skipped == ["missing_source"]
 
 
 def test_build_job_search_sources_rejects_unknown_sources_by_default() -> None:
-    config = _build_config(["linkedin_email"])
+    config = _build_config(["missing_source"])
 
     with pytest.raises(
         ValueError,
-        match="Unsupported source: linkedin_email",
+        match="Unsupported source: missing_source",
     ):
         build_job_search_sources(config)
 

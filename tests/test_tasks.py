@@ -24,6 +24,9 @@ INDEED_FIXTURE_PATH = (
 GLASSDOOR_FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "glassdoor_search_taiwan.html"
 )
+LINKEDIN_FIXTURE_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "linkedin_alert_sample.eml"
+)
 
 
 def test_list_tasks_returns_registered_task_names() -> None:
@@ -82,7 +85,7 @@ def test_fetch_task_skips_failed_and_unsupported_sources(
 ) -> None:
     config_path = _write_config(
         tmp_path,
-        source_names=["dummy", "job104", "linkedin_email"],
+        source_names=["dummy", "job104", "missing_source"],
     )
     db_path = tmp_path / "signals.sqlite3"
     monkeypatch.setattr(fetch_task_module, "DEFAULT_DB_PATH", db_path)
@@ -95,8 +98,34 @@ def test_fetch_task_skips_failed_and_unsupported_sources(
     FetchTask(str(config_path)).run()
 
     captured = capsys.readouterr()
-    assert "skipped unsupported sources: linkedin_email" in captured.out
+    assert "skipped unsupported sources: missing_source" in captured.out
     assert "source failed: job104: cloudflare challenge" in captured.out
+    assert _count_rows(db_path, "signals") == 2
+    assert _signal_run_statuses(db_path) == ["completed", "failed"]
+
+
+def test_fetch_task_records_linkedin_email_source_failures_without_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["dummy", "linkedin_email"],
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(fetch_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.delenv("LINKEDIN_EMAIL_SOURCE_PATH", raising=False)
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_HOST", raising=False)
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_USERNAME", raising=False)
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_PASSWORD", raising=False)
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_MAILBOX", raising=False)
+
+    FetchTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert "source failed: linkedin_email:" in captured.out
+    assert "LINKEDIN_EMAIL_SOURCE_PATH" in captured.out
     assert _count_rows(db_path, "signals") == 2
     assert _signal_run_statuses(db_path) == ["completed", "failed"]
 
@@ -224,6 +253,35 @@ def test_fetch_task_persists_and_dedups_glassdoor_results(
     assert _signal_run_statuses(db_path) == ["completed", "completed"]
 
 
+def test_fetch_task_persists_and_dedups_linkedin_email_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["linkedin_email"],
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(fetch_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("LINKEDIN_EMAIL_SOURCE_PATH", str(LINKEDIN_FIXTURE_PATH))
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_HOST", raising=False)
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_USERNAME", raising=False)
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_PASSWORD", raising=False)
+    monkeypatch.delenv("LINKEDIN_EMAIL_IMAP_MAILBOX", raising=False)
+
+    FetchTask(str(config_path)).run()
+    first_run = capsys.readouterr()
+    assert "persisted 2 inserted / 0 updated" in first_run.out
+    assert _count_rows(db_path, "signals") == 2
+
+    FetchTask(str(config_path)).run()
+    second_run = capsys.readouterr()
+    assert "persisted 0 inserted / 2 updated" in second_run.out
+    assert _count_rows(db_path, "signals") == 2
+    assert _signal_run_statuses(db_path) == ["completed", "completed"]
+
+
 def test_fetch_task_persists_from_multiple_successful_sources(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -286,7 +344,7 @@ def test_fetch_task_fails_when_only_unsupported_sources_are_configured(
 ) -> None:
     config_path = _write_config(
         tmp_path,
-        source_names=["linkedin_email"],
+        source_names=["missing_source"],
     )
     db_path = tmp_path / "signals.sqlite3"
     monkeypatch.setattr(fetch_task_module, "DEFAULT_DB_PATH", db_path)
