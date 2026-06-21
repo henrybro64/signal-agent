@@ -253,9 +253,10 @@ Expected headings:
 from datetime import UTC, datetime
 
 from app.core import SignalItem
-from app.scorers import load_job_search_profile, score_job_posting
+from app.scorers import JobRuleScorer, load_job_search_profile, score_job_posting
 
 profile = load_job_search_profile()
+scorer = JobRuleScorer(profile)
 item = SignalItem(
     source="manual",
     item_type="job",
@@ -264,7 +265,9 @@ item = SignalItem(
     content="Remote Python and Pytest automation with Kubernetes.",
 )
 result = score_job_posting(item, profile)
+rule_result = scorer.score(item)
 print(result.score, result.matched_positive_signals)
+print(rule_result.score, rule_result.recommendation, rule_result.reason)
 ```
 
 - Update the bullets when target roles, strong skills, preferred industries, or
@@ -272,8 +275,10 @@ print(result.score, result.matched_positive_signals)
 - Keep the file free of secrets, phone numbers, and private credentials.
 - `Notes for scorer` is stored for human and future LLM guidance; the bootstrap
   rule-based scorer does not use it yet.
-- `app/scorers/job_search.py` contains the loader and the current bootstrap
-  scoring logic.
+- `score_job_posting()` is the lower-level profile match scorer used by tests
+  and future ranking flows.
+- `JobRuleScorer` is the offline MVP scorer that returns a clamped 0-100 score,
+  recommendation, and human-readable reasons without using `OPENAI_API_KEY`.
 
 ## Development
 

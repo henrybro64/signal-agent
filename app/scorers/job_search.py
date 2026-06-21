@@ -1,4 +1,4 @@
-"""Job-profile loading and lightweight rule-based scoring for job signals."""
+"""Job-profile loading and profile-signal matching for job scorers."""
 
 from __future__ import annotations
 
@@ -68,6 +68,14 @@ class JobScore:
     matched_negative_signals: list[str] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class JobProfileMatches:
+    """Grouped profile matches for one job posting."""
+
+    positive_matches: dict[str, list[str]] = field(default_factory=dict)
+    negative_matches: dict[str, list[str]] = field(default_factory=dict)
+
+
 def load_job_search_profile(
     path: str | Path | None = None,
 ) -> JobSearchProfile:
@@ -130,29 +138,55 @@ def parse_job_search_profile(
 def score_job_posting(item: SignalItem, profile: JobSearchProfile) -> JobScore:
     """Score one job posting against the profile using phrase and token matches."""
 
+    matches = match_job_posting(item, profile)
+    score = 0.0
+
+    for field_name, weight in _POSITIVE_SIGNAL_WEIGHTS.items():
+        for _signal in matches.positive_matches.get(field_name, []):
+            score += weight
+
+    for field_name, weight in _NEGATIVE_SIGNAL_WEIGHTS.items():
+        for _signal in matches.negative_matches.get(field_name, []):
+            score -= weight
+
+    return JobScore(
+        score=score,
+        matched_positive_signals=_flatten_match_groups(matches.positive_matches),
+        matched_negative_signals=_flatten_match_groups(matches.negative_matches),
+    )
+
+
+def match_job_posting(
+    item: SignalItem,
+    profile: JobSearchProfile,
+) -> JobProfileMatches:
+    """Return grouped profile matches for a job posting."""
+
     if item.item_type != "job":
         msg = "Job scoring only supports item_type='job'"
         raise ValueError(msg)
 
     search_text = _normalize_search_text(_build_search_text(item))
-    positive_matches: list[str] = []
-    negative_matches: list[str] = []
-    score = 0.0
+    positive_matches = {
+        field_name: _find_matches(search_text, getattr(profile, field_name))
+        for field_name in _POSITIVE_SIGNAL_WEIGHTS
+    }
+    negative_matches = {
+        field_name: _find_matches(search_text, getattr(profile, field_name))
+        for field_name in _NEGATIVE_SIGNAL_WEIGHTS
+    }
 
-    for field_name, weight in _POSITIVE_SIGNAL_WEIGHTS.items():
-        for signal in _find_matches(search_text, getattr(profile, field_name)):
-            positive_matches.append(signal)
-            score += weight
-
-    for field_name, weight in _NEGATIVE_SIGNAL_WEIGHTS.items():
-        for signal in _find_matches(search_text, getattr(profile, field_name)):
-            negative_matches.append(signal)
-            score -= weight
-
-    return JobScore(
-        score=score,
-        matched_positive_signals=positive_matches,
-        matched_negative_signals=negative_matches,
+    return JobProfileMatches(
+        positive_matches={
+            field_name: signals
+            for field_name, signals in positive_matches.items()
+            if signals
+        },
+        negative_matches={
+            field_name: signals
+            for field_name, signals in negative_matches.items()
+            if signals
+        },
     )
 
 
@@ -191,6 +225,13 @@ def _find_matches(search_text: str, signals: list[str]) -> list[str]:
         if _signal_matches(search_text, normalized_signal):
             matches.append(signal)
     return matches
+
+
+def _flatten_match_groups(match_groups: dict[str, list[str]]) -> list[str]:
+    flattened: list[str] = []
+    for signals in match_groups.values():
+        flattened.extend(signals)
+    return flattened
 
 
 def _signal_matches(search_text: str, normalized_signal: str) -> bool:
