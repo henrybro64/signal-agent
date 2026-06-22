@@ -96,6 +96,57 @@ def test_job_llm_scorer_returns_structured_score() -> None:
     request_json = session.calls[0]["json"]
     assert request_json["model"] == "gpt-5.2"
     assert request_json["text"]["format"]["type"] == "json_schema"
+    prompt = str(request_json["input"])
+    assert "Target roles" in prompt
+    assert "Cloud SDET" in prompt
+
+
+def test_job_llm_scorer_includes_extra_metadata_in_prompt() -> None:
+    profile = _profile()
+    fallback = JobRuleScorer(profile)
+    session = FakeSession(
+        [
+            FakeResponse(
+                json_payload={
+                    "output_text": (
+                        '{"score": 85, "recommendation": "strong_match", '
+                        '"fit_reason": "Matches cybersecurity industry.", '
+                        '"concern": ""}'
+                    )
+                }
+            )
+        ]
+    )
+    scorer = JobLLMScorer(
+        api_key="sk-test",
+        model="gpt-5.2",
+        profile=profile,
+        fallback_scorer=fallback,
+        session=session,
+    )
+    job = SignalItem(
+        source="job104",
+        item_type="job",
+        title="Cloud SDET",
+        observed_at=OBSERVED_AT,
+        content="Python automation with Kubernetes.",
+        metadata={
+            "company": "Example Security Product Company",
+            "location": "Taipei",
+            "salary": "NT$80万+",
+            "industry": "Cybersecurity",
+            "experience": "3+ years",
+            "education": "Bachelor",
+        },
+    )
+
+    scorer.score(job)
+
+    prompt = str(session.calls[0]["json"]["input"])
+    assert "Salary: NT$80万+" in prompt
+    assert "Industry: Cybersecurity" in prompt
+    assert "Experience: 3+ years" in prompt
+    assert "Education: Bachelor" in prompt
 
 
 def test_job_llm_scorer_falls_back_on_invalid_json() -> None:

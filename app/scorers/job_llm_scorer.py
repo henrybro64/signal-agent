@@ -49,6 +49,11 @@ _STRUCTURED_OUTPUT_SCHEMA: Final[dict[str, object]] = {
 }
 
 
+_PROMPT_METADATA_SKIP_KEYS: Final[frozenset[str]] = frozenset(
+    {"company", "location"}
+)
+
+
 class JobLLMScorerError(RuntimeError):
     """Raised when LLM scoring fails before fallback is applied."""
 
@@ -156,14 +161,18 @@ def _build_user_prompt(item: SignalItem, profile: JobSearchProfile) -> str:
     company = _metadata_value(item, "company", fallback="Unknown company")
     location = _metadata_value(item, "location", fallback="Unknown location")
     profile_summary = "\n".join(_profile_lines(profile))
+    job_lines = [
+        f"Title: {item.title}",
+        f"Company: {company}",
+        f"Location: {location}",
+        *_metadata_prompt_lines(item),
+        f"Description: {description}",
+    ]
     return (
         "Candidate profile:\n"
         f"{profile_summary}\n\n"
         "Job posting:\n"
-        f"Title: {item.title}\n"
-        f"Company: {company}\n"
-        f"Location: {location}\n"
-        f"Description: {description}\n"
+        f"{'\n'.join(job_lines)}\n"
     )
 
 
@@ -202,6 +211,21 @@ def _metadata_value(
     if isinstance(value, str) and value.strip():
         return value.strip()
     return fallback
+
+
+def _metadata_prompt_lines(item: SignalItem) -> list[str]:
+    lines: list[str] = []
+    for key in sorted(item.metadata):
+        if key in _PROMPT_METADATA_SKIP_KEYS:
+            continue
+        value = item.metadata[key]
+        if isinstance(value, str) and value.strip():
+            lines.append(f"{_format_metadata_key(key)}: {value.strip()}")
+    return lines
+
+
+def _format_metadata_key(key: str) -> str:
+    return key.replace("_", " ").strip().title()
 
 
 def _extract_output_text(payload: object) -> str:
