@@ -235,6 +235,80 @@ def update_signal_evaluation(
             raise ValueError(f"Unknown signal id: {signal_id}")
 
 
+SignalEvaluationState = Literal["unscored", "pending_digest", "complete"]
+
+
+def get_signal_evaluation_state(
+    signal_id: int,
+    *,
+    db_path: str | Path | None = None,
+) -> SignalEvaluationState:
+    """Return whether a signal still needs scoring or digest reporting."""
+
+    resolved_path = _resolve_db_path(db_path)
+
+    with _connect(resolved_path) as connection:
+        row = connection.execute(
+            "SELECT score, status FROM signals WHERE id = ?",
+            (signal_id,),
+        ).fetchone()
+
+    if row is None:
+        raise ValueError(f"Unknown signal id: {signal_id}")
+    if row["score"] is None:
+        return "unscored"
+    if row["status"] in {"new", "rejected"}:
+        return "pending_digest"
+    return "complete"
+
+
+def get_signal_evaluation(
+    signal_id: int,
+    *,
+    db_path: str | Path | None = None,
+) -> tuple[float, str]:
+    """Return the stored score and reason for one signal."""
+
+    resolved_path = _resolve_db_path(db_path)
+
+    with _connect(resolved_path) as connection:
+        row = connection.execute(
+            "SELECT score, reason FROM signals WHERE id = ?",
+            (signal_id,),
+        ).fetchone()
+
+    if row is None:
+        raise ValueError(f"Unknown signal id: {signal_id}")
+    if row["score"] is None or row["reason"] is None:
+        raise ValueError(f"Signal id {signal_id} has not been scored yet")
+
+    return float(row["score"]), str(row["reason"])
+
+
+def mark_signals_digest_reported(
+    signal_ids: list[int],
+    *,
+    db_path: str | Path | None = None,
+) -> None:
+    """Mark scored jobs as reported after a digest is delivered."""
+
+    if not signal_ids:
+        return
+
+    resolved_path = _resolve_db_path(db_path)
+    placeholders = ", ".join("?" for _ in signal_ids)
+
+    with _connect(resolved_path) as connection:
+        connection.execute(
+            f"""
+            UPDATE signals
+            SET status = 'reviewed'
+            WHERE id IN ({placeholders})
+            """,
+            signal_ids,
+        )
+
+
 def start_signal_run(
     source: str,
     *,

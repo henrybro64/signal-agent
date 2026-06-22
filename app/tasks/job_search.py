@@ -16,7 +16,10 @@ from app.config import (
 from app.core import (
     SignalItem,
     finish_signal_run,
+    get_signal_evaluation,
+    get_signal_evaluation_state,
     init_db,
+    mark_signals_digest_reported,
     start_signal_run,
     update_signal_evaluation,
     upsert_signal,
@@ -119,6 +122,25 @@ class JobSearchTask(BaseTask):
                     else:
                         updated_count += 1
                         summary.duplicate_count += 1
+                        evaluation_state = get_signal_evaluation_state(
+                            result.signal_id,
+                            db_path=db_path,
+                        )
+                        if evaluation_state == "unscored":
+                            self._score_and_record(
+                                item=item,
+                                signal_id=result.signal_id,
+                                summary=summary,
+                                scorer=scorer,
+                                db_path=db_path,
+                            )
+                        elif evaluation_state == "pending_digest":
+                            self._record_pending_digest_job(
+                                item=item,
+                                signal_id=result.signal_id,
+                                summary=summary,
+                                db_path=db_path,
+                            )
 
                 finish_signal_run(
                     run_id,
@@ -143,6 +165,13 @@ class JobSearchTask(BaseTask):
                 f"{source_name}: {message}"
                 for source_name, message in summary.failed_sources
             )
+            print("\n".join(_build_console_summary(self.config_path, db_path, summary)))
+            self._maybe_send_telegram_digest(
+                config=config,
+                env=env,
+                summary=summary,
+                db_path=db_path,
+            )
             raise ValueError(
                 "All configured job-search sources failed: "
                 f"{failure_summary}"
@@ -150,6 +179,21 @@ class JobSearchTask(BaseTask):
 
         print("\n".join(_build_console_summary(self.config_path, db_path, summary)))
 
+        self._maybe_send_telegram_digest(
+            config=config,
+            env=env,
+            summary=summary,
+            db_path=db_path,
+        )
+
+    def _maybe_send_telegram_digest(
+        self,
+        *,
+        config,
+        env,
+        summary: JobSearchSummary,
+        db_path: Path,
+    ) -> None:
         digest = _build_telegram_digest(summary)
         if not digest:
             print("telegram digest skipped: no new jobs to report")
@@ -165,6 +209,10 @@ class JobSearchTask(BaseTask):
         )
         notifier = build_telegram_notifier(env=env)
         notifier.send_message(digest)
+        mark_signals_digest_reported(
+            _collect_reported_signal_ids(summary),
+            db_path=db_path,
+        )
         print("telegram digest sent")
 
     def _score_and_record(
@@ -186,6 +234,24 @@ class JobSearchTask(BaseTask):
             db_path=db_path,
         )
 
+        scored_job = ScoredJob(signal_id=signal_id, item=item, score=score)
+        if score.recommendation == "strong_match":
+            summary.strong_matches.append(scored_job)
+        elif score.recommendation == "maybe":
+            summary.maybe_matches.append(scored_job)
+        else:
+            summary.rejected_jobs.append(scored_job)
+
+    def _record_pending_digest_job(
+        self,
+        *,
+        item: SignalItem,
+        signal_id: int,
+        summary: JobSearchSummary,
+        db_path: Path,
+    ) -> None:
+        stored_score, reason = get_signal_evaluation(signal_id, db_path=db_path)
+        score = _job_rule_score_from_stored(stored_score, reason)
         scored_job = ScoredJob(signal_id=signal_id, item=item, score=score)
         if score.recommendation == "strong_match":
             summary.strong_matches.append(scored_job)
@@ -233,7 +299,9 @@ def _build_console_summary(
 
 def _build_telegram_digest(summary: JobSearchSummary) -> str:
     has_useful_output = (
-        summary.new_count > 0
+        bool(summary.strong_matches)
+        or bool(summary.maybe_matches)
+        or bool(summary.rejected_jobs)
         or bool(summary.failed_sources)
         or bool(summary.unsupported_sources)
     )
@@ -254,7 +322,9 @@ def _build_telegram_digest(summary: JobSearchSummary) -> str:
     ]
 
     if summary.strong_matches:
-        lines.extend(_render_job_section("Top recommended jobs", summary.strong_matches))
+        lines.extend(
+            _render_job_section("Top recommended jobs", summary.strong_matches)
+        )
     if summary.maybe_matches:
         lines.extend(_render_job_section("Maybe jobs", summary.maybe_matches))
     if summary.rejected_jobs:
@@ -326,6 +396,32 @@ def _location_name(item: SignalItem) -> str:
     if isinstance(location, str):
         return location.strip()
     return ""
+
+
+def _collect_reported_signal_ids(summary: JobSearchSummary) -> list[int]:
+    return [
+        job.signal_id
+        for job in (
+            summary.strong_matches
+            + summary.maybe_matches
+            + summary.rejected_jobs
+        )
+    ]
+
+
+def _job_rule_score_from_stored(score: float, reason: str) -> JobRuleScore:
+    normalized = int(score)
+    if normalized >= 60:
+        recommendation = "strong_match"
+    elif normalized >= 25:
+        recommendation = "maybe"
+    else:
+        recommendation = "reject"
+    return JobRuleScore(
+        score=normalized,
+        recommendation=recommendation,
+        reason=reason,
+    )
 
 
 def _resolve_db_path() -> Path:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core import SecretError, SignalItem
+from app.core import SecretError, SignalItem, init_db, upsert_signal
 from app.tasks import JobSearchTask
 from app.tasks import job_search as job_search_task_module
 
@@ -64,7 +64,11 @@ def test_job_search_task_runs_end_to_end_and_sends_digest(
 
     message = notifier.messages[0]
     assert "signal-agent job search digest" in message
-    assert "counts: fetched=3, new=3, duplicates=0, strong=1, maybe=1, rejected=1" in message
+    counts = (
+        "counts: fetched=3, new=3, duplicates=0, "
+        "strong=1, maybe=1, rejected=1"
+    )
+    assert counts in message
     assert "Top recommended jobs" in message
     assert "Cloud SDET" in message
     assert "Maybe jobs" in message
@@ -75,11 +79,11 @@ def test_job_search_task_runs_end_to_end_and_sends_digest(
     rows = _fetch_signal_rows(db_path)
     assert len(rows) == 3
     assert rows["Cloud SDET"]["score"] == 100.0
-    assert rows["Cloud SDET"]["status"] == "new"
+    assert rows["Cloud SDET"]["status"] == "reviewed"
     assert rows["Test Automation Engineer"]["score"] == 30.0
-    assert rows["Test Automation Engineer"]["status"] == "new"
+    assert rows["Test Automation Engineer"]["status"] == "reviewed"
     assert rows["Helpdesk Support Engineer"]["score"] == 0.0
-    assert rows["Helpdesk Support Engineer"]["status"] == "rejected"
+    assert rows["Helpdesk Support Engineer"]["status"] == "reviewed"
 
 
 def test_job_search_task_skips_duplicates_for_telegram_digest(
@@ -186,25 +190,29 @@ def test_job_search_task_skips_telegram_validation_without_digest(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    config_path = _write_config(
-        tmp_path,
-        source_names=["static_jobs"],
-        telegram_enabled=False,
-    )
+    config_path = _write_config(tmp_path, source_names=["static_jobs"])
     db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
     monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
     monkeypatch.setitem(
         job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
 
     JobSearchTask(str(config_path)).run()
     capsys.readouterr()
 
-    config_path = _write_config(tmp_path, source_names=["static_jobs"])
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
     JobSearchTask(str(config_path)).run()
 
     captured = capsys.readouterr()
@@ -231,6 +239,109 @@ def test_job_search_task_requires_telegram_credentials_when_sending_digest(
         match="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required",
     ):
         JobSearchTask(str(config_path)).run()
+
+
+def test_job_search_task_scores_unscored_duplicates_from_fetch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, source_names=["static_jobs"])
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    init_db(db_path)
+    for item in _sample_jobs():
+        upsert_signal(item, db_path=db_path)
+
+    JobSearchTask(str(config_path)).run()
+
+    assert len(notifier.messages) == 1
+    assert "Top recommended jobs" in notifier.messages[0]
+    rows = _fetch_signal_rows(db_path)
+    assert rows["Cloud SDET"]["score"] == 100.0
+    assert rows["Cloud SDET"]["status"] == "reviewed"
+
+
+def test_job_search_task_sends_failure_digest_when_all_sources_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, source_names=["failing_source"])
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+
+    class FailingSource:
+        name = "failing_source"
+
+        def fetch(self) -> list[SignalItem]:
+            raise RuntimeError("imap auth failed")
+
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        "failing_source",
+        lambda _config: FailingSource(),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    with pytest.raises(ValueError, match="All configured job-search sources failed"):
+        JobSearchTask(str(config_path)).run()
+
+    assert len(notifier.messages) == 1
+    assert "Source failures" in notifier.messages[0]
+    assert "imap auth failed" in notifier.messages[0]
+
+
+def test_job_search_task_retries_telegram_digest_after_credential_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, source_names=["static_jobs"])
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    with pytest.raises(SecretError):
+        JobSearchTask(str(config_path)).run()
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+
+    JobSearchTask(str(config_path)).run()
+
+    assert len(notifier.messages) == 1
+    assert "Cloud SDET" in notifier.messages[0]
 
 
 def _sample_jobs() -> list[SignalItem]:
