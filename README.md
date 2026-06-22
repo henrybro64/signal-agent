@@ -27,6 +27,7 @@ python main.py --help
 python main.py --list-tasks
 python main.py --task dummy
 python main.py --task fetch
+python main.py --task job_search
 python main.py --telegram-test
 signal-agent --help
 python -m pytest
@@ -100,6 +101,9 @@ signal-agent/
   short bootstrap summary that proves the entrypoint wiring works.
 - `python main.py --task fetch` runs the configured job-search sources,
   persists results to SQLite, and prints a source-by-source summary.
+- `python main.py --task job_search` runs the full MVP pipeline: fetch jobs,
+  deduplicate, score new jobs with the rule-based scorer, persist results, and
+  send a Telegram digest when there is useful output.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
@@ -158,6 +162,10 @@ task.run()
 `python main.py --task fetch` runs the configured `tasks.job_search.sources`,
 persists each successful source to SQLite, and skips unsupported or failed
 sources without aborting the whole run.
+
+`python main.py --task job_search` adds rule-based scoring for newly inserted
+jobs and optional Telegram digests. Duplicate jobs are still stored, but they
+are not rescored or included in the digest.
 
 ## Storage
 

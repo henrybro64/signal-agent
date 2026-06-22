@@ -10,6 +10,7 @@ from app.core import (
     finish_signal_run,
     init_db,
     start_signal_run,
+    update_signal_evaluation,
     update_signal_status,
     upsert_signal,
 )
@@ -283,6 +284,36 @@ def test_update_signal_status_rejects_invalid_value(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Invalid signal status: archived"):
         update_signal_status(result.signal_id, "archived", db_path=db_path)  # type: ignore[arg-type]
+
+
+def test_update_signal_evaluation_persists_score_reason_and_status(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    item = SignalItem(
+        source="manual",
+        item_type="job",
+        title="Signal to score",
+        observed_at=OBSERVED_AT,
+    )
+
+    init_db(db_path)
+    result = upsert_signal(item, db_path=db_path)
+    update_signal_evaluation(
+        result.signal_id,
+        score=82,
+        reason="strong match (82/100): positives: python; concerns: none.",
+        status="reviewed",
+        db_path=db_path,
+    )
+
+    row = _fetch_signal(db_path, result.signal_id)
+
+    assert row["score"] == 82
+    assert row["reason"] == (
+        "strong match (82/100): positives: python; concerns: none."
+    )
+    assert row["status"] == "reviewed"
 
 
 def test_signal_run_lifecycle_persists_counts(tmp_path: Path) -> None:

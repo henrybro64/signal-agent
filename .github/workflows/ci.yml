@@ -20,5 +20,11 @@ jobs:
       - name: Install dependencies
         run: make install-dev
 
-      - name: Run tests and lint
-        run: make check
+      - name: Run tests
+        run: make test
+
+      - name: Run lint
+        run: make lint
+
+      - name: Run package smoke test
+        run: make package-smoke
