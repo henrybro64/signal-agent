@@ -71,10 +71,6 @@ class JobSearchTask(BaseTask):
             llm_enabled=config.scoring.llm_enabled,
             env=env,
         )
-        validate_telegram_notifier_secrets(
-            telegram_enabled=config.notifiers.telegram.enabled,
-            env=env,
-        )
 
         db_path = _resolve_db_path()
         init_db(db_path)
@@ -163,6 +159,10 @@ class JobSearchTask(BaseTask):
             print("telegram digest skipped: notifier disabled in config")
             return
 
+        validate_telegram_notifier_secrets(
+            telegram_enabled=True,
+            env=env,
+        )
         notifier = build_telegram_notifier(env=env)
         notifier.send_message(digest)
         print("telegram digest sent")

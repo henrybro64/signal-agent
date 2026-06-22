@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core import SignalItem
+from app.core import SecretError, SignalItem
 from app.tasks import JobSearchTask
 from app.tasks import job_search as job_search_task_module
 
@@ -170,6 +170,69 @@ def test_job_search_task_reports_useful_failures_even_without_new_jobs(
     assert "cloudflare challenge" in notifier.messages[0]
 
 
+def test_job_search_task_rejects_disabled_config(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        job_search_enabled=False,
+    )
+
+    with pytest.raises(ValueError, match="job_search' is disabled"):
+        JobSearchTask(str(config_path)).run()
+
+
+def test_job_search_task_skips_telegram_validation_without_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        telegram_enabled=False,
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()),
+    )
+
+    JobSearchTask(str(config_path)).run()
+    capsys.readouterr()
+
+    config_path = _write_config(tmp_path, source_names=["static_jobs"])
+    JobSearchTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert "telegram digest skipped: no new jobs to report" in captured.out
+
+
+def test_job_search_task_requires_telegram_credentials_when_sending_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, source_names=["static_jobs"])
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()),
+    )
+
+    with pytest.raises(
+        SecretError,
+        match="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required",
+    ):
+        JobSearchTask(str(config_path)).run()
+
+
 def _sample_jobs() -> list[SignalItem]:
     return [
         SignalItem(
@@ -225,6 +288,8 @@ def _write_config(
     tmp_path: Path,
     *,
     source_names: list[str],
+    job_search_enabled: bool = True,
+    telegram_enabled: bool = True,
 ) -> Path:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -235,7 +300,7 @@ def _write_config(
                 '  digest_time: "20:00"',
                 "tasks:",
                 "  job_search:",
-                "    enabled: true",
+                f"    enabled: {'true' if job_search_enabled else 'false'}",
                 "    sources:",
                 *[f"      - {source_name}" for source_name in source_names],
                 "    keywords:",
@@ -247,7 +312,7 @@ def _write_config(
                 "    timezone: Asia/Taipei",
                 "notifiers:",
                 "  telegram:",
-                "    enabled: true",
+                f"    enabled: {'true' if telegram_enabled else 'false'}",
                 "scoring:",
                 "  freshness_weight: 0.6",
                 "  priority_weight: 0.4",
