@@ -30,6 +30,7 @@ from .secrets import (
     validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
+from .time_utils import is_tw_market_open
 
 __all__ = [
     "AppConfig",
@@ -46,6 +47,7 @@ __all__ = [
     "has_openai_api_key",
     "has_telegram_credentials",
     "init_db",
+    "is_tw_market_open",
     "load_config",
     "mark_signals_digest_reported",
     "load_env_settings",

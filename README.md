@@ -71,7 +71,8 @@ signal-agent/
 │   │   ├── config.py
 │   │   ├── db.py
 │   │   ├── models.py
-│   │   └── secrets.py
+│   │   ├── secrets.py
+│   │   └── time_utils.py
 │   ├── notifiers/
 │   │   └── telegram.py
 │   ├── profiles/
@@ -169,6 +170,22 @@ rule-based scorer if the API request fails or returns invalid structured JSON.
 Duplicate jobs are still stored. Unscored duplicates from earlier `fetch` runs
 are scored on the next `job_search` run, but jobs that were already reported in
 a digest are not rescored or included again.
+
+## Taiwan market hours
+
+`tw_stock_movers` workflows should call `is_tw_market_open()` before fetching or
+sending reports so frequent schedulers can no-op outside 台股開盤時間:
+
+```python
+from app.core import is_tw_market_open
+
+if not is_tw_market_open():
+    print("tw market closed; skipping stock mover run")
+    return
+```
+
+The MVP guard treats Monday through Friday, 09:00 through 13:30 inclusive, in
+`Asia/Taipei`. Public holidays are not handled yet.
 
 ## Storage
 
