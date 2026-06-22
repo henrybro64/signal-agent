@@ -201,6 +201,40 @@ def update_signal_status(
             raise ValueError(f"Unknown signal id: {signal_id}")
 
 
+def update_signal_evaluation(
+    signal_id: int,
+    *,
+    score: float,
+    reason: str,
+    status: SignalStatus | None = None,
+    db_path: str | Path | None = None,
+) -> None:
+    """Persist scoring output and optionally update the signal status."""
+
+    if status is not None and status not in VALID_SIGNAL_STATUSES:
+        valid_statuses = ", ".join(sorted(VALID_SIGNAL_STATUSES))
+        raise ValueError(
+            f"Invalid signal status: {status}. Valid statuses: {valid_statuses}"
+        )
+
+    resolved_path = _resolve_db_path(db_path)
+
+    with _connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE signals
+            SET
+                score = ?,
+                reason = ?,
+                status = COALESCE(?, status)
+            WHERE id = ?
+            """,
+            (score, reason, status, signal_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Unknown signal id: {signal_id}")
+
+
 def start_signal_run(
     source: str,
     *,

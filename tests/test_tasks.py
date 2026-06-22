@@ -11,7 +11,14 @@ from app.sources import (
     IndeedSource,
     Job104Source,
 )
-from app.tasks import BaseTask, DummyTask, FetchTask, build_task, list_tasks
+from app.tasks import (
+    BaseTask,
+    DummyTask,
+    FetchTask,
+    JobSearchTask,
+    build_task,
+    list_tasks,
+)
 from app.tasks import fetch as fetch_task_module
 from tests.source_fakes import FakeResponse, FakeSession
 
@@ -30,7 +37,7 @@ LINKEDIN_FIXTURE_PATH = (
 
 
 def test_list_tasks_returns_registered_task_names() -> None:
-    assert list_tasks() == ["dummy", "fetch"]
+    assert list_tasks() == ["dummy", "fetch", "job_search"]
 
 
 def test_build_task_returns_task_instance() -> None:
@@ -48,11 +55,21 @@ def test_build_task_supports_fetch_task() -> None:
     assert task.name == "fetch"
 
 
+def test_build_task_supports_job_search_task() -> None:
+    task = build_task("job_search", config_path="config.yaml")
+
+    assert isinstance(task, JobSearchTask)
+    assert task.name == "job_search"
+
+
 def test_build_task_unknown_name_raises_clear_error() -> None:
     with pytest.raises(ValueError, match="Unknown task: missing-task"):
         build_task("missing-task", config_path="config.yaml")
 
-    with pytest.raises(ValueError, match="Available tasks: dummy, fetch"):
+    with pytest.raises(
+        ValueError,
+        match="Available tasks: dummy, fetch, job_search",
+    ):
         build_task("missing-task", config_path="config.yaml")
 
 

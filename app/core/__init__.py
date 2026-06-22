@@ -11,6 +11,7 @@ from .db import (
     finish_signal_run,
     init_db,
     start_signal_run,
+    update_signal_evaluation,
     update_signal_status,
     upsert_signal,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "load_config",
     "load_env_settings",
     "start_signal_run",
+    "update_signal_evaluation",
     "update_signal_status",
     "upsert_signal",
     "validate_linkedin_email_source_secrets",
