@@ -13,9 +13,12 @@ _MARKET_CLOSE_TIME = time(13, 30)
 def is_tw_market_open(now: datetime | None = None) -> bool:
     """Return whether the Taiwan market is open at the given time.
 
-    Market hours for the MVP are Monday through Friday, 09:00 through 13:30,
-    in the ``Asia/Taipei`` timezone. Holiday handling is intentionally out of
-    scope for this first version.
+    Market hours for the MVP are Monday through Friday, 09:00 through 13:30
+    inclusive, in the ``Asia/Taipei`` timezone. Holiday handling is
+    intentionally out of scope for this first version.
+
+    When ``now`` is timezone-aware, it is converted to Taipei before the check.
+    Naive datetimes are treated as Taipei local time.
     """
 
     current = now or datetime.now(UTC)

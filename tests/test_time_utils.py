@@ -36,9 +36,19 @@ def test_is_tw_market_open_returns_false_after_close() -> None:
 
 
 def test_is_tw_market_open_returns_false_on_weekends() -> None:
-    now = datetime.fromisoformat("2026-06-21T10:00:00+08:00")
+    sunday = datetime.fromisoformat("2026-06-21T10:00:00+08:00")
+    saturday = datetime.fromisoformat("2026-06-20T10:00:00+08:00")
 
-    assert is_tw_market_open(now) is False
+    assert is_tw_market_open(sunday) is False
+    assert is_tw_market_open(saturday) is False
+
+
+def test_is_tw_market_open_treats_naive_datetimes_as_taipei_local() -> None:
+    before_open = datetime(2026, 6, 22, 8, 59)
+    during_open = datetime(2026, 6, 22, 10, 0)
+
+    assert is_tw_market_open(before_open) is False
+    assert is_tw_market_open(during_open) is True
 
 
 def test_is_tw_market_open_converts_non_taipei_timezones() -> None:
