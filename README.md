@@ -166,8 +166,9 @@ sources without aborting the whole run.
 `python main.py --task job_search` scores newly inserted jobs with the optional
 OpenAI-backed scorer when `scoring.llm_enabled` is true, and falls back to the
 rule-based scorer if the API request fails or returns invalid structured JSON.
-Duplicate jobs are still stored, but they are not rescored or included in the
-digest once they have already been reported.
+Duplicate jobs are still stored. Unscored duplicates from earlier `fetch` runs
+are scored on the next `job_search` run, but jobs that were already reported in
+a digest are not rescored or included again.
 
 ## Storage
 

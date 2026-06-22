@@ -240,7 +240,11 @@ def _parse_llm_score_result(payload: object) -> JobLLMScoreResult:
         raise JobLLMScorerError("LLM structured result was not an object")
 
     raw_score = payload.get("score")
-    if not isinstance(raw_score, int) or isinstance(raw_score, bool):
+    if isinstance(raw_score, bool):
+        raise JobLLMScorerError("LLM score must be an integer")
+    if isinstance(raw_score, float) and raw_score.is_integer():
+        raw_score = int(raw_score)
+    if not isinstance(raw_score, int):
         raise JobLLMScorerError("LLM score must be an integer")
     if not 0 <= raw_score <= 100:
         raise JobLLMScorerError("LLM score must be between 0 and 100")

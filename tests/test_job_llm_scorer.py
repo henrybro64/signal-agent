@@ -156,6 +156,55 @@ def test_job_llm_scorer_falls_back_on_api_failure() -> None:
     assert result.recommendation == fallback_result.recommendation
 
 
+def test_job_llm_scorer_falls_back_on_http_error() -> None:
+    profile = _profile()
+    fallback = JobRuleScorer(profile)
+    session = FakeSession([FakeResponse(status_code=503)])
+    scorer = JobLLMScorer(
+        api_key="sk-test",
+        model="gpt-5.2",
+        profile=profile,
+        fallback_scorer=fallback,
+        session=session,
+    )
+
+    result = scorer.score(_good_fit_job())
+
+    fallback_result = fallback.score(_good_fit_job())
+    assert result.score == fallback_result.score
+    assert result.recommendation == fallback_result.recommendation
+
+
+def test_job_llm_scorer_accepts_integer_like_float_score() -> None:
+    profile = _profile()
+    fallback = JobRuleScorer(profile)
+    session = FakeSession(
+        [
+            FakeResponse(
+                json_payload={
+                    "output_text": (
+                        '{"score": 85.0, "recommendation": "strong_match", '
+                        '"fit_reason": "Matches Python automation.", '
+                        '"concern": ""}'
+                    )
+                }
+            )
+        ]
+    )
+    scorer = JobLLMScorer(
+        api_key="sk-test",
+        model="gpt-5.2",
+        profile=profile,
+        fallback_scorer=fallback,
+        session=session,
+    )
+
+    result = scorer.score(_good_fit_job())
+
+    assert result.score == 85
+    assert result.recommendation == "strong_match"
+
+
 def test_job_llm_scorer_falls_back_on_mismatched_recommendation() -> None:
     profile = _profile()
     fallback = JobRuleScorer(profile)

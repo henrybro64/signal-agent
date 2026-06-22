@@ -185,6 +185,24 @@ def test_job_search_task_rejects_disabled_config(tmp_path: Path) -> None:
         JobSearchTask(str(config_path)).run()
 
 
+def test_job_search_task_requires_openai_key_when_llm_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        llm_enabled=True,
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(
+        SecretError,
+        match="OPENAI_API_KEY is required when scoring.llm_enabled is true",
+    ):
+        JobSearchTask(str(config_path)).run()
+
+
 def test_job_search_task_skips_telegram_validation_without_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
