@@ -185,6 +185,24 @@ def test_job_search_task_rejects_disabled_config(tmp_path: Path) -> None:
         JobSearchTask(str(config_path)).run()
 
 
+def test_job_search_task_requires_openai_key_when_llm_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        llm_enabled=True,
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(
+        SecretError,
+        match="OPENAI_API_KEY is required when scoring.llm_enabled is true",
+    ):
+        JobSearchTask(str(config_path)).run()
+
+
 def test_job_search_task_skips_telegram_validation_without_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -344,6 +362,72 @@ def test_job_search_task_retries_telegram_digest_after_credential_failure(
     assert "Cloud SDET" in notifier.messages[0]
 
 
+def test_job_search_task_uses_llm_scorer_when_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        llm_enabled=True,
+        llm_model="gpt-5.2",
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()[:1]),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    class FakeJobLLMScorer:
+        def __init__(
+            self,
+            *,
+            api_key: str,
+            model: str,
+            profile,
+            fallback_scorer,
+        ) -> None:
+            calls.append((api_key, model))
+
+        def score(self, item: SignalItem):
+            return job_search_task_module.JobRuleScore(
+                score=88,
+                recommendation="strong_match",
+                reason=(
+                    "strong match (88/100): positives: LLM fit; "
+                    "concerns: needs minor ramp."
+                ),
+                reasons=["LLM fit"],
+                concerns=["needs minor ramp"],
+            )
+
+    monkeypatch.setattr(
+        job_search_task_module,
+        "JobLLMScorer",
+        FakeJobLLMScorer,
+    )
+
+    JobSearchTask(str(config_path)).run()
+
+    assert calls == [("sk-test", "gpt-5.2")]
+    assert len(notifier.messages) == 1
+    assert "LLM fit" in notifier.messages[0]
+    rows = _fetch_signal_rows(db_path)
+    assert rows["Cloud SDET"]["score"] == 88.0
+
+
 def _sample_jobs() -> list[SignalItem]:
     return [
         SignalItem(
@@ -401,6 +485,8 @@ def _write_config(
     source_names: list[str],
     job_search_enabled: bool = True,
     telegram_enabled: bool = True,
+    llm_enabled: bool = False,
+    llm_model: str = "gpt-4o-mini",
 ) -> Path:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -427,7 +513,8 @@ def _write_config(
                 "scoring:",
                 "  freshness_weight: 0.6",
                 "  priority_weight: 0.4",
-                "  llm_enabled: false",
+                f"  llm_enabled: {'true' if llm_enabled else 'false'}",
+                f"  llm_model: {llm_model}",
             ]
         ),
         encoding="utf-8",

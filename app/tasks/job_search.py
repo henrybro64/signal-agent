@@ -25,7 +25,12 @@ from app.core import (
     upsert_signal,
 )
 from app.notifiers import build_telegram_notifier
-from app.scorers import JobRuleScore, JobRuleScorer
+from app.scorers import (
+    JobLLMScorer,
+    JobRuleScore,
+    JobRuleScorer,
+    load_job_search_profile,
+)
 from app.sources import build_job_search_sources
 
 from .base import BaseTask
@@ -92,7 +97,7 @@ class JobSearchTask(BaseTask):
                 )
             raise ValueError("No job-search sources are configured.")
 
-        scorer = JobRuleScorer()
+        scorer = _build_job_scorer(config=config, env=env)
 
         for source in sources:
             run_id = start_signal_run(source.name, db_path=db_path)
@@ -221,7 +226,7 @@ class JobSearchTask(BaseTask):
         item: SignalItem,
         signal_id: int,
         summary: JobSearchSummary,
-        scorer: JobRuleScorer,
+        scorer: JobRuleScorer | JobLLMScorer,
         db_path: Path,
     ) -> None:
         score = scorer.score(item)
@@ -429,3 +434,16 @@ def _resolve_db_path() -> Path:
     if raw_path:
         return Path(raw_path).expanduser()
     return DEFAULT_DB_PATH
+
+
+def _build_job_scorer(*, config, env) -> JobRuleScorer | JobLLMScorer:
+    profile = load_job_search_profile()
+    rule_scorer = JobRuleScorer(profile)
+    if not config.scoring.llm_enabled:
+        return rule_scorer
+    return JobLLMScorer(
+        api_key=env.openai_api_key or "",
+        model=config.scoring.llm_model,
+        profile=profile,
+        fallback_scorer=rule_scorer,
+    )

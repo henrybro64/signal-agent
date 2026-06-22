@@ -27,3 +27,4 @@ scoring:
   freshness_weight: 0.6
   priority_weight: 0.4
   llm_enabled: false
+  llm_model: gpt-4o-mini
