@@ -1,5 +1,6 @@
 """Signal scoring components used to rank collected items."""
 
+from .job_llm_scorer import JobLLMScorer, JobLLMScoreResult
 from .job_rule_scorer import JobRuleScore, JobRuleScorer
 from .job_search import (
     DEFAULT_JOB_PROFILE_PATH,
@@ -14,6 +15,8 @@ from .job_search import (
 
 __all__ = [
     "DEFAULT_JOB_PROFILE_PATH",
+    "JobLLMScoreResult",
+    "JobLLMScorer",
     "JobProfileMatches",
     "JobRuleScore",
     "JobRuleScorer",

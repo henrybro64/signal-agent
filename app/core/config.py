@@ -58,6 +58,7 @@ class ScoringConfig:
     freshness_weight: float
     priority_weight: float
     llm_enabled: bool = False
+    llm_model: str = "gpt-4o-mini"
 
 
 @dataclass(slots=True)
@@ -191,6 +192,13 @@ class AppConfig:
                     parent_path="scoring",
                     source_name=source_name,
                 ),
+                llm_model=_optional_str(
+                    scoring,
+                    "llm_model",
+                    default="gpt-4o-mini",
+                    parent_path="scoring",
+                    source_name=source_name,
+                ),
             ),
         )
 
@@ -299,6 +307,24 @@ def _require_str(
             f"Config value '{config_path}' must be a string in {source_name}"
         )
     return value
+
+
+def _optional_str(
+    data: dict[str, Any],
+    key: str,
+    *,
+    default: str,
+    source_name: str,
+    parent_path: str | None = None,
+) -> str:
+    if key not in data:
+        return default
+    return _require_str(
+        data,
+        key,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
 
 
 def _require_int(

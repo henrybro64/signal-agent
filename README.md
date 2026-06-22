@@ -102,8 +102,8 @@ signal-agent/
 - `python main.py --task fetch` runs the configured job-search sources,
   persists results to SQLite, and prints a source-by-source summary.
 - `python main.py --task job_search` runs the full MVP pipeline: fetch jobs,
-  deduplicate, score new jobs with the rule-based scorer, persist results, and
-  send a Telegram digest when there is useful output.
+  deduplicate, score new jobs, persist results, and send a Telegram digest when
+  there is useful output.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
@@ -163,9 +163,11 @@ task.run()
 persists each successful source to SQLite, and skips unsupported or failed
 sources without aborting the whole run.
 
-`python main.py --task job_search` adds rule-based scoring for newly inserted
-jobs and optional Telegram digests. Duplicate jobs are still stored, but they
-are not rescored or included in the digest.
+`python main.py --task job_search` scores newly inserted jobs with the optional
+OpenAI-backed scorer when `scoring.llm_enabled` is true, and falls back to the
+rule-based scorer if the API request fails or returns invalid structured JSON.
+Duplicate jobs are still stored, but they are not rescored or included in the
+digest once they have already been reported.
 
 ## Storage
 
@@ -243,6 +245,7 @@ scoring:
   freshness_weight: 0.6
   priority_weight: 0.4
   llm_enabled: false
+  llm_model: gpt-4o-mini
 ```
 
 Load config in code with:
@@ -256,6 +259,8 @@ env = load_env_settings()
 
 - Put local secrets in `.env`, not in `config.yaml` or committed files.
 - Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`.
+- Set `scoring.llm_model` in `config.yaml` to choose which OpenAI model powers
+  the optional LLM scorer.
 - Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before using
   `--telegram-test` or the Telegram notifier.
 - For `linkedin_email`, either set `LINKEDIN_EMAIL_SOURCE_PATH` to a local
@@ -311,8 +316,8 @@ print(rule_result.score, rule_result.recommendation, rule_result.reason)
 - Update the bullets when target roles, strong skills, preferred industries, or
   reject signals change.
 - Keep the file free of secrets, phone numbers, and private credentials.
-- `Notes for scorer` is stored for human and future LLM guidance; the bootstrap
-  rule-based scorer does not use it yet.
+- `Notes for scorer` is stored for human and optional LLM guidance; the
+  rule-based scorer does not use it.
 - `score_job_posting()` is a lower-level bootstrap float scorer used by tests
   and future ranking flows. Prefer `JobRuleScorer` for the offline MVP output.
 - `JobRuleScorer` is the offline MVP scorer that returns a clamped 0-100 score,

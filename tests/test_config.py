@@ -24,6 +24,7 @@ def test_load_config_reads_sample_file() -> None:
     assert config.scoring.freshness_weight == 0.6
     assert config.scoring.priority_weight == 0.4
     assert config.scoring.llm_enabled is False
+    assert config.scoring.llm_model == "gpt-4o-mini"
 
 
 def test_load_config_missing_file_raises() -> None:
@@ -177,6 +178,7 @@ def test_app_config_from_dict() -> None:
                 "freshness_weight": 0.5,
                 "priority_weight": 0.5,
                 "llm_enabled": True,
+                "llm_model": "gpt-5.2",
             },
         }
     )
@@ -186,6 +188,7 @@ def test_app_config_from_dict() -> None:
     assert config.tasks.job_search.locations == []
     assert config.tasks.tw_stock_movers.top_n == 5
     assert config.scoring.llm_enabled is True
+    assert config.scoring.llm_model == "gpt-5.2"
 
 
 def test_app_config_from_dict_reads_optional_job_search_locations() -> None:
@@ -214,6 +217,37 @@ def test_app_config_from_dict_reads_optional_job_search_locations() -> None:
     )
 
     assert config.tasks.job_search.locations == ["Taipei", "Remote"]
+    assert config.scoring.llm_model == "gpt-4o-mini"
+
+
+def test_app_config_from_dict_rejects_invalid_llm_model_type() -> None:
+    with pytest.raises(
+        ConfigError,
+        match="Config value 'scoring.llm_model' must be a string",
+    ):
+        AppConfig.from_dict(
+            {
+                "agent": {"timezone": "UTC", "digest_time": "09:00"},
+                "tasks": {
+                    "job_search": {
+                        "enabled": True,
+                        "sources": ["job104"],
+                        "keywords": ["python"],
+                    },
+                    "tw_stock_movers": {
+                        "enabled": True,
+                        "top_n": 5,
+                        "timezone": "UTC",
+                    },
+                },
+                "notifiers": {"telegram": {"enabled": False}},
+                "scoring": {
+                    "freshness_weight": 0.5,
+                    "priority_weight": 0.5,
+                    "llm_model": 123,
+                },
+            }
+        )
 
 
 def test_load_env_settings_reads_variables(
