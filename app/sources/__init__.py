@@ -12,6 +12,7 @@ from .glassdoor import GlassdoorSource, GlassdoorSourceError
 from .indeed import IndeedSource, IndeedSourceError
 from .job104 import Job104Source, Job104SourceError
 from .linkedin_email import LinkedInEmailSource, LinkedInEmailSourceError
+from .twse import TwseSource, TwseSourceError
 
 SourceFactory = Callable[[AppConfig], BaseSource]
 UnknownSourceHandler = Callable[[str], None]
@@ -27,6 +28,10 @@ SOURCE_FACTORIES: dict[str, SourceFactory] = {
     IndeedSource.name: IndeedSource.from_config,
     Job104Source.name: Job104Source.from_config,
     LinkedInEmailSource.name: LinkedInEmailSource.from_config,
+}
+
+TW_STOCK_MOVER_SOURCE_FACTORIES: dict[str, SourceFactory] = {
+    TwseSource.name: TwseSource.from_config,
 }
 
 
@@ -70,6 +75,15 @@ def build_job_search_sources(
     )
 
 
+def build_tw_stock_mover_sources(config: AppConfig) -> list[BaseSource]:
+    """Build the currently supported Taiwan stock-mover sources."""
+
+    return [
+        factory(config)
+        for factory in TW_STOCK_MOVER_SOURCE_FACTORIES.values()
+    ]
+
+
 def list_source_names() -> list[str]:
     """Return the available source names."""
 
@@ -79,6 +93,7 @@ def list_source_names() -> list[str]:
 __all__ = [
     "BaseSource",
     "build_job_search_sources",
+    "build_tw_stock_mover_sources",
     "build_sources",
     "DummySource",
     "GlassdoorSource",
@@ -93,6 +108,8 @@ __all__ = [
     "SOURCE_FACTORIES",
     "SourceErrorHandler",
     "SourceFactory",
+    "TwseSource",
+    "TwseSourceError",
     "UnknownSourceHandler",
     "fetch_from_sources",
 ]

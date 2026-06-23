@@ -24,7 +24,12 @@ def test_signal_agent_console_script_lists_tasks() -> None:
     )
 
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["dummy", "fetch", "job_search"]
+    assert result.stdout.splitlines() == [
+        "dummy",
+        "fetch",
+        "job_search",
+        "tw_stock_movers",
+    ]
 
 
 def test_cli_telegram_test_uses_default_message(
