@@ -139,7 +139,7 @@ def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "build_telegram_notifier",
-        lambda env: FakeNotifier(),
+        lambda *, env: FakeNotifier(),
     )
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
@@ -186,6 +186,82 @@ def test_tw_stock_movers_task_raises_when_all_sources_fail(
     assert _signal_run_statuses(db_path) == ["failed"]
 
 
+def test_tw_stock_movers_task_sends_failure_digest_when_all_sources_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, telegram_enabled=True)
+    db_path = tmp_path / "signals.sqlite3"
+    sent_messages: list[str] = []
+
+    class FakeNotifier:
+        def send_message(self, message: str) -> None:
+            sent_messages.append(message)
+
+    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "is_tw_market_open",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "build_tw_stock_mover_sources",
+        lambda _config: [FailingStockSource()],
+    )
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "build_telegram_notifier",
+        lambda *, env: FakeNotifier(),
+    )
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+
+    with pytest.raises(
+        ValueError,
+        match="All configured Taiwan stock-mover sources failed",
+    ):
+        TwStockMoversTask(str(config_path)).run()
+
+    assert len(sent_messages) == 1
+    assert "Source failures" in sent_messages[0]
+    assert "quote provider timeout" in sent_messages[0]
+
+
+def test_select_top_gainers_limits_to_top_n() -> None:
+    items = [
+        _stock_mover_item(
+            stock_code=f"{index:04d}",
+            company=f"Gainer {index}",
+            change_percent=float(index),
+        )
+        for index in range(1, 26)
+    ]
+
+    top_gainers = tw_stock_movers_task_module._select_top_gainers(items, limit=20)
+
+    assert len(top_gainers) == 20
+    assert top_gainers[0].metadata["change_percent"] == 25.0
+    assert top_gainers[-1].metadata["change_percent"] == 6.0
+
+
+def test_select_top_losers_limits_to_top_n() -> None:
+    items = [
+        _stock_mover_item(
+            stock_code=f"{index:04d}",
+            company=f"Loser {index}",
+            change_percent=-float(index),
+        )
+        for index in range(1, 26)
+    ]
+
+    top_losers = tw_stock_movers_task_module._select_top_losers(items, limit=20)
+
+    assert len(top_losers) == 20
+    assert top_losers[0].metadata["change_percent"] == -25.0
+    assert top_losers[-1].metadata["change_percent"] == -6.0
+
+
 def test_tw_stock_movers_task_respects_disabled_config(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
@@ -221,6 +297,28 @@ def test_tw_stock_movers_task_does_not_require_openai_key(
     captured = capsys.readouterr()
     assert "Taiwan market is closed" in captured.out
     assert not db_path.exists()
+
+
+def _stock_mover_item(
+    *,
+    stock_code: str,
+    company: str,
+    change_percent: float,
+) -> SignalItem:
+    direction = "gains" if change_percent > 0 else "falls"
+    return SignalItem(
+        source="static_stock",
+        item_type="tw_stock_mover",
+        title=f"{company} {direction} {abs(change_percent):.1f}%",
+        observed_at=SAMPLE_OBSERVED_AT,
+        external_id=f"{stock_code}-sample",
+        content=f"{company} moved {change_percent:+.1f}%.",
+        metadata={
+            "stock_code": stock_code,
+            "company": company,
+            "change_percent": change_percent,
+        },
+    )
 
 
 def _write_config(
