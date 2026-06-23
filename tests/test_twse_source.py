@@ -55,6 +55,8 @@ def test_twse_source_fetch_normalizes_stock_movers() -> None:
     assert first_item.metadata["stock_code"] == "2330"
     assert first_item.metadata["stock_name"] == "TSMC"
     assert first_item.metadata["company"] == "TSMC"
+    assert first_item.metadata["market"] == "twse"
+    assert first_item.metadata["exchange"] == "tse"
     assert first_item.metadata["price"] == 1010.0
     assert first_item.metadata["last_price"] == 1010.0
     assert first_item.metadata["change_amount"] == 10.0

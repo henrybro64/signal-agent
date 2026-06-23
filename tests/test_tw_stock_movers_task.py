@@ -26,6 +26,8 @@ class StaticStockSource(BaseSource):
                     "stock_code": "2330",
                     "company": "TSMC",
                     "change_percent": 3.1,
+                    "market": "twse",
+                    "exchange": "tse",
                 },
             ),
             SignalItem(
@@ -39,9 +41,48 @@ class StaticStockSource(BaseSource):
                     "stock_code": "2454",
                     "company": "MediaTek",
                     "change_percent": -1.2,
+                    "market": "twse",
+                    "exchange": "tse",
                 },
             ),
         ]
+
+
+class TwseStockSource(BaseSource):
+    name = "twse"
+
+    def fetch(self) -> list[SignalItem]:
+        return [
+            _stock_mover_item(
+                stock_code="2330",
+                company="TSMC",
+                change_percent=5.0,
+                market="twse",
+                exchange="tse",
+            )
+        ]
+
+
+class TpexStockSource(BaseSource):
+    name = "tpex"
+
+    def fetch(self) -> list[SignalItem]:
+        return [
+            _stock_mover_item(
+                stock_code="3105",
+                company="穩懋",
+                change_percent=10.0,
+                market="tpex",
+                exchange="otc",
+            )
+        ]
+
+
+class FailingTpexSource(BaseSource):
+    name = "tpex"
+
+    def fetch(self) -> list[SignalItem]:
+        raise RuntimeError("tpex quote provider timeout")
 
 
 class FailingStockSource(BaseSource):
@@ -98,10 +139,11 @@ def test_tw_stock_movers_task_filters_and_persists_stock_items(
     assert "fetched 1 stock mover(s) from 1 successful source(s)" in captured.out
     assert "persisted 1 new / 0 duplicate" in captured.out
     assert (
-        "reporting 1 ranked mover(s): 1 gainer(s) / 0 loser(s) (limit=20 each)"
+        "reporting 1 ranked mover(s) across 1 market(s) (limit=20 each)"
         in captured.out
     )
     assert "ignored 1 non-stock signal(s)" in captured.out
+    assert "TWSE listed (上市)" in captured.out
     assert "2330 TSMC +3.1% | TSMC gains 3.1%" in captured.out
     assert "telegram digest skipped: notifier disabled in config" in captured.out
     assert _count_rows(db_path, "signals") == 1
@@ -150,8 +192,8 @@ def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
     assert "telegram digest sent" in captured.out
     assert len(sent_messages) == 1
     assert "signal-agent tw stock movers digest" in sent_messages[0]
-    assert "Top gainers" in sent_messages[0]
-    assert "Top losers" in sent_messages[0]
+    assert "TWSE listed (上市) - Top gainers" in sent_messages[0]
+    assert "TWSE listed (上市) - Top losers" in sent_messages[0]
     assert "2330 TSMC +3.1% | TSMC gains 3.1%" in sent_messages[0]
     assert "2454 MediaTek -1.2% | MediaTek falls 1.2%" in sent_messages[0]
 
@@ -262,6 +304,111 @@ def test_select_top_losers_limits_to_top_n() -> None:
     assert top_losers[-1].metadata["change_percent"] == -6.0
 
 
+def test_select_top_gainers_ranks_each_market_separately() -> None:
+    items = [
+        _stock_mover_item(
+            stock_code="2330",
+            company="TSMC",
+            change_percent=5.0,
+            market="twse",
+            exchange="tse",
+        ),
+        _stock_mover_item(
+            stock_code="3105",
+            company="穩懋",
+            change_percent=10.0,
+            market="tpex",
+            exchange="otc",
+        ),
+    ]
+
+    reports = tw_stock_movers_task_module._build_market_reports(items, limit=20)
+
+    twse_report = reports[0]
+    tpex_report = reports[1]
+    assert twse_report.market_key == "twse"
+    assert tpex_report.market_key == "tpex"
+    assert len(twse_report.gainers) == 1
+    assert twse_report.gainers[0].metadata["stock_code"] == "2330"
+    assert len(tpex_report.gainers) == 1
+    assert tpex_report.gainers[0].metadata["stock_code"] == "3105"
+    assert twse_report.losers == []
+    assert tpex_report.losers == []
+
+
+def test_tw_stock_movers_task_reports_both_markets_separately(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(tmp_path, telegram_enabled=True, top_n=1)
+    db_path = tmp_path / "signals.sqlite3"
+    sent_messages: list[str] = []
+
+    class FakeNotifier:
+        def send_message(self, message: str) -> None:
+            sent_messages.append(message)
+
+    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "is_tw_market_open",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "build_tw_stock_mover_sources",
+        lambda _config: [TwseStockSource(), TpexStockSource()],
+    )
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "build_telegram_notifier",
+        lambda *, env: FakeNotifier(),
+    )
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+
+    TwStockMoversTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert "reporting 2 ranked mover(s) across 2 market(s)" in captured.out
+    assert "TWSE listed (上市)" in captured.out
+    assert "TPEx OTC (上櫃)" in captured.out
+    assert "2330 TSMC +5.0%" in captured.out
+    assert "3105 穩懋 +10.0%" in captured.out
+    assert len(sent_messages) == 1
+    assert "TWSE listed (上市) - Top gainers" in sent_messages[0]
+    assert "TPEx OTC (上櫃) - Top gainers" in sent_messages[0]
+
+
+def test_tw_stock_movers_task_continues_when_one_market_source_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(tmp_path, telegram_enabled=False)
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "is_tw_market_open",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "build_tw_stock_mover_sources",
+        lambda _config: [TwseStockSource(), FailingTpexSource()],
+    )
+
+    TwStockMoversTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert "source failed: tpex: tpex quote provider timeout" in captured.out
+    assert "2330 TSMC +5.0%" in captured.out
+    assert "TPEx OTC (上櫃)" not in captured.out
+    assert _signal_run_statuses(db_path) == ["completed", "failed"]
+
+
 def test_tw_stock_movers_task_respects_disabled_config(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
@@ -304,10 +451,12 @@ def _stock_mover_item(
     stock_code: str,
     company: str,
     change_percent: float,
+    market: str = "twse",
+    exchange: str = "tse",
 ) -> SignalItem:
     direction = "gains" if change_percent > 0 else "falls"
     return SignalItem(
-        source="static_stock",
+        source=market,
         item_type="tw_stock_mover",
         title=f"{company} {direction} {abs(change_percent):.1f}%",
         observed_at=SAMPLE_OBSERVED_AT,
@@ -317,6 +466,8 @@ def _stock_mover_item(
             "stock_code": stock_code,
             "company": company,
             "change_percent": change_percent,
+            "market": market,
+            "exchange": exchange,
         },
     )
 

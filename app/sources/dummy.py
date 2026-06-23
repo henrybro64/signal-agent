@@ -45,6 +45,8 @@ class DummySource(BaseSource):
                     "company": "TSMC",
                     "change_percent": 3.1,
                     "direction": "up",
+                    "market": "twse",
+                    "exchange": "tse",
                 },
             ),
         ]
