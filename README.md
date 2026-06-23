@@ -28,6 +28,7 @@ python main.py --list-tasks
 python main.py --task dummy
 python main.py --task fetch
 python main.py --task job_search
+python main.py --task tw_stock_movers
 python main.py --telegram-test
 signal-agent --help
 python -m pytest
@@ -105,6 +106,9 @@ signal-agent/
 - `python main.py --task job_search` runs the full MVP pipeline: fetch jobs,
   deduplicate, score new jobs, persist results, and send a Telegram digest when
   there is useful output.
+- `python main.py --task tw_stock_movers` runs the Taiwan stock-mover task
+  during market hours, persists `tw_stock_mover` signals, and reports the top
+  configured gainers and losers from the live TWSE source for listed stocks.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
@@ -133,7 +137,9 @@ samples for local development and tests, while `job104`, `indeed`, and
 `glassdoor` provide live job-search integrations. `linkedin_email` parses
 LinkedIn job-alert emails from a local `.eml` file or IMAP inbox without
 requiring a LinkedIn browser login. The global search sources default to the
-Taiwan region when `tasks.job_search.locations` is not set.
+Taiwan region when `tasks.job_search.locations` is not set. `twse` fetches live
+listed-stock quotes from the official TWSE market data endpoints and normalizes
+them into `tw_stock_mover` signals.
 
 `job104` uses 104's public JSON search API over HTTP (no browser automation).
 When `locations` are configured, the MVP folds them into the keyword query
@@ -170,6 +176,11 @@ rule-based scorer if the API request fails or returns invalid structured JSON.
 Duplicate jobs are still stored. Unscored duplicates from earlier `fetch` runs
 are scored on the next `job_search` run, but jobs that were already reported in
 a digest are not rescored or included again.
+
+`python main.py --task tw_stock_movers` checks `is_tw_market_open()` before it
+fetches. While the market is open, it persists only `tw_stock_mover` items,
+ignores non-stock signals from mixed sources such as `dummy`, and optionally
+delivers a Telegram digest with separate top gainer and top loser sections.
 
 ## Taiwan market hours
 

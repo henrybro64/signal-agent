@@ -38,7 +38,12 @@ def test_main_list_tasks_command() -> None:
     result = run_main("--list-tasks")
 
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["dummy", "fetch", "job_search"]
+    assert result.stdout.splitlines() == [
+        "dummy",
+        "fetch",
+        "job_search",
+        "tw_stock_movers",
+    ]
 
 
 def test_main_dummy_task_command() -> None:
@@ -230,7 +235,46 @@ def test_main_invalid_task_returns_error() -> None:
 
     assert result.returncode == 1
     assert "Unknown task: missing-task" in result.stderr
-    assert "Available tasks: dummy, fetch" in result.stderr
+    assert "Available tasks: dummy, fetch, job_search, tw_stock_movers" in result.stderr
+
+
+def test_main_tw_stock_movers_disabled_task_returns_error(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "tw_stock_movers.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "agent:",
+                "  timezone: Asia/Taipei",
+                '  digest_time: "20:00"',
+                "tasks:",
+                "  job_search:",
+                "    enabled: true",
+                "    sources:",
+                "      - dummy",
+                "    keywords:",
+                "      - python",
+                "  tw_stock_movers:",
+                "    enabled: false",
+                "    top_n: 20",
+                "    timezone: Asia/Taipei",
+                "notifiers:",
+                "  telegram:",
+                "    enabled: false",
+                "scoring:",
+                "  freshness_weight: 0.6",
+                "  priority_weight: 0.4",
+                "  llm_enabled: false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_main("--config", str(config_path), "--task", "tw_stock_movers")
+
+    assert result.returncode == 1
+    assert "Task 'tw_stock_movers' is disabled in config" in result.stderr
 
 
 def test_main_telegram_test_missing_credentials_returns_error() -> None:

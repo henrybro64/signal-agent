@@ -1,0 +1,90 @@
+{
+  "industry": {
+    "tse": [
+      {
+        "code": "24",
+        "name": "Semiconductors"
+      },
+      {
+        "code": "B0",
+        "name": "ETF"
+      }
+    ]
+  },
+  "category_24": {
+    "msgArray": [
+      {
+        "ex": "tse",
+        "ch": "2330.tw",
+        "n": "TSMC"
+      },
+      {
+        "ex": "tse",
+        "ch": "2454.tw",
+        "n": "MediaTek"
+      },
+      {
+        "ex": "tse",
+        "ch": "1301.tw",
+        "n": "Formosa Plastics"
+      }
+    ]
+  },
+  "stock_info": {
+    "rtcode": "0000",
+    "rtmessage": "OK",
+    "queryTime": {
+      "sysDate": "20260623",
+      "sysTime": "09:05:06"
+    },
+    "msgArray": [
+      {
+        "c": "2330",
+        "n": "TSMC",
+        "nf": "Taiwan Semiconductor Manufacturing Co.",
+        "z": "1010",
+        "pz": "1009",
+        "y": "1000",
+        "o": "1005",
+        "h": "1015",
+        "l": "995",
+        "v": "12,345,678",
+        "tv": "123,456",
+        "t": "09:05:00",
+        "d": "20260623",
+        "tlong": "1782176700000"
+      },
+      {
+        "c": "2454",
+        "n": "MediaTek",
+        "nf": "MediaTek Inc.",
+        "z": "-",
+        "pz": "1470",
+        "y": "1500",
+        "o": "1495",
+        "h": "1505",
+        "l": "1465",
+        "v": "8,765,432",
+        "tv": "98,765",
+        "t": "09:04:59",
+        "d": "20260623",
+        "tlong": "1782176699000"
+      },
+      {
+        "c": "1301",
+        "n": "Formosa Plastics",
+        "nf": "Formosa Plastics Corp.",
+        "z": "45",
+        "y": "45",
+        "o": "45",
+        "h": "45.5",
+        "l": "44.8",
+        "v": "1,000,000",
+        "tv": "10,000",
+        "t": "09:05:01",
+        "d": "20260623",
+        "tlong": "1782176701000"
+      }
+    ]
+  }
+}
