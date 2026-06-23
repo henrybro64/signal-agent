@@ -395,6 +395,8 @@ class TwseSource(BaseSource):
                             "stock_code": code,
                             "industry_code": member.industry_code,
                             "industry_name": member.industry_name,
+                            "market": "twse",
+                            "exchange": "tse",
                             "price": round(last_price, 4),
                             "last_price": round(last_price, 4),
                             "previous_close": round(previous_close, 4),

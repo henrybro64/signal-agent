@@ -33,6 +33,7 @@ SOURCE_FACTORIES: dict[str, SourceFactory] = {
 
 TW_STOCK_MOVER_SOURCE_FACTORIES: dict[str, SourceFactory] = {
     TwseSource.name: TwseSource.from_config,
+    TpexSource.name: TpexSource.from_config,
 }
 
 

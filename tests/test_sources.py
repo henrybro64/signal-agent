@@ -8,6 +8,7 @@ from app.sources import (
     IndeedSource,
     Job104Source,
     LinkedInEmailSource,
+    TpexSource,
     TwseSource,
     build_job_search_sources,
     build_tw_stock_mover_sources,
@@ -143,13 +144,14 @@ def test_build_job_search_sources_rejects_unknown_sources_by_default() -> None:
         build_job_search_sources(config)
 
 
-def test_build_tw_stock_mover_sources_builds_twse_source() -> None:
+def test_build_tw_stock_mover_sources_builds_twse_and_tpex_sources() -> None:
     config = _build_config(["dummy"])
 
     sources = build_tw_stock_mover_sources(config)
 
-    assert [source.name for source in sources] == ["twse"]
+    assert [source.name for source in sources] == ["twse", "tpex"]
     assert isinstance(sources[0], TwseSource)
+    assert isinstance(sources[1], TpexSource)
 
 
 def _build_config(source_names: list[str]) -> AppConfig:

@@ -107,8 +107,8 @@ signal-agent/
   deduplicate, score new jobs, persist results, and send a Telegram digest when
   there is useful output.
 - `python main.py --task tw_stock_movers` runs the Taiwan stock-mover task
-  during market hours, persists `tw_stock_mover` signals, and reports the top
-  configured gainers and losers from the live TWSE source for listed stocks.
+  during market hours, persists `tw_stock_mover` signals, and reports separate
+  top gainers and losers for TWSE listed (上市) and TPEx OTC (上櫃) stocks.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
@@ -180,7 +180,7 @@ a digest are not rescored or included again.
 `python main.py --task tw_stock_movers` checks `is_tw_market_open()` before it
 fetches. While the market is open, it persists only `tw_stock_mover` items,
 ignores non-stock signals from mixed sources such as `dummy`, and optionally
-delivers a Telegram digest with separate top gainer and top loser sections.
+delivers a Telegram digest with separate 上市 and 上櫃 top gainer/loser sections.
 
 ## Taiwan market hours
 
