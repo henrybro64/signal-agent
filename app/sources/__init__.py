@@ -12,6 +12,7 @@ from .glassdoor import GlassdoorSource, GlassdoorSourceError
 from .indeed import IndeedSource, IndeedSourceError
 from .job104 import Job104Source, Job104SourceError
 from .linkedin_email import LinkedInEmailSource, LinkedInEmailSourceError
+from .tpex import TpexSource, TpexSourceError
 from .twse import TwseSource, TwseSourceError
 
 SourceFactory = Callable[[AppConfig], BaseSource]
@@ -108,6 +109,8 @@ __all__ = [
     "SOURCE_FACTORIES",
     "SourceErrorHandler",
     "SourceFactory",
+    "TpexSource",
+    "TpexSourceError",
     "TwseSource",
     "TwseSourceError",
     "UnknownSourceHandler",

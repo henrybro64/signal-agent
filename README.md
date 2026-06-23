@@ -137,9 +137,9 @@ samples for local development and tests, while `job104`, `indeed`, and
 `glassdoor` provide live job-search integrations. `linkedin_email` parses
 LinkedIn job-alert emails from a local `.eml` file or IMAP inbox without
 requiring a LinkedIn browser login. The global search sources default to the
-Taiwan region when `tasks.job_search.locations` is not set. `twse` fetches live
-listed-stock quotes from the official TWSE market data endpoints and normalizes
-them into `tw_stock_mover` signals.
+Taiwan region when `tasks.job_search.locations` is not set. `twse` and `tpex`
+fetch live Taiwan listed-stock and OTC quotes from the official market data
+endpoints and normalize them into `tw_stock_mover` signals.
 
 `job104` uses 104's public JSON search API over HTTP (no browser automation).
 When `locations` are configured, the MVP folds them into the keyword query
