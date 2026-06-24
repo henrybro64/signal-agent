@@ -41,11 +41,11 @@ def test_twse_source_fetch_normalizes_stock_movers() -> None:
     first_item = items[0]
     assert first_item.source == "twse"
     assert first_item.item_type == "tw_stock_mover"
-    assert first_item.title == "TSMC gains 1.00%"
-    assert first_item.external_id == "twse-20260623-2330"
+    assert first_item.title == "TSMC 上漲 1.00%"
+    assert first_item.external_id == "twse-20260623-0905-2330"
     assert first_item.url == (
         "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
-        "?date=20260623&stockNo=2330"
+        "?date=20260623&stockNo=2330&snapshot=0905"
     )
     assert first_item.observed_at == datetime.fromtimestamp(1782176700, tz=UTC)
     assert first_item.content == (
@@ -64,12 +64,58 @@ def test_twse_source_fetch_normalizes_stock_movers() -> None:
     assert first_item.metadata["volume"] == 12345678
 
     second_item = items[1]
-    assert second_item.title == "MediaTek falls 2.00%"
+    assert second_item.title == "MediaTek 下跌 2.00%"
+    assert second_item.external_id == "twse-20260623-0905-2454"
     assert second_item.metadata["stock_code"] == "2454"
     assert second_item.metadata["price"] == 1470.0
     assert second_item.metadata["change_amount"] == -30.0
     assert second_item.metadata["change_percent"] == -2.0
     assert second_item.metadata["volume"] == 8765432
+
+
+def test_twse_source_uses_query_time_for_snapshot_ids() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(
+                json_payload={
+                    "tse": [{"code": "24", "name": "Semiconductors"}]
+                }
+            ),
+            FakeResponse(
+                json_payload={
+                    "msgArray": [{"ex": "tse", "ch": "2330.tw", "n": "TSMC"}]
+                }
+            ),
+            FakeResponse(
+                json_payload={
+                    "rtcode": "0000",
+                    "queryTime": {
+                        "sysDate": "20260623",
+                        "sysTime": "10:10:00",
+                    },
+                    "msgArray": [
+                        {
+                            "c": "2330",
+                            "n": "TSMC",
+                            "z": "1010",
+                            "y": "1000",
+                            "t": "09:00:00",
+                            "d": "20260623",
+                            "tlong": "1782173100000",
+                        }
+                    ],
+                }
+            ),
+        ]
+    )
+    source = TwseSource(session=session, request_delay_seconds=0.0)
+
+    items = source.fetch()
+
+    assert len(items) == 1
+    assert items[0].external_id == "twse-20260623-1010-2330"
+    assert items[0].url is not None
+    assert "snapshot=1010" in items[0].url
 
 
 def test_twse_source_batches_quote_requests_and_skips_non_equity_categories() -> None:

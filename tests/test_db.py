@@ -252,6 +252,77 @@ def test_upsert_signal_dedups_by_content_hash(tmp_path: Path) -> None:
     assert row["last_seen_at"] == "2026-06-16T11:00:00Z"
 
 
+def test_upsert_stock_mover_snapshots_preserve_history_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    first = SignalItem(
+        source="twse",
+        item_type="tw_stock_mover",
+        title="TSMC 上漲 3.10%",
+        observed_at=OBSERVED_AT,
+        external_id="twse-20260615-2000-2330",
+        url=(
+            "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
+            "?date=20260615&stockNo=2330&snapshot=2000"
+        ),
+        content="TWSE 2330 last 1000.00, prev close 970.00.",
+    )
+    second = SignalItem(
+        source="twse",
+        item_type="tw_stock_mover",
+        title="TSMC 上漲 3.10%",
+        observed_at=datetime(2026, 6, 15, 12, 10, tzinfo=UTC),
+        external_id="twse-20260615-2010-2330",
+        url=(
+            "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
+            "?date=20260615&stockNo=2330&snapshot=2010"
+        ),
+        content="TWSE 2330 last 1000.00, prev close 970.00.",
+    )
+
+    init_db(db_path)
+    first_result = upsert_signal(first, db_path=db_path)
+    second_result = upsert_signal(second, db_path=db_path)
+
+    assert first_result.action == "inserted"
+    assert second_result.action == "inserted"
+    assert second_result.matched_on is None
+    assert _count_signals(db_path) == 2
+
+
+def test_upsert_stock_mover_without_external_id_falls_back_to_url_dedup(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    url = "https://example.com/stock/2330"
+    first = SignalItem(
+        source="custom",
+        item_type="tw_stock_mover",
+        title="TSMC 上漲 3.10%",
+        observed_at=OBSERVED_AT,
+        url=url,
+        content="snapshot 1",
+        metadata={"stock_code": "2330"},
+    )
+    second = SignalItem(
+        source="custom",
+        item_type="tw_stock_mover",
+        title="TSMC 上漲 3.20%",
+        observed_at=datetime(2026, 6, 15, 12, 10, tzinfo=UTC),
+        url=url,
+        content="snapshot 2",
+        metadata={"stock_code": "2330"},
+    )
+
+    init_db(db_path)
+    first_result = upsert_signal(first, db_path=db_path)
+    second_result = upsert_signal(second, db_path=db_path)
+
+    assert first_result.action == "inserted"
+    assert second_result.action == "updated"
+    assert second_result.matched_on == "url"
+    assert _count_signals(db_path) == 1
+
+
 def test_update_signal_status_persists_new_value(tmp_path: Path) -> None:
     db_path = tmp_path / "signals.sqlite3"
     item = SignalItem(

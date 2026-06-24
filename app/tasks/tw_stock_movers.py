@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, Final
+from zoneinfo import ZoneInfo
 
 from app.config import (
     load_config,
@@ -30,6 +32,14 @@ _MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     ("twse", "TWSE listed (上市)"),
     ("tpex", "TPEx OTC (上櫃)"),
 )
+_MARKET_TELEGRAM_LABELS: Final[dict[str, str]] = {
+    "twse": "上市",
+    "tpex": "上櫃",
+}
+_SOURCE_WARNING_LABELS: Final[dict[str, str]] = {
+    "twse": "上市資料",
+    "tpex": "上櫃資料",
+}
 
 
 @dataclass(slots=True)
@@ -150,6 +160,8 @@ class TwStockMoversTask(BaseTask):
             env=env,
             summary=summary,
             market_reports=market_reports,
+            top_n=config.tasks.tw_stock_movers.top_n,
+            timezone_name=config.tasks.tw_stock_movers.timezone,
         )
 
         if summary.successful_sources == 0:
@@ -169,10 +181,14 @@ class TwStockMoversTask(BaseTask):
         env,
         summary: TwStockMoversSummary,
         market_reports: list[TwStockMarketReport],
+        top_n: int,
+        timezone_name: str,
     ) -> None:
         digest = _build_telegram_digest(
             summary=summary,
             market_reports=market_reports,
+            top_n=top_n,
+            timezone_name=timezone_name,
         )
         if not digest:
             print("telegram digest skipped: no stock movers to report")
@@ -246,53 +262,74 @@ def _build_telegram_digest(
     *,
     summary: TwStockMoversSummary,
     market_reports: list[TwStockMarketReport],
+    top_n: int,
+    timezone_name: str,
 ) -> str:
     reported_count = _count_reported_movers(market_reports)
     has_useful_output = reported_count > 0 or bool(summary.failed_sources)
     if not has_useful_output:
         return ""
 
-    lines = [
-        "signal-agent tw stock movers digest",
-        (
-            "counts: "
-            f"fetched={summary.fetched_count}, "
-            f"new={summary.new_count}, "
-            f"duplicates={summary.duplicate_count}, "
-            f"reported={reported_count}"
-        ),
-    ]
+    lines = [_build_telegram_heading(timezone_name)]
 
     for report in market_reports:
         if report.reported_count == 0:
             continue
         if report.gainers:
             lines.append("")
-            lines.append(f"{report.title} - Top gainers")
-            for item in report.gainers:
-                lines.append(f"- {_render_mover_line(item)}")
-                if item.content:
-                    lines.append(f"  {item.content}")
-                if item.url:
-                    lines.append(f"  {item.url}")
+            lines.append(
+                _build_telegram_section_title(
+                    market_key=report.market_key,
+                    top_n=top_n,
+                    direction="gainers",
+                )
+            )
+            for index, item in enumerate(report.gainers, start=1):
+                lines.append(_render_digest_ranked_line(index, item))
 
         if report.losers:
             lines.append("")
-            lines.append(f"{report.title} - Top losers")
-            for item in report.losers:
-                lines.append(f"- {_render_mover_line(item)}")
-                if item.content:
-                    lines.append(f"  {item.content}")
-                if item.url:
-                    lines.append(f"  {item.url}")
+            lines.append(
+                _build_telegram_section_title(
+                    market_key=report.market_key,
+                    top_n=top_n,
+                    direction="losers",
+                )
+            )
+            for index, item in enumerate(report.losers, start=1):
+                lines.append(_render_digest_ranked_line(index, item))
 
     if summary.failed_sources:
         lines.append("")
-        lines.append("Source failures")
+        lines.append("資料來源異常")
         for source_name, message in summary.failed_sources:
-            lines.append(f"- {source_name}: {message}")
+            lines.append(f"- {_source_warning_label(source_name)}：{message}")
 
     return "\n".join(lines)
+
+
+def _now_in_timezone(timezone_name: str) -> datetime:
+    return datetime.now(ZoneInfo(timezone_name))
+
+
+def _build_telegram_heading(timezone_name: str) -> str:
+    timestamp = _now_in_timezone(timezone_name).strftime("%Y-%m-%d %H:%M")
+    return f"台股漲跌幅快報 {timestamp}"
+
+
+def _build_telegram_section_title(
+    *,
+    market_key: str,
+    top_n: int,
+    direction: str,
+) -> str:
+    market_label = _MARKET_TELEGRAM_LABELS.get(market_key, market_key.upper())
+    direction_label = "漲幅" if direction == "gainers" else "跌幅"
+    return f"{market_label}前{top_n}{direction_label}"
+
+
+def _source_warning_label(source_name: str) -> str:
+    return _SOURCE_WARNING_LABELS.get(source_name, source_name)
 
 
 def _build_market_reports(
@@ -394,6 +431,18 @@ def _render_mover_line(item: SignalItem) -> str:
     if prefix:
         prefix += " "
     return f"{prefix}{change_percent:+.1f}% | {title}"
+
+
+def _render_digest_ranked_line(index: int, item: SignalItem) -> str:
+    stock_code = _stock_code(item)
+    company = _company_name(item)
+    change_percent = _change_percent(item)
+
+    prefix_parts = [part for part in (stock_code, company) if part]
+    prefix = " ".join(prefix_parts).strip()
+    if not prefix:
+        prefix = item.title.strip()
+    return f"{index}. {prefix} {change_percent:+.2f}%"
 
 
 def _stock_code(item: SignalItem) -> str:

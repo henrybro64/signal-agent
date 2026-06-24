@@ -36,7 +36,7 @@ class DummySource(BaseSource):
             SignalItem(
                 source=self.name,
                 item_type="tw_stock_mover",
-                title="TSMC gains 3.1%",
+                title="TSMC 上漲 3.1%",
                 observed_at=SAMPLE_OBSERVED_AT,
                 external_id="dummy-stock-2330",
                 content="Sample Taiwan stock mover used for development flows.",

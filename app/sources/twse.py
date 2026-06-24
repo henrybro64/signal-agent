@@ -324,6 +324,9 @@ class TwseSource(BaseSource):
             for member in members
         }
 
+        query_time_dict = query_time if isinstance(query_time, dict) else None
+        snapshot_key = _build_snapshot_key(_parse_query_time(query_time_dict))
+
         items: list[SignalItem] = []
         for row in rows:
             if not isinstance(row, dict):
@@ -351,7 +354,7 @@ class TwseSource(BaseSource):
 
             observed_at = _parse_observed_at(
                 row=row,
-                query_time=query_time if isinstance(query_time, dict) else None,
+                query_time=query_time_dict,
             )
             trade_date = _clean_text(row.get("d"))
             effective_trade_date = trade_date or observed_at.astimezone(
@@ -374,8 +377,12 @@ class TwseSource(BaseSource):
                         code=code,
                         trade_date=trade_date,
                         observed_at=observed_at,
+                        snapshot_key=snapshot_key,
                     ),
-                    external_id=f"twse-{effective_trade_date}-{code}",
+                    external_id=(
+                        f"twse-{effective_trade_date}-"
+                        f"{snapshot_key}-{code}"
+                    ),
                     content=_build_content(
                         code=code,
                         last_price=last_price,
@@ -486,6 +493,23 @@ def _first_numeric(*values: object) -> float | None:
     return None
 
 
+def _parse_query_time(query_time: dict[str, Any] | None) -> datetime:
+    if query_time is not None:
+        sys_date = _clean_text(query_time.get("sysDate"))
+        sys_time = _clean_text(query_time.get("sysTime"))
+        if sys_date and sys_time:
+            try:
+                localized = datetime.strptime(
+                    f"{sys_date} {sys_time}",
+                    "%Y%m%d %H:%M:%S",
+                ).replace(tzinfo=_TAIPEI)
+                return localized.astimezone(UTC)
+            except ValueError:
+                pass
+
+    return datetime.now(UTC)
+
+
 def _parse_observed_at(
     *,
     row: dict[str, Any],
@@ -524,11 +548,11 @@ def _direction_from_change(change: float) -> str:
 
 def _build_title(name: str, change_percent: float) -> str:
     if change_percent > 0:
-        verb = "gains"
+        verb = "上漲"
     elif change_percent < 0:
-        verb = "falls"
+        verb = "下跌"
     else:
-        verb = "moves"
+        verb = "持平"
     return f"{name} {verb} {abs(change_percent):.2f}%"
 
 
@@ -537,14 +561,19 @@ def _build_stock_url(
     code: str,
     trade_date: str,
     observed_at: datetime,
+    snapshot_key: str,
 ) -> str:
     effective_trade_date = trade_date or observed_at.astimezone(_TAIPEI).strftime(
         "%Y%m%d"
     )
     return (
         "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
-        f"?date={effective_trade_date}&stockNo={code}"
+        f"?date={effective_trade_date}&stockNo={code}&snapshot={snapshot_key}"
     )
+
+
+def _build_snapshot_key(observed_at: datetime) -> str:
+    return observed_at.astimezone(_TAIPEI).strftime("%H%M")
 
 
 def _build_content(
