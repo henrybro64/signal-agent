@@ -34,6 +34,37 @@ signal-agent --help
 python -m pytest
 ```
 
+## Docker Compose
+
+Use Docker Compose for an Ubuntu VM when you want a simple containerized run
+path before moving to k3s.
+
+```bash
+cp .env.example .env
+mkdir -p data
+docker compose build
+docker compose run --rm signal-agent python main.py --task dummy
+docker compose run --rm signal-agent python main.py --task fetch
+docker compose run --rm signal-agent python main.py --task job_search
+docker compose run --rm signal-agent python main.py --task tw_stock_movers
+docker compose run --rm signal-agent python main.py --telegram-test
+```
+
+Compose behavior:
+
+- `.env` is loaded when present via `env_file`; it is optional for
+  `docker compose build`, but task runs that need secrets still require it.
+- Rebuild the image after pulling code changes: `docker compose build`.
+- `config.yaml` is mounted read-only at `/app/config.yaml`.
+- SQLite data persists in `./data`, so the default database lives at
+  `/app/data/signals.sqlite3`.
+- The image bakes in the application code, but task commands remain
+  override-friendly through `docker compose run --rm signal-agent ...`.
+- If you want dry runs without Telegram delivery, set
+  `notifiers.telegram.enabled: false` in `config.yaml`.
+- If you use `LINKEDIN_EMAIL_SOURCE_PATH`, point it to a file under a mounted
+  path such as `/app/data/...`, or add another volume mount.
+
 ## Architecture
 
 `signal-agent` is organized around independent workflows that collect signals,
@@ -42,6 +73,8 @@ score them, and send digests:
 ```text
 config.yaml          # non-secret runtime settings
 .env                 # secrets such as OpenAI and Telegram credentials
+docker-compose.yml   # Ubuntu VM task runner with mounted config and data
+Dockerfile           # runtime image used by Docker Compose
 app/core/            # shared models, config, secrets, and SQLite storage
 app/sources/         # collectors that return SignalItem objects
 app/tasks/           # workflows such as job_search and tw_stock_movers
@@ -63,8 +96,11 @@ sql/                 # SQLite schema for signals and run history
 signal-agent/
 ├── README.md
 ├── .env.example
+├── .dockerignore
 ├── .gitignore
+├── Dockerfile
 ├── config.yaml
+├── docker-compose.yml
 ├── main.py
 ├── pyproject.toml
 ├── app/
