@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 .env
 *.env
+deploy/k3s/secret.yaml
 data/
 output/
 *.db

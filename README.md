@@ -65,6 +65,44 @@ Compose behavior:
 - If you use `LINKEDIN_EMAIL_SOURCE_PATH`, point it to a file under a mounted
   path such as `/app/data/...`, or add another volume mount.
 
+## k3s CronJobs
+
+Use the manifests in `deploy/k3s/` after you have a `signal-agent` image built
+from the repository `Dockerfile`.
+
+```bash
+cp deploy/k3s/secret.example.yaml deploy/k3s/secret.yaml
+# Edit deploy/k3s/secret.yaml and replace the placeholder values.
+kubectl apply -f deploy/k3s/namespace.yaml \
+  -f deploy/k3s/configmap.yaml \
+  -f deploy/k3s/pvc.yaml \
+  -f deploy/k3s/secret.yaml \
+  -f deploy/k3s/cronjob-job-search.yaml \
+  -f deploy/k3s/cronjob-tw-stock-movers.yaml
+```
+
+k3s deployment behavior:
+
+- The manifests create a dedicated `signal-agent` namespace.
+- Copy `secret.example.yaml` to `secret.yaml`, replace the `replace-me` values,
+  and apply `secret.yaml` only. The example file is not meant for production use.
+- `configmap.yaml` mounts the same `config.yaml` content at `/app/config.yaml`.
+- `pvc.yaml` persists SQLite data at `/app/data` for both CronJobs.
+- `cronjob-job-search.yaml` runs `job_search` at 08:05 and 18:05 in
+  `Asia/Taipei`.
+- `cronjob-tw-stock-movers.yaml` runs `tw_stock_movers` every 10 minutes on
+  weekdays in `Asia/Taipei`, while the task still guards Taiwan market hours
+  internally.
+- Job search is offset to `:05` so it does not start at the same minute as the
+  stock-mover CronJob on the shared SQLite volume.
+- `cronjob-job-search.yaml` sets `activeDeadlineSeconds: 1800` so a hung source
+  (for example `linkedin_email` IMAP) cannot block later schedules forever
+  under `concurrencyPolicy: Forbid`.
+- Both CronJobs set `spec.timeZone: Asia/Taipei` so schedules do not depend on
+  the controller manager timezone.
+- The CronJobs use `signal-agent:local` with `imagePullPolicy: IfNotPresent`;
+  change the image reference if your k3s nodes pull from a registry instead.
+
 ## Architecture
 
 `signal-agent` is organized around independent workflows that collect signals,
@@ -125,6 +163,11 @@ signal-agent/
 │   └── tasks/
 ├── deploy/
 │   └── k3s/
+│       ├── configmap.yaml
+│       ├── cronjob-job-search.yaml
+│       ├── cronjob-tw-stock-movers.yaml
+│       ├── namespace.yaml
+│       ├── pvc.yaml
 │       └── secret.example.yaml
 ├── sql/
 │   └── schema.sql
@@ -360,8 +403,8 @@ env = load_env_settings()
   `LINKEDIN_EMAIL_IMAP_USERNAME`, and `LINKEDIN_EMAIL_IMAP_PASSWORD`. Optional:
   `LINKEDIN_EMAIL_IMAP_MAILBOX` defaults to `INBOX`.
 - `.env.example` documents the expected local secret variables.
-- `deploy/k3s/secret.example.yaml` shows the Kubernetes Secret shape for later
-  deployment work.
+- `deploy/k3s/secret.example.yaml` shows the Kubernetes Secret shape. Copy it to
+  `deploy/k3s/secret.yaml`, fill in real values, and apply that file in k3s.
 
 ## Job Profile
 
