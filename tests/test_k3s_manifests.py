@@ -85,6 +85,7 @@ def test_job_search_cronjob_manifest_runs_expected_cli_command() -> None:
     assert manifest["metadata"]["namespace"] == "signal-agent"
     assert manifest["spec"]["timeZone"] == "Asia/Taipei"
     assert manifest["spec"]["schedule"] == "5 8,18 * * *"
+    assert manifest["spec"]["jobTemplate"]["spec"]["activeDeadlineSeconds"] == 1800
     assert container["image"] == "signal-agent:local"
     assert container["command"] == [
         "python",

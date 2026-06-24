@@ -95,6 +95,9 @@ k3s deployment behavior:
   internally.
 - Job search is offset to `:05` so it does not start at the same minute as the
   stock-mover CronJob on the shared SQLite volume.
+- `cronjob-job-search.yaml` sets `activeDeadlineSeconds: 1800` so a hung source
+  (for example `linkedin_email` IMAP) cannot block later schedules forever
+  under `concurrencyPolicy: Forbid`.
 - Both CronJobs set `spec.timeZone: Asia/Taipei` so schedules do not depend on
   the controller manager timezone.
 - The CronJobs use `signal-agent:local` with `imagePullPolicy: IfNotPresent`;

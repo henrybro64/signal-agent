@@ -16,6 +16,9 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # Fail the Job if it hangs (for example on a blocked linkedin_email IMAP
+      # call) so concurrencyPolicy: Forbid does not skip future schedules.
+      activeDeadlineSeconds: 1800
       backoffLimit: 1
       template:
         metadata:
