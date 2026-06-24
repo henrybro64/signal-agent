@@ -308,8 +308,12 @@ def _build_telegram_digest(
     return "\n".join(lines)
 
 
+def _now_in_timezone(timezone_name: str) -> datetime:
+    return datetime.now(ZoneInfo(timezone_name))
+
+
 def _build_telegram_heading(timezone_name: str) -> str:
-    timestamp = datetime.now(ZoneInfo(timezone_name)).strftime("%Y-%m-%d %H:%M")
+    timestamp = _now_in_timezone(timezone_name).strftime("%Y-%m-%d %H:%M")
     return f"台股漲跌幅快報 {timestamp}"
 
 

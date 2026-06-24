@@ -18,7 +18,7 @@ class StaticStockSource(BaseSource):
             SignalItem(
                 source=self.name,
                 item_type="tw_stock_mover",
-                title="TSMC gains 3.1%",
+                title="TSMC 上漲 3.1%",
                 observed_at=SAMPLE_OBSERVED_AT,
                 external_id="2330-1",
                 content="Taiwan semiconductor leader jumps on AI demand.",
@@ -33,7 +33,7 @@ class StaticStockSource(BaseSource):
             SignalItem(
                 source=self.name,
                 item_type="tw_stock_mover",
-                title="MediaTek falls 1.2%",
+                title="MediaTek 下跌 1.2%",
                 observed_at=SAMPLE_OBSERVED_AT,
                 external_id="2454-1",
                 content="Pullback after a recent multi-day rally.",
@@ -100,7 +100,7 @@ class HistoricalTwseStockSource(BaseSource):
             SignalItem(
                 source=self.name,
                 item_type="tw_stock_mover",
-                title="TSMC gains 3.1%",
+                title="TSMC 上漲 3.1%",
                 observed_at=SAMPLE_OBSERVED_AT,
                 external_id="twse-20260616-090000-2330",
                 url=(
@@ -119,7 +119,7 @@ class HistoricalTwseStockSource(BaseSource):
             SignalItem(
                 source=self.name,
                 item_type="tw_stock_mover",
-                title="TSMC gains 3.1%",
+                title="TSMC 上漲 3.1%",
                 observed_at=SAMPLE_OBSERVED_AT.replace(minute=10),
                 external_id="twse-20260616-091000-2330",
                 url=(
@@ -190,7 +190,7 @@ def test_tw_stock_movers_task_filters_and_persists_stock_items(
     )
     assert "ignored 1 non-stock signal(s)" in captured.out
     assert "TWSE listed (上市)" in captured.out
-    assert "2330 TSMC +3.1% | TSMC gains 3.1%" in captured.out
+    assert "2330 TSMC +3.1% | TSMC 上漲 3.1%" in captured.out
     assert "telegram digest skipped: notifier disabled in config" in captured.out
     assert _count_rows(db_path, "signals") == 1
     assert _signal_run_statuses(db_path) == ["completed"]
@@ -521,6 +521,25 @@ def test_tw_stock_movers_task_sends_partial_failure_warning_in_digest(
     assert "上櫃資料：tpex quote provider timeout" in sent_messages[0]
 
 
+def test_build_telegram_heading_uses_configured_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    fixed = datetime(2026, 6, 12, 10, 10, tzinfo=ZoneInfo("Asia/Taipei"))
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "_now_in_timezone",
+        lambda timezone_name: fixed,
+    )
+
+    assert (
+        tw_stock_movers_task_module._build_telegram_heading("Asia/Taipei")
+        == "台股漲跌幅快報 2026-06-12 10:10"
+    )
+
+
 def test_tw_stock_movers_task_respects_disabled_config(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
@@ -566,7 +585,7 @@ def _stock_mover_item(
     market: str = "twse",
     exchange: str = "tse",
 ) -> SignalItem:
-    direction = "gains" if change_percent > 0 else "falls"
+    direction = "上漲" if change_percent > 0 else "下跌"
     return SignalItem(
         source=market,
         item_type="tw_stock_mover",

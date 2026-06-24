@@ -99,7 +99,7 @@ def test_main_fetch_task_command(
     assert "fetched 2 signal(s) from 1 successful source(s)" in result.stdout
     assert "persisted 2 inserted / 0 updated" in result.stdout
     assert "Python Backend Engineer" in result.stdout
-    assert "TSMC gains 3.1%" in result.stdout
+    assert "TSMC 上漲 3.1%" in result.stdout
 
 
 def test_main_job_search_task_command(

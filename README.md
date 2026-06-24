@@ -181,6 +181,33 @@ a digest are not rescored or included again.
 fetches. While the market is open, it persists only `tw_stock_mover` items,
 ignores non-stock signals from mixed sources such as `dummy`, and optionally
 delivers a Telegram digest with separate 上市 and 上櫃 top gainer/loser sections.
+Each scheduled run stores a minute-bucketed snapshot in SQLite so a 10-minute
+cron can build price-move history without overwriting earlier rows.
+
+Telegram output is in Traditional Chinese:
+
+```text
+台股漲跌幅快報 2026-06-12 10:10
+
+上市前20漲幅
+1. 2330 台積電 +3.51%
+...
+
+上市前20跌幅
+...
+
+上櫃前20漲幅
+...
+
+上櫃前20跌幅
+...
+
+資料來源異常
+- 上櫃資料：quote provider timeout
+```
+
+If one market source fails, the digest still includes the successful market and
+adds a short warning under `資料來源異常`.
 
 ## Taiwan market hours
 

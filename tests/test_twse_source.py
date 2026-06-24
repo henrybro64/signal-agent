@@ -41,11 +41,11 @@ def test_twse_source_fetch_normalizes_stock_movers() -> None:
     first_item = items[0]
     assert first_item.source == "twse"
     assert first_item.item_type == "tw_stock_mover"
-    assert first_item.title == "TSMC gains 1.00%"
-    assert first_item.external_id == "twse-20260623-090500-2330"
+    assert first_item.title == "TSMC 上漲 1.00%"
+    assert first_item.external_id == "twse-20260623-0905-2330"
     assert first_item.url == (
         "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
-        "?date=20260623&stockNo=2330&snapshot=090500"
+        "?date=20260623&stockNo=2330&snapshot=0905"
     )
     assert first_item.observed_at == datetime.fromtimestamp(1782176700, tz=UTC)
     assert first_item.content == (
@@ -64,7 +64,7 @@ def test_twse_source_fetch_normalizes_stock_movers() -> None:
     assert first_item.metadata["volume"] == 12345678
 
     second_item = items[1]
-    assert second_item.title == "MediaTek falls 2.00%"
+    assert second_item.title == "MediaTek 下跌 2.00%"
     assert second_item.metadata["stock_code"] == "2454"
     assert second_item.metadata["price"] == 1470.0
     assert second_item.metadata["change_amount"] == -30.0

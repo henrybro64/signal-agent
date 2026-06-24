@@ -522,11 +522,11 @@ def _direction_from_change(change: float) -> str:
 
 def _build_title(name: str, change_percent: float) -> str:
     if change_percent > 0:
-        verb = "gains"
+        verb = "上漲"
     elif change_percent < 0:
-        verb = "falls"
+        verb = "下跌"
     else:
-        verb = "moves"
+        verb = "持平"
     return f"{name} {verb} {abs(change_percent):.2f}%"
 
 
@@ -559,7 +559,7 @@ def _build_content(
 
 
 def _build_snapshot_key(observed_at: datetime) -> str:
-    return observed_at.astimezone(_TAIPEI).strftime("%H%M%S")
+    return observed_at.astimezone(_TAIPEI).strftime("%H%M")
 
 
 def _compact_metadata(
