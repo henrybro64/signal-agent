@@ -65,6 +65,30 @@ Compose behavior:
 - If you use `LINKEDIN_EMAIL_SOURCE_PATH`, point it to a file under a mounted
   path such as `/app/data/...`, or add another volume mount.
 
+## k3s CronJobs
+
+Use the manifests in `deploy/k3s/` after you have a `signal-agent` image built
+from the repository `Dockerfile` and after you replace the placeholder values
+in `secret.example.yaml`.
+
+```bash
+kubectl apply -f deploy/k3s/
+```
+
+k3s deployment behavior:
+
+- The manifests create a dedicated `signal-agent` namespace.
+- `secret.example.yaml` is intentionally placeholder-only; replace the
+  `replace-me` values before using it in a real cluster.
+- `configmap.yaml` mounts the same `config.yaml` content at `/app/config.yaml`.
+- `pvc.yaml` persists SQLite data at `/app/data`.
+- `cronjob-job-search.yaml` runs `job_search` at 08:00 and 18:00.
+- `cronjob-tw-stock-movers.yaml` runs `tw_stock_movers` every 10 minutes on
+  weekdays, while the task still guards Taiwan market hours internally.
+- Both CronJobs assume the cluster evaluates cron schedules in `Asia/Taipei`.
+- The CronJobs use `signal-agent:local` with `imagePullPolicy: IfNotPresent`;
+  change the image reference if your k3s nodes pull from a registry instead.
+
 ## Architecture
 
 `signal-agent` is organized around independent workflows that collect signals,
@@ -125,6 +149,11 @@ signal-agent/
 │   └── tasks/
 ├── deploy/
 │   └── k3s/
+│       ├── configmap.yaml
+│       ├── cronjob-job-search.yaml
+│       ├── cronjob-tw-stock-movers.yaml
+│       ├── namespace.yaml
+│       ├── pvc.yaml
 │       └── secret.example.yaml
 ├── sql/
 │   └── schema.sql

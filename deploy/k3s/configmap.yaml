@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: signal-agent-config
+  namespace: signal-agent
+  labels:
+    app.kubernetes.io/name: signal-agent
+data:
+  config.yaml: |
+    agent:
+      timezone: Asia/Taipei
+      digest_time: "20:00"
+
+    tasks:
+      job_search:
+        enabled: true
+        sources:
+          - job104
+          - linkedin_email
+        keywords:
+          - python
+          - backend
+          - agent
+        locations:
+          - Taiwan
+      tw_stock_movers:
+        enabled: true
+        top_n: 20
+        timezone: Asia/Taipei
+
+    notifiers:
+      telegram:
+        enabled: true
+
+    scoring:
+      freshness_weight: 0.6
+      priority_weight: 0.4
+      llm_enabled: false
+      llm_model: gpt-4o-mini
