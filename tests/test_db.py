@@ -289,6 +289,40 @@ def test_upsert_stock_mover_snapshots_preserve_history_rows(tmp_path: Path) -> N
     assert _count_signals(db_path) == 2
 
 
+def test_upsert_stock_mover_without_external_id_falls_back_to_url_dedup(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    url = "https://example.com/stock/2330"
+    first = SignalItem(
+        source="custom",
+        item_type="tw_stock_mover",
+        title="TSMC 上漲 3.10%",
+        observed_at=OBSERVED_AT,
+        url=url,
+        content="snapshot 1",
+        metadata={"stock_code": "2330"},
+    )
+    second = SignalItem(
+        source="custom",
+        item_type="tw_stock_mover",
+        title="TSMC 上漲 3.20%",
+        observed_at=datetime(2026, 6, 15, 12, 10, tzinfo=UTC),
+        url=url,
+        content="snapshot 2",
+        metadata={"stock_code": "2330"},
+    )
+
+    init_db(db_path)
+    first_result = upsert_signal(first, db_path=db_path)
+    second_result = upsert_signal(second, db_path=db_path)
+
+    assert first_result.action == "inserted"
+    assert second_result.action == "updated"
+    assert second_result.matched_on == "url"
+    assert _count_signals(db_path) == 1
+
+
 def test_update_signal_status_persists_new_value(tmp_path: Path) -> None:
     db_path = tmp_path / "signals.sqlite3"
     item = SignalItem(

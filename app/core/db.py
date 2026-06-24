@@ -405,11 +405,9 @@ def _find_existing_signal(
     external_id: str | None,
     content_hash: str | None,
 ) -> tuple[sqlite3.Row | None, DedupMatch | None]:
-    # Ordered lookup matches the issue requirements exactly.
-    if item_type == "tw_stock_mover":
-        if external_id is None:
-            return None, None
-
+    # Stock movers use snapshot external IDs when present; otherwise fall back
+    # to the normal URL/content-hash dedup path for custom sources.
+    if item_type == "tw_stock_mover" and external_id is not None:
         row = connection.execute(
             """
             SELECT *

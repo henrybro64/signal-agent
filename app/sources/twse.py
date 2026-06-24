@@ -324,6 +324,9 @@ class TwseSource(BaseSource):
             for member in members
         }
 
+        query_time_dict = query_time if isinstance(query_time, dict) else None
+        snapshot_key = _build_snapshot_key(_parse_query_time(query_time_dict))
+
         items: list[SignalItem] = []
         for row in rows:
             if not isinstance(row, dict):
@@ -351,7 +354,7 @@ class TwseSource(BaseSource):
 
             observed_at = _parse_observed_at(
                 row=row,
-                query_time=query_time if isinstance(query_time, dict) else None,
+                query_time=query_time_dict,
             )
             trade_date = _clean_text(row.get("d"))
             effective_trade_date = trade_date or observed_at.astimezone(
@@ -374,11 +377,11 @@ class TwseSource(BaseSource):
                         code=code,
                         trade_date=trade_date,
                         observed_at=observed_at,
-                        snapshot_key=_build_snapshot_key(observed_at),
+                        snapshot_key=snapshot_key,
                     ),
                     external_id=(
                         f"twse-{effective_trade_date}-"
-                        f"{_build_snapshot_key(observed_at)}-{code}"
+                        f"{snapshot_key}-{code}"
                     ),
                     content=_build_content(
                         code=code,
@@ -488,6 +491,23 @@ def _first_numeric(*values: object) -> float | None:
         if parsed is not None:
             return parsed
     return None
+
+
+def _parse_query_time(query_time: dict[str, Any] | None) -> datetime:
+    if query_time is not None:
+        sys_date = _clean_text(query_time.get("sysDate"))
+        sys_time = _clean_text(query_time.get("sysTime"))
+        if sys_date and sys_time:
+            try:
+                localized = datetime.strptime(
+                    f"{sys_date} {sys_time}",
+                    "%Y%m%d %H:%M:%S",
+                ).replace(tzinfo=_TAIPEI)
+                return localized.astimezone(UTC)
+            except ValueError:
+                pass
+
+    return datetime.now(UTC)
 
 
 def _parse_observed_at(
