@@ -42,7 +42,7 @@ def test_tpex_source_fetch_normalizes_stock_movers() -> None:
     assert first_item.source == "tpex"
     assert first_item.item_type == "tw_stock_mover"
     assert first_item.title == "穩懋 gains 3.51%"
-    assert first_item.external_id == "tpex-20260623-3105"
+    assert first_item.external_id == "tpex-20260623-142959-3105"
     assert first_item.observed_at == datetime.fromtimestamp(1782196199, tz=UTC)
     assert first_item.content == (
         "TPEx 3105 last 560.00, prev close 541.00, change +19.00 (+3.51%), "

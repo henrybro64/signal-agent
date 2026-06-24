@@ -88,6 +88,7 @@ def upsert_signal(
         existing_row, matched_on = _find_existing_signal(
             connection,
             source=item.source,
+            item_type=item.item_type,
             url=url,
             external_id=external_id,
             content_hash=content_hash,
@@ -399,11 +400,30 @@ def _find_existing_signal(
     connection: sqlite3.Connection,
     *,
     source: str,
+    item_type: str,
     url: str | None,
     external_id: str | None,
     content_hash: str | None,
 ) -> tuple[sqlite3.Row | None, DedupMatch | None]:
     # Ordered lookup matches the issue requirements exactly.
+    if item_type == "tw_stock_mover":
+        if external_id is None:
+            return None, None
+
+        row = connection.execute(
+            """
+            SELECT *
+            FROM signals
+            WHERE source = ? AND external_id = ?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (source, external_id),
+        ).fetchone()
+        if row is not None:
+            return row, "source_external_id"
+        return None, None
+
     if url is not None:
         row = connection.execute(
             "SELECT * FROM signals WHERE url = ? ORDER BY id LIMIT 1",
@@ -438,12 +458,16 @@ def _find_existing_signal(
 
 
 def _build_content_hash(item: SignalItem) -> str:
+    payload_data = {
+        "item_type": item.item_type.strip(),
+        "title": item.title.strip(),
+        "content": (item.content or "").strip(),
+    }
+    if item.item_type == "tw_stock_mover":
+        payload_data["external_id"] = (item.external_id or "").strip()
+
     payload = json.dumps(
-        {
-            "item_type": item.item_type.strip(),
-            "title": item.title.strip(),
-            "content": (item.content or "").strip(),
-        },
+        payload_data,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

@@ -370,7 +370,10 @@ class TpexSource(BaseSource):
                     item_type="tw_stock_mover",
                     title=_build_title(short_name, change_percent),
                     observed_at=observed_at,
-                    external_id=f"tpex-{effective_trade_date}-{code}",
+                    external_id=(
+                        f"tpex-{effective_trade_date}-"
+                        f"{_build_snapshot_key(observed_at)}-{code}"
+                    ),
                     content=_build_content(
                         code=code,
                         last_price=last_price,
@@ -553,6 +556,10 @@ def _build_content(
     if low_price is not None:
         parts.append(f"low {low_price:.2f}")
     return ", ".join(parts) + "."
+
+
+def _build_snapshot_key(observed_at: datetime) -> str:
+    return observed_at.astimezone(_TAIPEI).strftime("%H%M%S")
 
 
 def _compact_metadata(

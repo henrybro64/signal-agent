@@ -374,8 +374,12 @@ class TwseSource(BaseSource):
                         code=code,
                         trade_date=trade_date,
                         observed_at=observed_at,
+                        snapshot_key=_build_snapshot_key(observed_at),
                     ),
-                    external_id=f"twse-{effective_trade_date}-{code}",
+                    external_id=(
+                        f"twse-{effective_trade_date}-"
+                        f"{_build_snapshot_key(observed_at)}-{code}"
+                    ),
                     content=_build_content(
                         code=code,
                         last_price=last_price,
@@ -537,14 +541,19 @@ def _build_stock_url(
     code: str,
     trade_date: str,
     observed_at: datetime,
+    snapshot_key: str,
 ) -> str:
     effective_trade_date = trade_date or observed_at.astimezone(_TAIPEI).strftime(
         "%Y%m%d"
     )
     return (
         "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
-        f"?date={effective_trade_date}&stockNo={code}"
+        f"?date={effective_trade_date}&stockNo={code}&snapshot={snapshot_key}"
     )
+
+
+def _build_snapshot_key(observed_at: datetime) -> str:
+    return observed_at.astimezone(_TAIPEI).strftime("%H%M%S")
 
 
 def _build_content(

@@ -252,6 +252,43 @@ def test_upsert_signal_dedups_by_content_hash(tmp_path: Path) -> None:
     assert row["last_seen_at"] == "2026-06-16T11:00:00Z"
 
 
+def test_upsert_stock_mover_snapshots_preserve_history_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    first = SignalItem(
+        source="twse",
+        item_type="tw_stock_mover",
+        title="TSMC gains 3.10%",
+        observed_at=OBSERVED_AT,
+        external_id="twse-20260615-090000-2330",
+        url=(
+            "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
+            "?date=20260615&stockNo=2330&snapshot=090000"
+        ),
+        content="TWSE 2330 last 1000.00, prev close 970.00.",
+    )
+    second = SignalItem(
+        source="twse",
+        item_type="tw_stock_mover",
+        title="TSMC gains 3.10%",
+        observed_at=datetime(2026, 6, 15, 12, 10, tzinfo=UTC),
+        external_id="twse-20260615-091000-2330",
+        url=(
+            "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
+            "?date=20260615&stockNo=2330&snapshot=091000"
+        ),
+        content="TWSE 2330 last 1000.00, prev close 970.00.",
+    )
+
+    init_db(db_path)
+    first_result = upsert_signal(first, db_path=db_path)
+    second_result = upsert_signal(second, db_path=db_path)
+
+    assert first_result.action == "inserted"
+    assert second_result.action == "inserted"
+    assert second_result.matched_on is None
+    assert _count_signals(db_path) == 2
+
+
 def test_update_signal_status_persists_new_value(tmp_path: Path) -> None:
     db_path = tmp_path / "signals.sqlite3"
     item = SignalItem(

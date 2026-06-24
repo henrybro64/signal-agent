@@ -42,10 +42,10 @@ def test_twse_source_fetch_normalizes_stock_movers() -> None:
     assert first_item.source == "twse"
     assert first_item.item_type == "tw_stock_mover"
     assert first_item.title == "TSMC gains 1.00%"
-    assert first_item.external_id == "twse-20260623-2330"
+    assert first_item.external_id == "twse-20260623-090500-2330"
     assert first_item.url == (
         "https://www.twse.com.tw/zh/page/trading/exchange/STOCK_DAY.html"
-        "?date=20260623&stockNo=2330"
+        "?date=20260623&stockNo=2330&snapshot=090500"
     )
     assert first_item.observed_at == datetime.fromtimestamp(1782176700, tz=UTC)
     assert first_item.content == (
