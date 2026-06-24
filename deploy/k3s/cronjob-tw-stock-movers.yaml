@@ -7,9 +7,9 @@ metadata:
     app.kubernetes.io/name: signal-agent
     app.kubernetes.io/component: tw-stock-movers
 spec:
-  # Run every 10 minutes on weekdays.
-  # This cron expression assumes the cluster evaluates schedules in Asia/Taipei.
-  # The task still checks Taiwan market hours internally, so off-hours runs no-op.
+  timeZone: Asia/Taipei
+  # Run every 10 minutes on weekdays. The task still checks Taiwan market hours
+  # internally, so off-hours runs no-op.
   schedule: "*/10 * * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1

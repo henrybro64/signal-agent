@@ -24,6 +24,8 @@ def test_k3s_yaml_files_are_parseable() -> None:
     for path in yaml_paths:
         manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert isinstance(manifest, dict), path.name
+
+
 def test_namespace_manifest_creates_signal_agent_namespace() -> None:
     manifest = _load_yaml("namespace.yaml")
 
@@ -81,7 +83,8 @@ def test_job_search_cronjob_manifest_runs_expected_cli_command() -> None:
     assert manifest["kind"] == "CronJob"
     assert manifest["metadata"]["name"] == "job-search-daily"
     assert manifest["metadata"]["namespace"] == "signal-agent"
-    assert manifest["spec"]["schedule"] == "0 8,18 * * *"
+    assert manifest["spec"]["timeZone"] == "Asia/Taipei"
+    assert manifest["spec"]["schedule"] == "5 8,18 * * *"
     assert container["image"] == "signal-agent:local"
     assert container["command"] == [
         "python",
@@ -126,6 +129,7 @@ def test_tw_stock_movers_cronjob_manifest_runs_expected_cli_command() -> None:
     assert manifest["kind"] == "CronJob"
     assert manifest["metadata"]["name"] == "tw-stock-movers-every-10-min"
     assert manifest["metadata"]["namespace"] == "signal-agent"
+    assert manifest["spec"]["timeZone"] == "Asia/Taipei"
     assert manifest["spec"]["schedule"] == "*/10 * * * 1-5"
     assert container["image"] == "signal-agent:local"
     assert container["command"] == [
@@ -156,7 +160,16 @@ def test_cronjob_manifest_comments_explain_schedule_assumptions() -> None:
 
     assert "Asia/Taipei" in job_search_text
     assert "Asia/Taipei" in tw_stock_text
-    assert "market hours internally" in tw_stock_text
+    assert "Taiwan market hours" in tw_stock_text
+    assert "off-hours runs no-op" in tw_stock_text
+    assert ":05 offset" in job_search_text
+
+
+def test_secret_example_is_not_gitignored_template_only() -> None:
+    secret_example = (K3S_DIR / "secret.example.yaml").read_text(encoding="utf-8")
+
+    assert "replace-me" in secret_example
+    assert "Example only" in secret_example
 
 
 def _load_yaml(name: str) -> dict:
