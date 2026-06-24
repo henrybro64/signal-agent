@@ -1,0 +1,14 @@
+services:
+  signal-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: signal-agent:local
+    working_dir: /app
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    command: ["python", "main.py", "--help"]
