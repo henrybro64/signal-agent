@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -271,6 +272,20 @@ def test_tw_stock_movers_task_raises_when_all_sources_fail(
 
     captured = capsys.readouterr()
     assert "source failed: failing_stock: quote provider timeout" in captured.out
+    structured_logs = _parse_structured_logs(captured.out)
+    source_failure_log = next(
+        log for log in structured_logs if log["event"] == "source_run_failed"
+    )
+    task_failure_log = next(
+        log for log in structured_logs if log["event"] == "task_failed"
+    )
+    assert source_failure_log["task_name"] == "tw_stock_movers"
+    assert source_failure_log["source_name"] == "failing_stock"
+    assert isinstance(source_failure_log["run_id"], int)
+    assert "RuntimeError: quote provider timeout" in source_failure_log["stack_trace"]
+    assert "ValueError: All configured Taiwan stock-mover sources failed" in (
+        task_failure_log["stack_trace"]
+    )
     assert _signal_run_statuses(db_path) == ["failed"]
 
 
@@ -658,3 +673,11 @@ def _signal_run_statuses(db_path: Path) -> list[str]:
             "SELECT status FROM signal_runs ORDER BY id"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def _parse_structured_logs(output: str) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in output.splitlines()
+        if line.startswith("{")
+    ]

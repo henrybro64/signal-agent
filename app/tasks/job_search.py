@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,74 +65,82 @@ class JobSearchSummary:
     ignored_non_job_count: int = 0
 
 
+@dataclass(slots=True, frozen=True)
+class NotificationOutcome:
+    """Summarize the Telegram notification phase for structured logs."""
+
+    status: str
+    notified_count: int = 0
+
+
 class JobSearchTask(BaseTask):
     """Fetch, dedup, score, persist, and notify for job-search signals."""
 
     name: ClassVar[str] = "job_search"
 
     def run(self) -> None:
-        config = load_config(self.config_path)
-        if not config.tasks.job_search.enabled:
-            raise ValueError("Task 'job_search' is disabled in config")
-
-        env = load_env_settings()
-        validate_llm_scoring_secrets(
-            llm_enabled=config.scoring.llm_enabled,
-            env=env,
-        )
-
         db_path = _resolve_db_path()
-        init_db(db_path)
-
-        summary = JobSearchSummary()
-        sources = build_job_search_sources(
-            config,
-            on_unknown=summary.unsupported_sources.append,
+        self.emit_log(
+            "task_started",
+            message="Job search task started",
+            db_path=str(db_path),
         )
-        if not sources:
-            if summary.unsupported_sources:
-                unsupported = ", ".join(summary.unsupported_sources)
-                raise ValueError(
-                    "No supported job-search sources are configured. "
-                    f"Unsupported sources: {unsupported}"
+
+        try:
+            config = load_config(self.config_path)
+            if not config.tasks.job_search.enabled:
+                raise ValueError("Task 'job_search' is disabled in config")
+
+            env = load_env_settings()
+            validate_llm_scoring_secrets(
+                llm_enabled=config.scoring.llm_enabled,
+                env=env,
+            )
+
+            init_db(db_path)
+
+            summary = JobSearchSummary()
+            sources = build_job_search_sources(
+                config,
+                on_unknown=summary.unsupported_sources.append,
+            )
+            if not sources:
+                if summary.unsupported_sources:
+                    unsupported = ", ".join(summary.unsupported_sources)
+                    raise ValueError(
+                        "No supported job-search sources are configured. "
+                        f"Unsupported sources: {unsupported}"
+                    )
+                raise ValueError("No job-search sources are configured.")
+
+            scorer = _build_job_scorer(config=config, env=env)
+
+            for source in sources:
+                run_id = start_signal_run(source.name, db_path=db_path)
+                self.emit_log(
+                    "source_run_started",
+                    message="Source run started",
+                    db_path=str(db_path),
+                    source_name=source.name,
+                    run_id=run_id,
                 )
-            raise ValueError("No job-search sources are configured.")
+                try:
+                    fetched_items = source.fetch()
+                    job_items = [
+                        item for item in fetched_items if item.item_type == "job"
+                    ]
+                    ignored_count = len(fetched_items) - len(job_items)
+                    summary.ignored_non_job_count += ignored_count
+                    summary.fetched_count += len(job_items)
 
-        scorer = _build_job_scorer(config=config, env=env)
+                    inserted_count = 0
+                    updated_count = 0
 
-        for source in sources:
-            run_id = start_signal_run(source.name, db_path=db_path)
-            try:
-                fetched_items = source.fetch()
-                job_items = [
-                    item for item in fetched_items if item.item_type == "job"
-                ]
-                summary.ignored_non_job_count += len(fetched_items) - len(job_items)
-                summary.fetched_count += len(job_items)
-
-                inserted_count = 0
-                updated_count = 0
-
-                for item in job_items:
-                    result = upsert_signal(item, db_path=db_path)
-                    if result.action == "inserted":
-                        inserted_count += 1
-                        summary.new_count += 1
-                        self._score_and_record(
-                            item=item,
-                            signal_id=result.signal_id,
-                            summary=summary,
-                            scorer=scorer,
-                            db_path=db_path,
-                        )
-                    else:
-                        updated_count += 1
-                        summary.duplicate_count += 1
-                        evaluation_state = get_signal_evaluation_state(
-                            result.signal_id,
-                            db_path=db_path,
-                        )
-                        if evaluation_state == "unscored":
+                    for item in job_items:
+                        result = upsert_signal(item, db_path=db_path)
+                        if result.action == "inserted":
+                            inserted_count += 1
+                            summary.new_count += 1
                             self._score_and_record(
                                 item=item,
                                 signal_id=result.signal_id,
@@ -139,57 +148,154 @@ class JobSearchTask(BaseTask):
                                 scorer=scorer,
                                 db_path=db_path,
                             )
-                        elif evaluation_state == "pending_digest":
-                            self._record_pending_digest_job(
-                                item=item,
-                                signal_id=result.signal_id,
-                                summary=summary,
+                        else:
+                            updated_count += 1
+                            summary.duplicate_count += 1
+                            evaluation_state = get_signal_evaluation_state(
+                                result.signal_id,
                                 db_path=db_path,
                             )
+                            if evaluation_state == "unscored":
+                                self._score_and_record(
+                                    item=item,
+                                    signal_id=result.signal_id,
+                                    summary=summary,
+                                    scorer=scorer,
+                                    db_path=db_path,
+                                )
+                            elif evaluation_state == "pending_digest":
+                                self._record_pending_digest_job(
+                                    item=item,
+                                    signal_id=result.signal_id,
+                                    summary=summary,
+                                    db_path=db_path,
+                                )
 
-                finish_signal_run(
-                    run_id,
-                    status="completed",
-                    fetched_count=len(job_items),
-                    inserted_count=inserted_count,
-                    updated_count=updated_count,
+                    finish_signal_run(
+                        run_id,
+                        status="completed",
+                        fetched_count=len(job_items),
+                        inserted_count=inserted_count,
+                        updated_count=updated_count,
+                        db_path=db_path,
+                    )
+                    self.emit_log(
+                        "source_run_completed",
+                        message="Source run completed",
+                        db_path=str(db_path),
+                        source_name=source.name,
+                        run_id=run_id,
+                        fetched_count=len(fetched_items),
+                        accepted_count=len(job_items),
+                        ignored_count=ignored_count,
+                        new_count=inserted_count,
+                        duplicate_count=updated_count,
+                        skipped_count=updated_count + ignored_count,
+                    )
+                    summary.successful_sources += 1
+                except Exception as exc:
+                    finish_signal_run(
+                        run_id,
+                        status="failed",
+                        error=str(exc),
+                        db_path=db_path,
+                    )
+                    summary.failed_sources.append((source.name, str(exc)))
+                    self.emit_log(
+                        "source_run_failed",
+                        message="Source run failed",
+                        level=logging.ERROR,
+                        exc_info=exc,
+                        db_path=str(db_path),
+                        source_name=source.name,
+                        run_id=run_id,
+                        error=str(exc),
+                    )
+
+            if summary.successful_sources == 0:
+                failure_summary = "; ".join(
+                    f"{source_name}: {message}"
+                    for source_name, message in summary.failed_sources
+                )
+                print(
+                    "\n".join(
+                        _build_console_summary(self.config_path, db_path, summary)
+                    )
+                )
+                notification = self._maybe_send_telegram_digest(
+                    config=config,
+                    env=env,
+                    summary=summary,
                     db_path=db_path,
                 )
-                summary.successful_sources += 1
-            except Exception as exc:
-                finish_signal_run(
-                    run_id,
-                    status="failed",
-                    error=str(exc),
-                    db_path=db_path,
+                self.emit_log(
+                    "task_summary",
+                    message="Job search task summary",
+                    db_path=str(db_path),
+                    task_status="failed",
+                    fetched_count=summary.fetched_count,
+                    new_count=summary.new_count,
+                    duplicate_count=summary.duplicate_count,
+                    skipped_count=(
+                        summary.duplicate_count + summary.ignored_non_job_count
+                    ),
+                    notified_count=notification.notified_count,
+                    notification_status=notification.status,
+                    successful_source_count=summary.successful_sources,
+                    failed_source_count=len(summary.failed_sources),
+                    unsupported_source_count=len(summary.unsupported_sources),
+                    ignored_count=summary.ignored_non_job_count,
+                    strong_match_count=len(summary.strong_matches),
+                    maybe_count=len(summary.maybe_matches),
+                    rejected_count=len(summary.rejected_jobs),
+                    unsupported_sources=summary.unsupported_sources,
                 )
-                summary.failed_sources.append((source.name, str(exc)))
+                raise ValueError(
+                    "All configured job-search sources failed: "
+                    f"{failure_summary}"
+                )
 
-        if summary.successful_sources == 0:
-            failure_summary = "; ".join(
-                f"{source_name}: {message}"
-                for source_name, message in summary.failed_sources
+            print(
+                "\n".join(_build_console_summary(self.config_path, db_path, summary))
             )
-            print("\n".join(_build_console_summary(self.config_path, db_path, summary)))
-            self._maybe_send_telegram_digest(
+
+            notification = self._maybe_send_telegram_digest(
                 config=config,
                 env=env,
                 summary=summary,
                 db_path=db_path,
             )
-            raise ValueError(
-                "All configured job-search sources failed: "
-                f"{failure_summary}"
+            self.emit_log(
+                "task_completed",
+                message="Job search task completed",
+                db_path=str(db_path),
+                fetched_count=summary.fetched_count,
+                new_count=summary.new_count,
+                duplicate_count=summary.duplicate_count,
+                skipped_count=(
+                    summary.duplicate_count + summary.ignored_non_job_count
+                ),
+                notified_count=notification.notified_count,
+                notification_status=notification.status,
+                successful_source_count=summary.successful_sources,
+                failed_source_count=len(summary.failed_sources),
+                unsupported_source_count=len(summary.unsupported_sources),
+                ignored_count=summary.ignored_non_job_count,
+                strong_match_count=len(summary.strong_matches),
+                maybe_count=len(summary.maybe_matches),
+                rejected_count=len(summary.rejected_jobs),
+                unsupported_sources=summary.unsupported_sources,
             )
-
-        print("\n".join(_build_console_summary(self.config_path, db_path, summary)))
-
-        self._maybe_send_telegram_digest(
-            config=config,
-            env=env,
-            summary=summary,
-            db_path=db_path,
-        )
+        except Exception as exc:
+            self.emit_log(
+                "task_failed",
+                message="Job search task failed",
+                level=logging.ERROR,
+                exc_info=exc,
+                db_path=str(db_path),
+                error=str(exc),
+            )
+            raise
 
     def _maybe_send_telegram_digest(
         self,
@@ -198,27 +304,67 @@ class JobSearchTask(BaseTask):
         env,
         summary: JobSearchSummary,
         db_path: Path,
-    ) -> None:
+    ) -> NotificationOutcome:
         digest = _build_telegram_digest(summary)
+        reported_signal_ids = _collect_reported_signal_ids(summary)
         if not digest:
+            self.emit_log(
+                "notification_skipped",
+                message="Telegram digest skipped",
+                db_path=str(db_path),
+                notifier="telegram",
+                notification_status="skipped_no_items",
+                notified_count=0,
+            )
             print("telegram digest skipped: no new jobs to report")
-            return
+            return NotificationOutcome(status="skipped_no_items")
 
         if not config.notifiers.telegram.enabled:
+            self.emit_log(
+                "notification_skipped",
+                message="Telegram digest skipped",
+                db_path=str(db_path),
+                notifier="telegram",
+                notification_status="skipped_notifier_disabled",
+                notified_count=0,
+            )
             print("telegram digest skipped: notifier disabled in config")
-            return
+            return NotificationOutcome(status="skipped_notifier_disabled")
 
         validate_telegram_notifier_secrets(
             telegram_enabled=True,
             env=env,
         )
         notifier = build_telegram_notifier(env=env)
-        notifier.send_message(digest)
-        mark_signals_digest_reported(
-            _collect_reported_signal_ids(summary),
-            db_path=db_path,
+        try:
+            notifier.send_message(digest)
+        except Exception as exc:
+            self.emit_log(
+                "notification_failed",
+                message="Telegram digest failed",
+                level=logging.ERROR,
+                exc_info=exc,
+                db_path=str(db_path),
+                notifier="telegram",
+                notification_status="failed",
+                attempted_notified_count=len(reported_signal_ids),
+                error=str(exc),
+            )
+            raise
+        mark_signals_digest_reported(reported_signal_ids, db_path=db_path)
+        self.emit_log(
+            "notification_sent",
+            message="Telegram digest sent",
+            db_path=str(db_path),
+            notifier="telegram",
+            notification_status="sent",
+            notified_count=len(reported_signal_ids),
         )
         print("telegram digest sent")
+        return NotificationOutcome(
+            status="sent",
+            notified_count=len(reported_signal_ids),
+        )
 
     def _score_and_record(
         self,

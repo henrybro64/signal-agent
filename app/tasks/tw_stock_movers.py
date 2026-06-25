@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -69,110 +70,213 @@ class TwStockMarketReport:
         return len(self.gainers) + len(self.losers)
 
 
+@dataclass(slots=True, frozen=True)
+class NotificationOutcome:
+    """Summarize the Telegram notification phase for structured logs."""
+
+    status: str
+    notified_count: int = 0
+
+
 class TwStockMoversTask(BaseTask):
     """Fetch, persist, and optionally report Taiwan stock movers."""
 
     name: ClassVar[str] = "tw_stock_movers"
 
     def run(self) -> None:
-        config = load_config(self.config_path)
-        if not config.tasks.tw_stock_movers.enabled:
-            raise ValueError("Task 'tw_stock_movers' is disabled in config")
-
-        env = load_env_settings()
-        if not is_tw_market_open():
-            print(
-                "tw_stock_movers task skipped using "
-                f"{self.config_path}: Taiwan market is closed"
-            )
-            return
-
-        sources = build_tw_stock_mover_sources(config)
-        if not sources:
-            raise ValueError("No Taiwan stock-mover sources are configured.")
-
         db_path = _resolve_db_path()
-        init_db(db_path)
-
-        summary = TwStockMoversSummary()
-        for source in sources:
-            run_id = start_signal_run(source.name, db_path=db_path)
-            try:
-                fetched_items = source.fetch()
-                stock_items = [
-                    item
-                    for item in fetched_items
-                    if item.item_type == "tw_stock_mover"
-                ]
-                summary.ignored_non_stock_count += len(fetched_items) - len(
-                    stock_items
-                )
-                summary.fetched_count += len(stock_items)
-
-                source_inserted = 0
-                source_updated = 0
-                for item in stock_items:
-                    result = upsert_signal(item, db_path=db_path)
-                    if result.action == "inserted":
-                        source_inserted += 1
-                        summary.new_count += 1
-                    else:
-                        source_updated += 1
-                        summary.duplicate_count += 1
-                    summary.stock_items.append(item)
-
-                finish_signal_run(
-                    run_id,
-                    status="completed",
-                    fetched_count=len(stock_items),
-                    inserted_count=source_inserted,
-                    updated_count=source_updated,
-                    db_path=db_path,
-                )
-                summary.successful_sources += 1
-            except Exception as exc:
-                finish_signal_run(
-                    run_id,
-                    status="failed",
-                    error=str(exc),
-                    db_path=db_path,
-                )
-                summary.failed_sources.append((source.name, str(exc)))
-
-        market_reports = _build_market_reports(
-            summary.stock_items,
-            limit=config.tasks.tw_stock_movers.top_n,
-        )
-        print(
-            "\n".join(
-                _build_console_summary(
-                    config_path=self.config_path,
-                    db_path=db_path,
-                    summary=summary,
-                    market_reports=market_reports,
-                    top_n=config.tasks.tw_stock_movers.top_n,
-                )
-            )
+        self.emit_log(
+            "task_started",
+            message="Taiwan stock movers task started",
+            db_path=str(db_path),
         )
 
-        self._maybe_send_telegram_digest(
-            config=config,
-            env=env,
-            summary=summary,
-            market_reports=market_reports,
-            top_n=config.tasks.tw_stock_movers.top_n,
-            timezone_name=config.tasks.tw_stock_movers.timezone,
-        )
+        try:
+            config = load_config(self.config_path)
+            if not config.tasks.tw_stock_movers.enabled:
+                raise ValueError("Task 'tw_stock_movers' is disabled in config")
 
-        if summary.successful_sources == 0:
-            failure_summary = "; ".join(
-                f"{source_name}: {message}"
-                for source_name, message in summary.failed_sources
+            env = load_env_settings()
+            if not is_tw_market_open():
+                self.emit_log(
+                    "task_skipped",
+                    message="Taiwan stock movers task skipped",
+                    db_path=str(db_path),
+                    skip_reason="taiwan_market_closed",
+                )
+                print(
+                    "tw_stock_movers task skipped using "
+                    f"{self.config_path}: Taiwan market is closed"
+                )
+                return
+
+            sources = build_tw_stock_mover_sources(config)
+            if not sources:
+                raise ValueError("No Taiwan stock-mover sources are configured.")
+
+            init_db(db_path)
+
+            summary = TwStockMoversSummary()
+            for source in sources:
+                run_id = start_signal_run(source.name, db_path=db_path)
+                self.emit_log(
+                    "source_run_started",
+                    message="Source run started",
+                    db_path=str(db_path),
+                    source_name=source.name,
+                    run_id=run_id,
+                )
+                try:
+                    fetched_items = source.fetch()
+                    stock_items = [
+                        item
+                        for item in fetched_items
+                        if item.item_type == "tw_stock_mover"
+                    ]
+                    ignored_count = len(fetched_items) - len(stock_items)
+                    summary.ignored_non_stock_count += ignored_count
+                    summary.fetched_count += len(stock_items)
+
+                    source_inserted = 0
+                    source_updated = 0
+                    for item in stock_items:
+                        result = upsert_signal(item, db_path=db_path)
+                        if result.action == "inserted":
+                            source_inserted += 1
+                            summary.new_count += 1
+                        else:
+                            source_updated += 1
+                            summary.duplicate_count += 1
+                        summary.stock_items.append(item)
+
+                    finish_signal_run(
+                        run_id,
+                        status="completed",
+                        fetched_count=len(stock_items),
+                        inserted_count=source_inserted,
+                        updated_count=source_updated,
+                        db_path=db_path,
+                    )
+                    self.emit_log(
+                        "source_run_completed",
+                        message="Source run completed",
+                        db_path=str(db_path),
+                        source_name=source.name,
+                        run_id=run_id,
+                        fetched_count=len(fetched_items),
+                        accepted_count=len(stock_items),
+                        ignored_count=ignored_count,
+                        new_count=source_inserted,
+                        duplicate_count=source_updated,
+                        skipped_count=source_updated + ignored_count,
+                    )
+                    summary.successful_sources += 1
+                except Exception as exc:
+                    finish_signal_run(
+                        run_id,
+                        status="failed",
+                        error=str(exc),
+                        db_path=db_path,
+                    )
+                    summary.failed_sources.append((source.name, str(exc)))
+                    self.emit_log(
+                        "source_run_failed",
+                        message="Source run failed",
+                        level=logging.ERROR,
+                        exc_info=exc,
+                        db_path=str(db_path),
+                        source_name=source.name,
+                        run_id=run_id,
+                        error=str(exc),
+                    )
+
+            market_reports = _build_market_reports(
+                summary.stock_items,
+                limit=config.tasks.tw_stock_movers.top_n,
             )
-            raise ValueError(
-                "All configured Taiwan stock-mover sources failed: "
-                f"{failure_summary}"
+            print(
+                "\n".join(
+                    _build_console_summary(
+                        config_path=self.config_path,
+                        db_path=db_path,
+                        summary=summary,
+                        market_reports=market_reports,
+                        top_n=config.tasks.tw_stock_movers.top_n,
+                    )
+                )
             )
+
+            notification = self._maybe_send_telegram_digest(
+                config=config,
+                env=env,
+                summary=summary,
+                market_reports=market_reports,
+                top_n=config.tasks.tw_stock_movers.top_n,
+                timezone_name=config.tasks.tw_stock_movers.timezone,
+                db_path=db_path,
+            )
+            if summary.successful_sources == 0:
+                self.emit_log(
+                    "task_summary",
+                    message="Taiwan stock movers task summary",
+                    db_path=str(db_path),
+                    task_status="failed",
+                    fetched_count=summary.fetched_count,
+                    new_count=summary.new_count,
+                    duplicate_count=summary.duplicate_count,
+                    skipped_count=(
+                        summary.duplicate_count + summary.ignored_non_stock_count
+                    ),
+                    notified_count=notification.notified_count,
+                    notification_status=notification.status,
+                    successful_source_count=summary.successful_sources,
+                    failed_source_count=len(summary.failed_sources),
+                    ignored_count=summary.ignored_non_stock_count,
+                    reported_count=_count_reported_movers(market_reports),
+                    active_market_count=sum(
+                        1
+                        for report in market_reports
+                        if report.reported_count > 0
+                    ),
+                )
+                failure_summary = "; ".join(
+                    f"{source_name}: {message}"
+                    for source_name, message in summary.failed_sources
+                )
+                raise ValueError(
+                    "All configured Taiwan stock-mover sources failed: "
+                    f"{failure_summary}"
+                )
+            self.emit_log(
+                "task_completed",
+                message="Taiwan stock movers task completed",
+                db_path=str(db_path),
+                fetched_count=summary.fetched_count,
+                new_count=summary.new_count,
+                duplicate_count=summary.duplicate_count,
+                skipped_count=(
+                    summary.duplicate_count + summary.ignored_non_stock_count
+                ),
+                notified_count=notification.notified_count,
+                notification_status=notification.status,
+                successful_source_count=summary.successful_sources,
+                failed_source_count=len(summary.failed_sources),
+                ignored_count=summary.ignored_non_stock_count,
+                reported_count=_count_reported_movers(market_reports),
+                active_market_count=sum(
+                    1 for report in market_reports if report.reported_count > 0
+                ),
+            )
+        except Exception as exc:
+            self.emit_log(
+                "task_failed",
+                message="Taiwan stock movers task failed",
+                level=logging.ERROR,
+                exc_info=exc,
+                db_path=str(db_path),
+                error=str(exc),
+            )
+            raise
 
     def _maybe_send_telegram_digest(
         self,
@@ -183,28 +287,72 @@ class TwStockMoversTask(BaseTask):
         market_reports: list[TwStockMarketReport],
         top_n: int,
         timezone_name: str,
-    ) -> None:
+        db_path: Path,
+    ) -> NotificationOutcome:
         digest = _build_telegram_digest(
             summary=summary,
             market_reports=market_reports,
             top_n=top_n,
             timezone_name=timezone_name,
         )
+        reported_count = _count_reported_movers(market_reports)
         if not digest:
+            self.emit_log(
+                "notification_skipped",
+                message="Telegram digest skipped",
+                db_path=str(db_path),
+                notifier="telegram",
+                notification_status="skipped_no_items",
+                notified_count=0,
+            )
             print("telegram digest skipped: no stock movers to report")
-            return
+            return NotificationOutcome(status="skipped_no_items")
 
         if not config.notifiers.telegram.enabled:
+            self.emit_log(
+                "notification_skipped",
+                message="Telegram digest skipped",
+                db_path=str(db_path),
+                notifier="telegram",
+                notification_status="skipped_notifier_disabled",
+                notified_count=0,
+            )
             print("telegram digest skipped: notifier disabled in config")
-            return
+            return NotificationOutcome(status="skipped_notifier_disabled")
 
         validate_telegram_notifier_secrets(
             telegram_enabled=True,
             env=env,
         )
         notifier = build_telegram_notifier(env=env)
-        notifier.send_message(digest)
+        try:
+            notifier.send_message(digest)
+        except Exception as exc:
+            self.emit_log(
+                "notification_failed",
+                message="Telegram digest failed",
+                level=logging.ERROR,
+                exc_info=exc,
+                db_path=str(db_path),
+                notifier="telegram",
+                notification_status="failed",
+                attempted_notified_count=reported_count,
+                error=str(exc),
+            )
+            raise
+        self.emit_log(
+            "notification_sent",
+            message="Telegram digest sent",
+            db_path=str(db_path),
+            notifier="telegram",
+            notification_status="sent",
+            notified_count=reported_count,
+        )
         print("telegram digest sent")
+        return NotificationOutcome(
+            status="sent",
+            notified_count=reported_count,
+        )
 
 
 def _build_console_summary(
