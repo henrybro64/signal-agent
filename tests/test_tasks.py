@@ -99,6 +99,20 @@ def test_fetch_task_persists_items_from_supported_sources(
     assert "fetch task executed using" in captured.out
     assert "fetched 2 signal(s) from 1 successful source(s)" in captured.out
     assert "persisted 2 inserted / 0 updated" in captured.out
+    structured_logs = _parse_structured_logs(captured.out)
+    source_log = next(
+        log for log in structured_logs if log["event"] == "source_run_completed"
+    )
+    task_log = next(
+        log for log in structured_logs if log["event"] == "task_completed"
+    )
+    assert source_log["task_name"] == "fetch"
+    assert source_log["source_name"] == "dummy"
+    assert source_log["fetched_count"] == 2
+    assert source_log["new_count"] == 2
+    assert isinstance(source_log["run_id"], int)
+    assert task_log["notification_status"] == "not_applicable"
+    assert task_log["notified_count"] == 0
     assert _count_rows(db_path, "signals") == 2
     assert _signal_run_statuses(db_path) == ["completed"]
 
@@ -433,3 +447,11 @@ def _signal_run_statuses(db_path: Path) -> list[str]:
             "SELECT status FROM signal_runs ORDER BY id"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def _parse_structured_logs(output: str) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in output.splitlines()
+        if line.startswith("{")
+    ]

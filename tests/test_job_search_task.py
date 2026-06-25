@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,6 +61,20 @@ def test_job_search_task_runs_end_to_end_and_sends_digest(
     assert "persisted 3 new / 0 duplicate" in captured.out
     assert "classified 1 strong_match / 1 maybe / 1 reject" in captured.out
     assert "telegram digest sent" in captured.out
+    structured_logs = _parse_structured_logs(captured.out)
+    notification_log = next(
+        log for log in structured_logs if log["event"] == "notification_sent"
+    )
+    task_log = next(
+        log for log in structured_logs if log["event"] == "task_completed"
+    )
+    assert notification_log["task_name"] == "job_search"
+    assert notification_log["notification_status"] == "sent"
+    assert notification_log["notified_count"] == 3
+    assert task_log["notification_status"] == "sent"
+    assert task_log["new_count"] == 3
+    assert task_log["duplicate_count"] == 0
+    assert task_log["notified_count"] == 3
     assert len(notifier.messages) == 1
 
     message = notifier.messages[0]
@@ -546,3 +561,11 @@ def _signal_run_statuses(db_path: Path) -> list[str]:
             "SELECT status FROM signal_runs ORDER BY id"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def _parse_structured_logs(output: str) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in output.splitlines()
+        if line.startswith("{")
+    ]
