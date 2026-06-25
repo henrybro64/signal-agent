@@ -191,6 +191,39 @@ signal-agent/
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
+## Structured logging
+
+`fetch`, `job_search`, and `tw_stock_movers` emit JSON log lines to stdout so
+Docker and k3s can collect task, source, and notification events from container
+logs. Human-readable summaries are still printed for local CLI use.
+
+Typical fields:
+
+- `event` such as `task_started`, `source_run_completed`, `notification_sent`
+- `task_name`, `source_name`, and SQLite `run_id` for source runs
+- `fetched_count`, `new_count`, `duplicate_count`, `skipped_count`
+- `notification_status` and `notified_count`
+- `stack_trace` on failures
+
+Example:
+
+```json
+{
+  "event": "source_run_completed",
+  "level": "info",
+  "message": "Source run completed",
+  "task_name": "job_search",
+  "source_name": "job104",
+  "run_id": 12,
+  "fetched_count": 8,
+  "new_count": 3,
+  "duplicate_count": 2,
+  "skipped_count": 5
+}
+```
+
+Secrets, tokens, and raw email content are not logged.
+
 ## Telegram notifier
 
 `app/notifiers/telegram.py` sends plain-text messages through the Telegram Bot API.

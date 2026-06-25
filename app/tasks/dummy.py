@@ -20,6 +20,11 @@ class DummyTask(BaseTask):
     name: ClassVar[str] = "dummy"
 
     def run(self) -> None:
+        self.emit_log(
+            "task_started",
+            message="Dummy task started",
+        )
+
         config = load_config(self.config_path)
         env = load_env_settings()
         validate_llm_scoring_secrets(
@@ -35,4 +40,12 @@ class DummyTask(BaseTask):
             f"job_search_enabled={config.tasks.job_search.enabled}, "
             f"tw_stock_movers_enabled={config.tasks.tw_stock_movers.enabled}, "
             f"telegram_ready={telegram_ready}"
+        )
+
+        self.emit_log(
+            "task_completed",
+            message="Dummy task completed",
+            notification_status="not_applicable",
+            notified_count=0,
+            telegram_ready=telegram_ready,
         )
