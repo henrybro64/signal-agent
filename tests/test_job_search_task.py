@@ -90,6 +90,10 @@ def test_job_search_task_runs_end_to_end_and_sends_digest(
     assert "Test Automation Engineer" in message
     assert "Rejected jobs summary" in message
     assert "Helpdesk Support Engineer" in message
+    assert (
+        "run summary: status=success, fetched=3, new=3, "
+        "skipped=0, notified=3"
+    ) in message
 
     rows = _fetch_signal_rows(db_path)
     assert len(rows) == 3
@@ -99,6 +103,7 @@ def test_job_search_task_runs_end_to_end_and_sends_digest(
     assert rows["Test Automation Engineer"]["status"] == "reviewed"
     assert rows["Helpdesk Support Engineer"]["score"] == 0.0
     assert rows["Helpdesk Support Engineer"]["status"] == "reviewed"
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_job_search_task_skips_duplicates_for_telegram_digest(
@@ -135,6 +140,7 @@ def test_job_search_task_skips_duplicates_for_telegram_digest(
     assert len(notifier.messages) == 1
     assert _count_rows(db_path, "signals") == 3
     assert _signal_run_statuses(db_path) == ["completed", "completed"]
+    assert _task_run_statuses(db_path) == ["success", "success"]
 
 
 def test_job_search_task_reports_useful_failures_even_without_new_jobs(
@@ -342,6 +348,11 @@ def test_job_search_task_sends_failure_digest_when_all_sources_fail(
     assert len(notifier.messages) == 1
     assert "Source failures" in notifier.messages[0]
     assert "imap auth failed" in notifier.messages[0]
+    assert (
+        "run summary: status=failed, fetched=0, new=0, "
+        "skipped=0, notified=0"
+    ) in notifier.messages[0]
+    assert _task_run_statuses(db_path) == ["failed"]
 
 
 def test_job_search_task_retries_telegram_digest_after_credential_failure(
@@ -559,6 +570,14 @@ def _signal_run_statuses(db_path: Path) -> list[str]:
     with sqlite3.connect(db_path) as connection:
         rows = connection.execute(
             "SELECT status FROM signal_runs ORDER BY id"
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _task_run_statuses(db_path: Path) -> list[str]:
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT status FROM task_runs ORDER BY id"
         ).fetchall()
     return [str(row[0]) for row in rows]
 

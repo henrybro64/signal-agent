@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,9 @@ def run_main(*args: str) -> subprocess.CompletedProcess[str]:
     env["OPENAI_API_KEY"] = ""
     env["TELEGRAM_BOT_TOKEN"] = ""
     env["TELEGRAM_CHAT_ID"] = ""
+    env["SIGNAL_AGENT_DB_PATH"] = str(
+        Path(tempfile.mkdtemp()) / "signals.sqlite3"
+    )
 
     return subprocess.run(
         [sys.executable, "main.py", *args],

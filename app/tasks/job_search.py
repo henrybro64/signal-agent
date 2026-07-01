@@ -19,7 +19,6 @@ from app.core import (
     finish_signal_run,
     get_signal_evaluation,
     get_signal_evaluation_state,
-    init_db,
     mark_signals_digest_reported,
     start_signal_run,
     update_signal_evaluation,
@@ -80,6 +79,10 @@ class JobSearchTask(BaseTask):
 
     def run(self) -> None:
         db_path = _resolve_db_path()
+        summary = JobSearchSummary()
+        notification = NotificationOutcome(status="not_applicable")
+
+        self.begin_task_run(db_path=db_path)
         self.emit_log(
             "task_started",
             message="Job search task started",
@@ -97,9 +100,6 @@ class JobSearchTask(BaseTask):
                 env=env,
             )
 
-            init_db(db_path)
-
-            summary = JobSearchSummary()
             sources = build_job_search_sources(
                 config,
                 on_unknown=summary.unsupported_sources.append,
@@ -286,7 +286,28 @@ class JobSearchTask(BaseTask):
                 rejected_count=len(summary.rejected_jobs),
                 unsupported_sources=summary.unsupported_sources,
             )
+            self.end_task_run(
+                db_path=db_path,
+                status="success",
+                fetched_count=summary.fetched_count,
+                new_count=summary.new_count,
+                skipped_count=(
+                    summary.duplicate_count + summary.ignored_non_job_count
+                ),
+                notified_count=notification.notified_count,
+            )
         except Exception as exc:
+            self.end_task_run(
+                db_path=db_path,
+                status="failed",
+                fetched_count=summary.fetched_count,
+                new_count=summary.new_count,
+                skipped_count=(
+                    summary.duplicate_count + summary.ignored_non_job_count
+                ),
+                notified_count=notification.notified_count,
+                error_message=str(exc),
+            )
             self.emit_log(
                 "task_failed",
                 message="Job search task failed",
@@ -305,8 +326,14 @@ class JobSearchTask(BaseTask):
         summary: JobSearchSummary,
         db_path: Path,
     ) -> NotificationOutcome:
-        digest = _build_telegram_digest(summary)
         reported_signal_ids = _collect_reported_signal_ids(summary)
+        digest = _build_telegram_digest(
+            summary,
+            run_status=(
+                "failed" if summary.successful_sources == 0 else "success"
+            ),
+            notified_count=len(reported_signal_ids),
+        )
         if not digest:
             self.emit_log(
                 "notification_skipped",
@@ -448,7 +475,12 @@ def _build_console_summary(
     return lines
 
 
-def _build_telegram_digest(summary: JobSearchSummary) -> str:
+def _build_telegram_digest(
+    summary: JobSearchSummary,
+    *,
+    run_status: str,
+    notified_count: int,
+) -> str:
     has_useful_output = (
         bool(summary.strong_matches)
         or bool(summary.maybe_matches)
@@ -491,6 +523,15 @@ def _build_telegram_digest(summary: JobSearchSummary) -> str:
             "Skipped unsupported sources: "
             + ", ".join(summary.unsupported_sources)
         )
+    lines.append("")
+    lines.append(
+        "run summary: "
+        f"status={run_status}, "
+        f"fetched={summary.fetched_count}, "
+        f"new={summary.new_count}, "
+        f"skipped={summary.duplicate_count + summary.ignored_non_job_count}, "
+        f"notified={notified_count}"
+    )
 
     return "\n".join(lines)
 

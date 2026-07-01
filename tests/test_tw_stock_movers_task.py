@@ -157,7 +157,8 @@ def test_tw_stock_movers_task_skips_when_market_is_closed(
 
     captured = capsys.readouterr()
     assert "Taiwan market is closed" in captured.out
-    assert not db_path.exists()
+    assert db_path.exists()
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_tw_stock_movers_task_filters_and_persists_stock_items(
@@ -195,6 +196,7 @@ def test_tw_stock_movers_task_filters_and_persists_stock_items(
     assert "telegram digest skipped: notifier disabled in config" in captured.out
     assert _count_rows(db_path, "signals") == 1
     assert _signal_run_statuses(db_path) == ["completed"]
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
@@ -243,6 +245,8 @@ def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
     assert "上市前1跌幅" in sent_messages[0]
     assert "1. 2330 TSMC +3.10%" in sent_messages[0]
     assert "1. 2454 MediaTek -1.20%" in sent_messages[0]
+    assert "執行摘要：狀態=成功，抓取=2，新增=2，略過=0，通知=2" in sent_messages[0]
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_tw_stock_movers_task_raises_when_all_sources_fail(
@@ -287,6 +291,7 @@ def test_tw_stock_movers_task_raises_when_all_sources_fail(
         task_failure_log["stack_trace"]
     )
     assert _signal_run_statuses(db_path) == ["failed"]
+    assert _task_run_statuses(db_path) == ["failed"]
 
 
 def test_tw_stock_movers_task_sends_failure_digest_when_all_sources_fail(
@@ -330,6 +335,8 @@ def test_tw_stock_movers_task_sends_failure_digest_when_all_sources_fail(
     assert sent_messages[0].startswith("台股漲跌幅快報 ")
     assert "資料來源異常" in sent_messages[0]
     assert "quote provider timeout" in sent_messages[0]
+    assert "執行摘要：狀態=失敗，抓取=0，新增=0，略過=0，通知=0" in sent_messages[0]
+    assert _task_run_statuses(db_path) == ["failed"]
 
 
 def test_select_top_gainers_limits_to_top_n() -> None:
@@ -471,6 +478,7 @@ def test_tw_stock_movers_task_continues_when_one_market_source_fails(
     assert "2330 TSMC +5.0%" in captured.out
     assert "TPEx OTC (上櫃)" not in captured.out
     assert _signal_run_statuses(db_path) == ["completed", "failed"]
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_tw_stock_movers_task_persists_multiple_snapshot_rows(
@@ -534,6 +542,7 @@ def test_tw_stock_movers_task_sends_partial_failure_warning_in_digest(
     assert "1. 2330 TSMC +5.00%" in sent_messages[0]
     assert "資料來源異常" in sent_messages[0]
     assert "上櫃資料：tpex quote provider timeout" in sent_messages[0]
+    assert "執行摘要：狀態=成功，抓取=1，新增=1，略過=0，通知=1" in sent_messages[0]
 
 
 def test_build_telegram_heading_uses_configured_timezone(
@@ -589,7 +598,8 @@ def test_tw_stock_movers_task_does_not_require_openai_key(
 
     captured = capsys.readouterr()
     assert "Taiwan market is closed" in captured.out
-    assert not db_path.exists()
+    assert db_path.exists()
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def _stock_mover_item(
@@ -671,6 +681,14 @@ def _signal_run_statuses(db_path: Path) -> list[str]:
     with sqlite3.connect(db_path) as connection:
         rows = connection.execute(
             "SELECT status FROM signal_runs ORDER BY id"
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _task_run_statuses(db_path: Path) -> list[str]:
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT status FROM task_runs ORDER BY id"
         ).fetchall()
     return [str(row[0]) for row in rows]
 

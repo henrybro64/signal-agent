@@ -37,3 +37,16 @@ CREATE TABLE IF NOT EXISTS signal_runs (
     updated_count INTEGER NOT NULL DEFAULT 0,
     error TEXT
 );
+
+CREATE TABLE IF NOT EXISTS task_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_name TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    fetched_count INTEGER NOT NULL DEFAULT 0,
+    new_count INTEGER NOT NULL DEFAULT 0,
+    skipped_count INTEGER NOT NULL DEFAULT 0,
+    notified_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT
+);
