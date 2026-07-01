@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from app.config import load_config, load_env_settings, validate_llm_scoring_secrets
-from app.core import finish_signal_run, init_db, start_signal_run, upsert_signal
+from app.core import finish_signal_run, start_signal_run, upsert_signal
 from app.sources import build_job_search_sources
 
 from .base import BaseTask
@@ -24,6 +24,14 @@ class FetchTask(BaseTask):
 
     def run(self) -> None:
         db_path = _resolve_db_path()
+        items = []
+        completed_sources = 0
+        inserted_count = 0
+        updated_count = 0
+        failed_sources: list[tuple[str, str]] = []
+        unsupported_sources: list[str] = []
+
+        self.begin_task_run(db_path=db_path)
         self.emit_log(
             "task_started",
             message="Fetch task started",
@@ -38,7 +46,6 @@ class FetchTask(BaseTask):
                 env=env,
             )
 
-            unsupported_sources: list[str] = []
             sources = build_job_search_sources(
                 config,
                 on_unknown=unsupported_sources.append,
@@ -51,14 +58,6 @@ class FetchTask(BaseTask):
                         f"Unsupported sources: {unsupported}"
                     )
                 raise ValueError("No job-search sources are configured.")
-
-            init_db(db_path)
-
-            items = []
-            completed_sources = 0
-            inserted_count = 0
-            updated_count = 0
-            failed_sources: list[tuple[str, str]] = []
 
             for source in sources:
                 run_id = start_signal_run(source.name, db_path=db_path)
@@ -148,6 +147,14 @@ class FetchTask(BaseTask):
                 unsupported_source_count=len(unsupported_sources),
                 unsupported_sources=unsupported_sources,
             )
+            self.end_task_run(
+                db_path=db_path,
+                status="success",
+                fetched_count=len(items),
+                new_count=inserted_count,
+                skipped_count=updated_count,
+                notified_count=0,
+            )
 
             lines = [
                 f"fetch task executed using {self.config_path}:",
@@ -170,6 +177,15 @@ class FetchTask(BaseTask):
             lines.extend(f"- [{item.item_type}] {item.title}" for item in items)
             print("\n".join(lines))
         except Exception as exc:
+            self.end_task_run(
+                db_path=db_path,
+                status="failed",
+                fetched_count=len(items),
+                new_count=inserted_count,
+                skipped_count=updated_count,
+                notified_count=0,
+                error_message=str(exc),
+            )
             self.emit_log(
                 "task_failed",
                 message="Fetch task failed",

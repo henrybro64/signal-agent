@@ -8,8 +8,10 @@ import pytest
 from app.core import (
     SignalItem,
     finish_signal_run,
+    finish_task_run,
     init_db,
     start_signal_run,
+    start_task_run,
     update_signal_evaluation,
     update_signal_status,
     upsert_signal,
@@ -33,7 +35,7 @@ def test_init_db_creates_required_tables(tmp_path: Path) -> None:
             """
         ).fetchall()
 
-    assert {row[0] for row in rows} >= {"signal_runs", "signals"}
+    assert {row[0] for row in rows} >= {"signal_runs", "signals", "task_runs"}
 
 
 def test_init_db_matches_schema_contract(tmp_path: Path) -> None:
@@ -119,6 +121,41 @@ def test_init_db_matches_schema_contract(tmp_path: Path) -> None:
     assert signal_run_columns["updated_count"]["notnull"] is True
     assert signal_run_columns["updated_count"]["default"] == "0"
     assert signal_run_columns["error"]["type"] == "TEXT"
+
+    task_run_columns = _table_columns(db_path, "task_runs")
+
+    assert list(task_run_columns) == [
+        "id",
+        "task_name",
+        "started_at",
+        "finished_at",
+        "status",
+        "fetched_count",
+        "new_count",
+        "skipped_count",
+        "notified_count",
+        "error_message",
+    ]
+    assert task_run_columns["task_name"]["type"] == "TEXT"
+    assert task_run_columns["task_name"]["notnull"] is True
+    assert task_run_columns["started_at"]["type"] == "TEXT"
+    assert task_run_columns["started_at"]["notnull"] is True
+    assert task_run_columns["finished_at"]["type"] == "TEXT"
+    assert task_run_columns["status"]["type"] == "TEXT"
+    assert task_run_columns["status"]["notnull"] is True
+    assert task_run_columns["fetched_count"]["type"] == "INTEGER"
+    assert task_run_columns["fetched_count"]["notnull"] is True
+    assert task_run_columns["fetched_count"]["default"] == "0"
+    assert task_run_columns["new_count"]["type"] == "INTEGER"
+    assert task_run_columns["new_count"]["notnull"] is True
+    assert task_run_columns["new_count"]["default"] == "0"
+    assert task_run_columns["skipped_count"]["type"] == "INTEGER"
+    assert task_run_columns["skipped_count"]["notnull"] is True
+    assert task_run_columns["skipped_count"]["default"] == "0"
+    assert task_run_columns["notified_count"]["type"] == "INTEGER"
+    assert task_run_columns["notified_count"]["notnull"] is True
+    assert task_run_columns["notified_count"]["default"] == "0"
+    assert task_run_columns["error_message"]["type"] == "TEXT"
 
 
 def test_upsert_signal_inserts_new_signal(tmp_path: Path) -> None:
@@ -411,11 +448,53 @@ def test_signal_run_lifecycle_persists_counts(tmp_path: Path) -> None:
     assert row["finished_at"] is not None
 
 
+def test_task_run_lifecycle_persists_counts_and_error_message(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+
+    init_db(db_path)
+    run_id = start_task_run("job_search", db_path=db_path)
+    finish_task_run(
+        run_id,
+        status="failed",
+        fetched_count=5,
+        new_count=2,
+        skipped_count=3,
+        notified_count=0,
+        error_message="telegram timeout",
+        db_path=db_path,
+    )
+
+    row = _fetch_task_run(db_path, run_id)
+
+    assert row["task_name"] == "job_search"
+    assert row["status"] == "failed"
+    assert row["fetched_count"] == 5
+    assert row["new_count"] == 2
+    assert row["skipped_count"] == 3
+    assert row["notified_count"] == 0
+    assert row["error_message"] == "telegram timeout"
+    assert row["finished_at"] is not None
+
+
 def _fetch_signal_run(db_path: Path, run_id: int) -> sqlite3.Row:
     with sqlite3.connect(db_path) as connection:
         connection.row_factory = sqlite3.Row
         row = connection.execute(
             "SELECT * FROM signal_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+
+    assert row is not None
+    return row
+
+
+def _fetch_task_run(db_path: Path, run_id: int) -> sqlite3.Row:
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT * FROM task_runs WHERE id = ?",
             (run_id,),
         ).fetchone()
 

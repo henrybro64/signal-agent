@@ -18,7 +18,6 @@ from app.config import (
 from app.core import (
     SignalItem,
     finish_signal_run,
-    init_db,
     is_tw_market_open,
     start_signal_run,
     upsert_signal,
@@ -85,6 +84,11 @@ class TwStockMoversTask(BaseTask):
 
     def run(self) -> None:
         db_path = _resolve_db_path()
+        summary = TwStockMoversSummary()
+        notification = NotificationOutcome(status="not_applicable")
+        market_reports: list[TwStockMarketReport] = []
+
+        self.begin_task_run(db_path=db_path)
         self.emit_log(
             "task_started",
             message="Taiwan stock movers task started",
@@ -108,15 +112,16 @@ class TwStockMoversTask(BaseTask):
                     "tw_stock_movers task skipped using "
                     f"{self.config_path}: Taiwan market is closed"
                 )
+                self.end_task_run(
+                    db_path=db_path,
+                    status="success",
+                    notified_count=0,
+                )
                 return
 
             sources = build_tw_stock_mover_sources(config)
             if not sources:
                 raise ValueError("No Taiwan stock-mover sources are configured.")
-
-            init_db(db_path)
-
-            summary = TwStockMoversSummary()
             for source in sources:
                 run_id = start_signal_run(source.name, db_path=db_path)
                 self.emit_log(
@@ -267,7 +272,28 @@ class TwStockMoversTask(BaseTask):
                     1 for report in market_reports if report.reported_count > 0
                 ),
             )
+            self.end_task_run(
+                db_path=db_path,
+                status="success",
+                fetched_count=summary.fetched_count,
+                new_count=summary.new_count,
+                skipped_count=(
+                    summary.duplicate_count + summary.ignored_non_stock_count
+                ),
+                notified_count=notification.notified_count,
+            )
         except Exception as exc:
+            self.end_task_run(
+                db_path=db_path,
+                status="failed",
+                fetched_count=summary.fetched_count,
+                new_count=summary.new_count,
+                skipped_count=(
+                    summary.duplicate_count + summary.ignored_non_stock_count
+                ),
+                notified_count=notification.notified_count,
+                error_message=str(exc),
+            )
             self.emit_log(
                 "task_failed",
                 message="Taiwan stock movers task failed",
@@ -289,13 +315,17 @@ class TwStockMoversTask(BaseTask):
         timezone_name: str,
         db_path: Path,
     ) -> NotificationOutcome:
+        reported_count = _count_reported_movers(market_reports)
         digest = _build_telegram_digest(
             summary=summary,
             market_reports=market_reports,
             top_n=top_n,
             timezone_name=timezone_name,
+            run_status=(
+                "failed" if summary.successful_sources == 0 else "success"
+            ),
+            notified_count=reported_count,
         )
-        reported_count = _count_reported_movers(market_reports)
         if not digest:
             self.emit_log(
                 "notification_skipped",
@@ -412,6 +442,8 @@ def _build_telegram_digest(
     market_reports: list[TwStockMarketReport],
     top_n: int,
     timezone_name: str,
+    run_status: str,
+    notified_count: int,
 ) -> str:
     reported_count = _count_reported_movers(market_reports)
     has_useful_output = reported_count > 0 or bool(summary.failed_sources)
@@ -452,6 +484,16 @@ def _build_telegram_digest(
         lines.append("資料來源異常")
         for source_name, message in summary.failed_sources:
             lines.append(f"- {_source_warning_label(source_name)}：{message}")
+
+    lines.append("")
+    lines.append(
+        "執行摘要："
+        f"狀態={'成功' if run_status == 'success' else '失敗'}，"
+        f"抓取={summary.fetched_count}，"
+        f"新增={summary.new_count}，"
+        f"略過={summary.duplicate_count + summary.ignored_non_stock_count}，"
+        f"通知={notified_count}"
+    )
 
     return "\n".join(lines)
 

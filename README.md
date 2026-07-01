@@ -200,7 +200,7 @@ logs. Human-readable summaries are still printed for local CLI use.
 Typical fields:
 
 - `event` such as `task_started`, `source_run_completed`, `notification_sent`
-- `task_name`, `source_name`, and SQLite `run_id` for source runs
+- `task_name`, `task_run_id`, `source_name`, and SQLite `run_id` for source runs
 - `fetched_count`, `new_count`, `duplicate_count`, `skipped_count`
 - `notification_status` and `notified_count`
 - `stack_trace` on failures
@@ -342,11 +342,28 @@ The MVP guard treats Monday through Friday, 09:00 through 13:30 inclusive, in
 Signals are persisted in SQLite through `app/core/db.py`. Local databases typically
 live under `data/` and are ignored by git.
 
+Run history now has two levels:
+
+- `task_runs` stores one row per top-level CLI task execution with `running`,
+  `success`, or `failed` status plus fetched/new/skipped/notified counts.
+- `signal_runs` keeps the existing source-level run detail for each provider
+  inside a task, including per-source failures that do not always abort the
+  whole task.
+
 ```python
-from app.core import SignalItem, finish_signal_run, init_db, start_signal_run, upsert_signal
+from app.core import (
+    SignalItem,
+    finish_signal_run,
+    finish_task_run,
+    init_db,
+    start_signal_run,
+    start_task_run,
+    upsert_signal,
+)
 from datetime import UTC, datetime
 
 init_db("data/signals.sqlite3")
+task_run_id = start_task_run("fetch")
 run_id = start_signal_run("linkedin")
 result = upsert_signal(
     SignalItem(
@@ -364,6 +381,14 @@ finish_signal_run(
     fetched_count=1,
     inserted_count=1 if result.action == "inserted" else 0,
     updated_count=1 if result.action == "updated" else 0,
+)
+finish_task_run(
+    task_run_id,
+    status="success",
+    fetched_count=1,
+    new_count=1 if result.action == "inserted" else 0,
+    skipped_count=1 if result.action == "updated" else 0,
+    notified_count=0,
 )
 ```
 

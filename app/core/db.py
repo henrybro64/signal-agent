@@ -47,6 +47,7 @@ class UpsertResult:
 
 
 SignalRunStatus = Literal["completed", "failed"]
+TaskRunStatus = Literal["success", "failed"]
 
 
 def init_db(db_path: str | Path) -> None:
@@ -380,6 +381,81 @@ def finish_signal_run(
         )
         if cursor.rowcount == 0:
             raise ValueError(f"Unknown signal run id: {run_id}")
+
+
+def start_task_run(
+    task_name: str,
+    *,
+    started_at: datetime | None = None,
+    db_path: str | Path | None = None,
+) -> int:
+    """Record the start of one top-level task execution."""
+
+    resolved_path = _resolve_db_path(db_path)
+    started_at_text = _format_timestamp(started_at or datetime.now(UTC))
+
+    with _connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO task_runs (
+                task_name,
+                started_at,
+                status
+            )
+            VALUES (?, ?, ?)
+            """,
+            (task_name, started_at_text, "running"),
+        )
+        return int(cursor.lastrowid)
+
+
+def finish_task_run(
+    run_id: int,
+    *,
+    status: TaskRunStatus,
+    fetched_count: int = 0,
+    new_count: int = 0,
+    skipped_count: int = 0,
+    notified_count: int = 0,
+    error_message: str | None = None,
+    finished_at: datetime | None = None,
+    db_path: str | Path | None = None,
+) -> None:
+    """Record the completion of one top-level task execution."""
+
+    if status not in {"success", "failed"}:
+        raise ValueError(f"Invalid task run status: {status}")
+
+    resolved_path = _resolve_db_path(db_path)
+    finished_at_text = _format_timestamp(finished_at or datetime.now(UTC))
+
+    with _connect(resolved_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE task_runs
+            SET
+                finished_at = ?,
+                status = ?,
+                fetched_count = ?,
+                new_count = ?,
+                skipped_count = ?,
+                notified_count = ?,
+                error_message = ?
+            WHERE id = ?
+            """,
+            (
+                finished_at_text,
+                status,
+                fetched_count,
+                new_count,
+                skipped_count,
+                notified_count,
+                error_message,
+                run_id,
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Unknown task run id: {run_id}")
 
 
 def _resolve_db_path(db_path: str | Path | None) -> Path:

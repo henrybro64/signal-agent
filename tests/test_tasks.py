@@ -49,6 +49,23 @@ def test_build_task_returns_task_instance() -> None:
     assert task.config_path == "config.yaml"
 
 
+def test_dummy_task_creates_task_run_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, source_names=["dummy"])
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setenv("SIGNAL_AGENT_DB_PATH", str(db_path))
+
+    DummyTask(str(config_path)).run()
+
+    rows = _task_run_rows(db_path)
+    assert len(rows) == 1
+    assert rows[0]["task_name"] == "dummy"
+    assert rows[0]["status"] == "success"
+    assert rows[0]["notified_count"] == 0
+
+
 def test_build_task_supports_fetch_task() -> None:
     task = build_task("fetch", config_path="config.yaml")
 
@@ -113,8 +130,10 @@ def test_fetch_task_persists_items_from_supported_sources(
     assert isinstance(source_log["run_id"], int)
     assert task_log["notification_status"] == "not_applicable"
     assert task_log["notified_count"] == 0
+    assert isinstance(task_log["task_run_id"], int)
     assert _count_rows(db_path, "signals") == 2
     assert _signal_run_statuses(db_path) == ["completed"]
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_fetch_task_skips_failed_and_unsupported_sources(
@@ -141,6 +160,7 @@ def test_fetch_task_skips_failed_and_unsupported_sources(
     assert "source failed: job104: cloudflare challenge" in captured.out
     assert _count_rows(db_path, "signals") == 2
     assert _signal_run_statuses(db_path) == ["completed", "failed"]
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_fetch_task_records_linkedin_email_source_failures_without_blocking(
@@ -167,6 +187,7 @@ def test_fetch_task_records_linkedin_email_source_failures_without_blocking(
     assert "LINKEDIN_EMAIL_SOURCE_PATH" in captured.out
     assert _count_rows(db_path, "signals") == 2
     assert _signal_run_statuses(db_path) == ["completed", "failed"]
+    assert _task_run_statuses(db_path) == ["success"]
 
 
 def test_fetch_task_persists_and_dedups_job104_results(
@@ -375,6 +396,7 @@ def test_fetch_task_fails_when_all_configured_sources_fail(
 
     assert _count_rows(db_path, "signals") == 0
     assert _signal_run_statuses(db_path) == ["failed"]
+    assert _task_run_statuses(db_path) == ["failed"]
 
 
 def test_fetch_task_fails_when_only_unsupported_sources_are_configured(
@@ -447,6 +469,23 @@ def _signal_run_statuses(db_path: Path) -> list[str]:
             "SELECT status FROM signal_runs ORDER BY id"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def _task_run_statuses(db_path: Path) -> list[str]:
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT status FROM task_runs ORDER BY id"
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
+def _task_run_rows(db_path: Path) -> list[sqlite3.Row]:
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT * FROM task_runs ORDER BY id"
+        ).fetchall()
+    return list(rows)
 
 
 def _parse_structured_logs(output: str) -> list[dict[str, object]]:
