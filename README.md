@@ -350,6 +350,16 @@ Run history now has two levels:
   inside a task, including per-source failures that do not always abort the
   whole task.
 
+`task_runs.status` starts as `running` when a task begins and is finalized to
+`success` or `failed` when the task exits. If a process is killed mid-run, the
+row can remain `running`. A market-closed `tw_stock_movers` skip is recorded as
+`success` with zero counts because the no-op exit is intentional.
+
+Telegram digests optionally append a run summary:
+
+- `job_search` adds an English `run summary: status=...` footer.
+- `tw_stock_movers` adds a Traditional Chinese `執行摘要：...` footer.
+
 ```python
 from app.core import (
     SignalItem,

@@ -455,6 +455,11 @@ def test_task_run_lifecycle_persists_counts_and_error_message(
 
     init_db(db_path)
     run_id = start_task_run("job_search", db_path=db_path)
+    running_row = _fetch_task_run(db_path, run_id)
+
+    assert running_row["status"] == "running"
+    assert running_row["finished_at"] is None
+
     finish_task_run(
         run_id,
         status="failed",
