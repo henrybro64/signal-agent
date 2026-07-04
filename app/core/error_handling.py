@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.notifiers import build_telegram_notifier
 import yaml
+
+from app.notifiers import build_telegram_notifier
 
 from .config import ConfigError, load_config
 from .logging import get_logger, log_event
