@@ -60,8 +60,11 @@ Compose behavior:
   `/app/data/signals.sqlite3`.
 - The image bakes in the application code, but task commands remain
   override-friendly through `docker compose run --rm signal-agent ...`.
-- If you want dry runs without Telegram delivery, set
-  `notifiers.telegram.enabled: false` in `config.yaml`.
+- If you want dry runs without any Telegram delivery, set both
+  `notifiers.telegram.enabled: false` and
+  `notifiers.telegram.failure_alerts_enabled: false` in `config.yaml`.
+- Set `notifiers.telegram.failure_alerts_enabled: false` if you want to keep
+  Telegram digests enabled but suppress task-failure alerts.
 - If you use `LINKEDIN_EMAIL_SOURCE_PATH`, point it to a file under a mounted
   path such as `/app/data/...`, or add another volume mount.
 
@@ -443,6 +446,7 @@ tasks:
 notifiers:
   telegram:
     enabled: true
+    failure_alerts_enabled: true
 
 scoring:
   freshness_weight: 0.6
@@ -466,6 +470,9 @@ env = load_env_settings()
   the optional LLM scorer.
 - Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before using
   `--telegram-test` or the Telegram notifier.
+- `notifiers.telegram.failure_alerts_enabled` controls best-effort Telegram
+  alerts when a top-level task exits with an error. If omitted, it defaults to
+  the same value as `notifiers.telegram.enabled`.
 - For `linkedin_email`, either set `LINKEDIN_EMAIL_SOURCE_PATH` to a local
   `.eml` file or directory, or set `LINKEDIN_EMAIL_IMAP_HOST`,
   `LINKEDIN_EMAIL_IMAP_USERNAME`, and `LINKEDIN_EMAIL_IMAP_PASSWORD`. Optional:

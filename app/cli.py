@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from app.config import ConfigError, SecretError
 from app.core import load_env_settings
+from app.core.error_handling import notify_task_failure
+from app.core.logging import get_logger, log_event
 from app.notifiers import (
     TelegramNotifierError,
     build_default_test_message,
     build_telegram_notifier,
 )
-from app.tasks import list_tasks, run_task
+from app.tasks import build_task, list_tasks
 
 DEFAULT_CONFIG_PATH = "config.yaml"
+_CLI_LOGGER = get_logger("cli")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.print_help()
             return 0
 
-        run_task(args.task, config_path=args.config)
+        run_task_with_failure_alerts(args.task, config_path=args.config)
     except (
         FileNotFoundError,
         ConfigError,
@@ -94,3 +98,32 @@ def send_telegram_test_message(text: str) -> None:
     )
     notifier.send_message(message)
     print("telegram test message sent")
+
+
+def run_task_with_failure_alerts(name: str, *, config_path: str) -> None:
+    """Run one task and send a best-effort alert if it fails."""
+
+    task = build_task(name, config_path=config_path)
+
+    try:
+        task.run()
+    except Exception as exc:
+        try:
+            notify_task_failure(
+                task_name=task.name,
+                config_path=config_path,
+                error=exc,
+            )
+        except Exception as alert_exc:  # pragma: no cover - defensive guard
+            log_event(
+                _CLI_LOGGER,
+                event="task_failure_alert_failed",
+                message="Task failure alert raised unexpectedly",
+                level=logging.ERROR,
+                exc_info=alert_exc,
+                task_name=task.name,
+                config_path=config_path,
+                original_error=str(exc),
+                alert_error=str(alert_exc),
+            )
+        raise
