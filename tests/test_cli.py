@@ -1,3 +1,4 @@
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -147,3 +148,47 @@ def test_cli_failed_task_triggers_failure_alert(
     assert recorded_calls[0]["config_path"] == "custom.yaml"
     assert isinstance(recorded_calls[0]["error"], ValueError)
     assert str(recorded_calls[0]["error"]) == "TWSE timeout"
+
+
+def test_cli_failure_alert_errors_do_not_mask_task_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FailingTask:
+        name = "tw_stock_movers"
+
+        def run(self) -> None:
+            raise ValueError("market data timeout")
+
+    monkeypatch.setattr(
+        "app.cli.build_task",
+        lambda name, *, config_path: FailingTask(),
+    )
+
+    def raise_alert_error(**kwargs) -> None:
+        raise RuntimeError("telegram outage")
+
+    monkeypatch.setattr(
+        "app.cli.notify_task_failure",
+        raise_alert_error,
+    )
+
+    exit_code = main(["--task", "tw_stock_movers", "--config", "custom.yaml"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err.strip() == "market data timeout"
+
+    structured_logs = [
+        json.loads(line)
+        for line in captured.out.splitlines()
+        if line.startswith("{")
+    ]
+    alert_failure_log = next(
+        log for log in structured_logs if log["event"] == "task_failure_alert_failed"
+    )
+    assert alert_failure_log["task_name"] == "tw_stock_movers"
+    assert alert_failure_log["config_path"] == "custom.yaml"
+    assert alert_failure_log["original_error"] == "market data timeout"
+    assert alert_failure_log["alert_error"] == "telegram outage"
+    assert "RuntimeError: telegram outage" in alert_failure_log["stack_trace"]

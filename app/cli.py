@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from app.config import ConfigError, SecretError
-from app.core.error_handling import notify_task_failure
 from app.core import load_env_settings
+from app.core.error_handling import notify_task_failure
+from app.core.logging import get_logger, log_event
 from app.notifiers import (
     TelegramNotifierError,
     build_default_test_message,
@@ -16,6 +18,7 @@ from app.notifiers import (
 from app.tasks import build_task, list_tasks
 
 DEFAULT_CONFIG_PATH = "config.yaml"
+_CLI_LOGGER = get_logger("cli")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -105,9 +108,22 @@ def run_task_with_failure_alerts(name: str, *, config_path: str) -> None:
     try:
         task.run()
     except Exception as exc:
-        notify_task_failure(
-            task_name=task.name,
-            config_path=config_path,
-            error=exc,
-        )
+        try:
+            notify_task_failure(
+                task_name=task.name,
+                config_path=config_path,
+                error=exc,
+            )
+        except Exception as alert_exc:  # pragma: no cover - defensive guard
+            log_event(
+                _CLI_LOGGER,
+                event="task_failure_alert_failed",
+                message="Task failure alert raised unexpectedly",
+                level=logging.ERROR,
+                exc_info=alert_exc,
+                task_name=task.name,
+                config_path=config_path,
+                original_error=str(exc),
+                alert_error=str(alert_exc),
+            )
         raise
