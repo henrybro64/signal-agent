@@ -6,13 +6,14 @@ import argparse
 import sys
 
 from app.config import ConfigError, SecretError
+from app.core.error_handling import notify_task_failure
 from app.core import load_env_settings
 from app.notifiers import (
     TelegramNotifierError,
     build_default_test_message,
     build_telegram_notifier,
 )
-from app.tasks import list_tasks, run_task
+from app.tasks import build_task, list_tasks
 
 DEFAULT_CONFIG_PATH = "config.yaml"
 
@@ -70,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.print_help()
             return 0
 
-        run_task(args.task, config_path=args.config)
+        run_task_with_failure_alerts(args.task, config_path=args.config)
     except (
         FileNotFoundError,
         ConfigError,
@@ -94,3 +95,19 @@ def send_telegram_test_message(text: str) -> None:
     )
     notifier.send_message(message)
     print("telegram test message sent")
+
+
+def run_task_with_failure_alerts(name: str, *, config_path: str) -> None:
+    """Run one task and send a best-effort alert if it fails."""
+
+    task = build_task(name, config_path=config_path)
+
+    try:
+        task.run()
+    except Exception as exc:
+        notify_task_failure(
+            task_name=task.name,
+            config_path=config_path,
+            error=exc,
+        )
+        raise

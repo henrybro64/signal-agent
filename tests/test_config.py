@@ -21,6 +21,7 @@ def test_load_config_reads_sample_file() -> None:
     assert config.tasks.tw_stock_movers.top_n == 20
     assert config.tasks.tw_stock_movers.timezone == "Asia/Taipei"
     assert config.notifiers.telegram.enabled is True
+    assert config.notifiers.telegram.failure_alerts_enabled is True
     assert config.scoring.freshness_weight == 0.6
     assert config.scoring.priority_weight == 0.4
     assert config.scoring.llm_enabled is False
@@ -187,6 +188,7 @@ def test_app_config_from_dict() -> None:
     assert config.tasks.job_search.keywords == ["data"]
     assert config.tasks.job_search.locations == []
     assert config.tasks.tw_stock_movers.top_n == 5
+    assert config.notifiers.telegram.failure_alerts_enabled is False
     assert config.scoring.llm_enabled is True
     assert config.scoring.llm_model == "gpt-5.2"
 
@@ -218,6 +220,39 @@ def test_app_config_from_dict_reads_optional_job_search_locations() -> None:
 
     assert config.tasks.job_search.locations == ["Taipei", "Remote"]
     assert config.scoring.llm_model == "gpt-4o-mini"
+
+
+def test_app_config_from_dict_allows_failure_alert_override() -> None:
+    config = AppConfig.from_dict(
+        {
+            "agent": {"timezone": "UTC", "digest_time": "09:00"},
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "sources": ["job104"],
+                    "keywords": ["python"],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 5,
+                    "timezone": "UTC",
+                },
+            },
+            "notifiers": {
+                "telegram": {
+                    "enabled": False,
+                    "failure_alerts_enabled": True,
+                }
+            },
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+            },
+        }
+    )
+
+    assert config.notifiers.telegram.enabled is False
+    assert config.notifiers.telegram.failure_alerts_enabled is True
 
 
 def test_app_config_from_dict_rejects_invalid_llm_model_type() -> None:

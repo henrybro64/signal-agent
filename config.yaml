@@ -22,6 +22,7 @@ tasks:
 notifiers:
   telegram:
     enabled: true
+    failure_alerts_enabled: true
 
 scoring:
   freshness_weight: 0.6

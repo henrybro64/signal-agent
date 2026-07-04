@@ -114,3 +114,36 @@ def test_cli_telegram_test_missing_credentials_returns_error(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are required" in captured.err
+
+
+def test_cli_failed_task_triggers_failure_alert(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    recorded_calls: list[dict[str, object]] = []
+
+    class FailingTask:
+        name = "job_search"
+
+        def run(self) -> None:
+            raise ValueError("TWSE timeout")
+
+    monkeypatch.setattr(
+        "app.cli.build_task",
+        lambda name, *, config_path: FailingTask(),
+    )
+    monkeypatch.setattr(
+        "app.cli.notify_task_failure",
+        lambda **kwargs: recorded_calls.append(kwargs),
+    )
+
+    exit_code = main(["--task", "job_search", "--config", "custom.yaml"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err.strip() == "TWSE timeout"
+    assert len(recorded_calls) == 1
+    assert recorded_calls[0]["task_name"] == "job_search"
+    assert recorded_calls[0]["config_path"] == "custom.yaml"
+    assert isinstance(recorded_calls[0]["error"], ValueError)
+    assert str(recorded_calls[0]["error"]) == "TWSE timeout"

@@ -46,6 +46,7 @@ class TasksConfig:
 @dataclass(slots=True)
 class TelegramNotifierConfig:
     enabled: bool
+    failure_alerts_enabled: bool
 
 
 @dataclass(slots=True)
@@ -94,6 +95,12 @@ class AppConfig:
             notifiers,
             "telegram",
             parent_path="notifiers",
+            source_name=source_name,
+        )
+        telegram_enabled = _require_bool(
+            telegram,
+            "enabled",
+            parent_path="notifiers.telegram",
             source_name=source_name,
         )
         scoring = _require_mapping(data, "scoring", source_name=source_name)
@@ -164,12 +171,14 @@ class AppConfig:
             ),
             notifiers=NotifiersConfig(
                 telegram=TelegramNotifierConfig(
-                    enabled=_require_bool(
+                    enabled=telegram_enabled,
+                    failure_alerts_enabled=_optional_bool(
                         telegram,
-                        "enabled",
+                        "failure_alerts_enabled",
+                        default=telegram_enabled,
                         parent_path="notifiers.telegram",
                         source_name=source_name,
-                    )
+                    ),
                 ),
             ),
             scoring=ScoringConfig(
