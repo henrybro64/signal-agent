@@ -93,10 +93,19 @@ def test_summarize_run_health_marks_failed_sources_degraded(
 ) -> None:
     db_path = tmp_path / "signals.sqlite3"
     init_db(db_path)
+    now = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
 
-    task_id = start_task_run("job_search", db_path=db_path)
+    task_id = start_task_run(
+        "job_search",
+        started_at=now - timedelta(hours=1),
+        db_path=db_path,
+    )
     finish_task_run(task_id, status="success", db_path=db_path)
-    run_id = start_signal_run("job104", db_path=db_path)
+    run_id = start_signal_run(
+        "job104",
+        started_at=now - timedelta(minutes=30),
+        db_path=db_path,
+    )
     finish_signal_run(
         run_id,
         status="failed",
@@ -107,6 +116,7 @@ def test_summarize_run_health_marks_failed_sources_degraded(
     summary = summarize_run_health(
         db_path=db_path,
         env=EnvSettings(),
+        now=now,
     )
     report = format_health_report(summary)
 
@@ -122,8 +132,13 @@ def test_summarize_run_health_shows_market_closed_skip(
 ) -> None:
     db_path = tmp_path / "signals.sqlite3"
     init_db(db_path)
+    now = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
 
-    task_id = start_task_run("tw_stock_movers", db_path=db_path)
+    task_id = start_task_run(
+        "tw_stock_movers",
+        started_at=now - timedelta(hours=1),
+        db_path=db_path,
+    )
     finish_task_run(
         task_id,
         status="skipped",
@@ -134,6 +149,7 @@ def test_summarize_run_health_shows_market_closed_skip(
     summary = summarize_run_health(
         db_path=db_path,
         env=EnvSettings(),
+        now=now,
     )
     report = format_health_report(summary)
 
@@ -141,6 +157,58 @@ def test_summarize_run_health_shows_market_closed_skip(
     assert (
         "Latest tw_stock_movers run: skipped (taiwan_market_closed)," in report
     )
+
+
+def test_summarize_run_health_marks_interrupted_running_as_degraded(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+    now = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
+    start_task_run(
+        "job_search",
+        started_at=now - timedelta(minutes=30),
+        db_path=db_path,
+    )
+
+    summary = summarize_run_health(
+        db_path=db_path,
+        env=EnvSettings(),
+        now=now,
+    )
+    report = format_health_report(summary)
+
+    assert summary.overall_status == "DEGRADED"
+    assert "running (interrupted or still in progress)" in report
+
+
+def test_summarize_run_health_marks_stale_success_as_degraded(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+    now = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
+    task_id = start_task_run(
+        "job_search",
+        started_at=now - timedelta(hours=40),
+        db_path=db_path,
+    )
+    finish_task_run(
+        task_id,
+        status="success",
+        finished_at=now - timedelta(hours=39),
+        db_path=db_path,
+    )
+
+    summary = summarize_run_health(
+        db_path=db_path,
+        env=EnvSettings(),
+        now=now,
+    )
+    report = format_health_report(summary)
+
+    assert summary.overall_status == "DEGRADED"
+    assert "(stale >36h)" in report
 
 
 def test_format_recent_signal_runs_includes_failed_error(tmp_path: Path) -> None:
@@ -193,7 +261,7 @@ def test_cli_health_reads_temp_db(
 ) -> None:
     db_path = tmp_path / "signals.sqlite3"
     init_db(db_path)
-    started = datetime(2026, 6, 25, 0, 5, tzinfo=UTC)
+    started = datetime.now(UTC) - timedelta(minutes=5)
     task_id = start_task_run(
         "job_search",
         started_at=started,
@@ -216,6 +284,7 @@ def test_cli_health_reads_temp_db(
     assert "Latest job_search run: completed," in captured.out
     assert "Asia/Taipei" in captured.out
     assert "Overall: OK" in captured.out
+    assert "(stale" not in captured.out
 
 
 def test_cli_recent_runs_respects_limit_and_order(

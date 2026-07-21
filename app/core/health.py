@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -22,6 +22,14 @@ DEFAULT_DB_PATH = Path("data/signals.sqlite3")
 DB_PATH_ENV_VAR = "SIGNAL_AGENT_DB_PATH"
 DEFAULT_HEALTH_TASKS: tuple[str, ...] = ("job_search", "tw_stock_movers")
 DEFAULT_TIMEZONE = "Asia/Taipei"
+# Align roughly with Ubuntu VM schedules: job_search twice daily; stock movers
+# weekdays only (allow a weekend gap before flagging stale).
+DEFAULT_STALE_AFTER_HOURS: dict[str, int] = {
+    "job_search": 36,
+    "tw_stock_movers": 72,
+}
+DEFAULT_STALE_AFTER_HOURS_FALLBACK = 48
+TERMINAL_TASK_STATUSES = frozenset({"success", "failed", "skipped"})
 
 
 class HealthError(ValueError):
@@ -38,13 +46,28 @@ class HealthSummary:
     failed_sources_last_window: int
     window_hours: int
     latest_task_runs: dict[str, TaskRunRecord | None] = field(default_factory=dict)
+    stale_after_hours_by_task: dict[str, int] = field(default_factory=dict)
+    now: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def overall_status(self) -> str:
         if self.failed_sources_last_window > 0:
             return "DEGRADED"
-        for run in self.latest_task_runs.values():
-            if run is not None and run.status == "failed":
+        for task_name, run in self.latest_task_runs.items():
+            if run is None:
+                continue
+            if _is_interrupted_task_run(run):
+                return "DEGRADED"
+            if run.status == "failed":
+                return "DEGRADED"
+            if _is_stale_task_run(
+                run,
+                now=self.now,
+                stale_after_hours=_stale_after_hours_for(
+                    task_name,
+                    self.stale_after_hours_by_task,
+                ),
+            ):
                 return "DEGRADED"
         return "OK"
 
@@ -80,6 +103,8 @@ def summarize_run_health(
     task_names: tuple[str, ...] = DEFAULT_HEALTH_TASKS,
     timezone_name: str = DEFAULT_TIMEZONE,
     env: EnvSettings | None = None,
+    stale_after_hours_by_task: dict[str, int] | None = None,
+    now: datetime | None = None,
 ) -> HealthSummary:
     """Build a concise health summary from local SQLite history."""
 
@@ -93,6 +118,7 @@ def summarize_run_health(
         failed_sources = count_failed_signal_runs(
             window_hours=window_hours,
             db_path=resolved,
+            now=now,
         )
     except (OSError, sqlite3.Error) as exc:
         raise HealthError(
@@ -106,6 +132,12 @@ def summarize_run_health(
         failed_sources_last_window=failed_sources,
         window_hours=window_hours,
         latest_task_runs=latest_task_runs,
+        stale_after_hours_by_task=(
+            dict(DEFAULT_STALE_AFTER_HOURS)
+            if stale_after_hours_by_task is None
+            else dict(stale_after_hours_by_task)
+        ),
+        now=_coerce_utc(now or datetime.now(UTC)),
     )
 
 
@@ -117,7 +149,15 @@ def format_health_report(summary: HealthSummary) -> str:
         f"DB: {summary.db_path}",
     ]
     for task_name, run in summary.latest_task_runs.items():
-        detail = _format_task_run_line(run, summary.timezone_name)
+        detail = _format_task_run_line(
+            run,
+            summary.timezone_name,
+            stale_after_hours=_stale_after_hours_for(
+                task_name,
+                summary.stale_after_hours_by_task,
+            ),
+            now=summary.now,
+        )
         lines.append(f"Latest {task_name} run: {detail}")
     lines.append(
         "Recent failed sources: "
@@ -165,15 +205,24 @@ def load_recent_signal_runs(
 def _format_task_run_line(
     run: TaskRunRecord | None,
     timezone_name: str,
+    *,
+    stale_after_hours: int,
+    now: datetime,
 ) -> str:
     if run is None:
         return "none"
     stamp = _format_local_timestamp(run.started_at, timezone_name)
     label = _display_task_status(run.status)
+    if _is_interrupted_task_run(run):
+        return f"{label} (interrupted or still in progress), {stamp}"
     if run.status == "skipped":
         reason = (run.error_message or "unspecified").strip()
-        return f"{label} ({reason}), {stamp}"
-    return f"{label}, {stamp}"
+        line = f"{label} ({reason}), {stamp}"
+    else:
+        line = f"{label}, {stamp}"
+    if _is_stale_task_run(run, now=now, stale_after_hours=stale_after_hours):
+        line = f"{line} (stale >{stale_after_hours}h)"
+    return line
 
 
 def _display_task_status(status: str) -> str:
@@ -182,6 +231,31 @@ def _display_task_status(status: str) -> str:
     if status == "success":
         return "completed"
     return status
+
+
+def _is_interrupted_task_run(run: TaskRunRecord) -> bool:
+    return run.status not in TERMINAL_TASK_STATUSES
+
+
+def _is_stale_task_run(
+    run: TaskRunRecord,
+    *,
+    now: datetime,
+    stale_after_hours: int,
+) -> bool:
+    if stale_after_hours <= 0:
+        return False
+    if run.status not in {"success", "skipped"}:
+        return False
+    age = _coerce_utc(now) - _coerce_utc(run.started_at)
+    return age > timedelta(hours=stale_after_hours)
+
+
+def _stale_after_hours_for(
+    task_name: str,
+    mapping: dict[str, int],
+) -> int:
+    return mapping.get(task_name, DEFAULT_STALE_AFTER_HOURS_FALLBACK)
 
 
 def _format_signal_run_line(
@@ -203,3 +277,9 @@ def _format_signal_run_line(
 def _format_local_timestamp(value: datetime, timezone_name: str) -> str:
     local = value.astimezone(ZoneInfo(timezone_name))
     return f"{local.strftime('%Y-%m-%d %H:%M')} {timezone_name}"
+
+
+def _coerce_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
