@@ -43,9 +43,13 @@ python -m pytest
 Use Docker Compose for an Ubuntu VM when you want a simple containerized run
 path before moving to k3s.
 
+For unattended VM scheduling (cron or systemd), follow the full runbook:
+[`docs/ubuntu-vm-deployment.md`](docs/ubuntu-vm-deployment.md). Helper scripts
+live under `deploy/ubuntu/`. **k3s is optional** and not required for MVP.
+
 ```bash
 cp .env.example .env
-mkdir -p data
+mkdir -p data logs
 docker compose build
 docker compose run --rm signal-agent python main.py --task dummy
 docker compose run --rm signal-agent python main.py --task fetch
@@ -73,6 +77,9 @@ Compose behavior:
   path such as `/app/data/...`, or add another volume mount.
 
 ## k3s CronJobs
+
+Optional. Prefer the Ubuntu VM + Compose path
+([`docs/ubuntu-vm-deployment.md`](docs/ubuntu-vm-deployment.md)) for MVP.
 
 Use the manifests in `deploy/k3s/` after you have a `signal-agent` image built
 from the repository `Dockerfile`.
@@ -174,7 +181,15 @@ signal-agent/
 │   │   ├── tpex.py
 │   │   └── twse.py
 │   └── tasks/
+├── docs/
+│   └── ubuntu-vm-deployment.md
 ├── deploy/
+│   ├── ubuntu/
+│   │   ├── crontab.example
+│   │   ├── run-job-search.sh
+│   │   ├── run-task.sh
+│   │   ├── run-tw-stock-movers.sh
+│   │   └── systemd/
 │   └── k3s/
 │       ├── configmap.yaml
 │       ├── cronjob-job-search.yaml

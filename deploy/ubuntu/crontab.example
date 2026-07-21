@@ -1,0 +1,17 @@
+# Example crontab for signal-agent on an Ubuntu VM (Docker Compose).
+#
+# Install:
+#   1. Set SIGNAL_AGENT_HOME below to your clone path (default /opt/signal-agent)
+#   2. crontab -e  and paste these lines
+#   3. crontab -l  to verify
+#
+# Schedules use Asia/Taipei via CRON_TZ so the host timezone can stay UTC.
+
+CRON_TZ=Asia/Taipei
+SIGNAL_AGENT_HOME=/opt/signal-agent
+
+# Job search at 08:05 and 18:05 Asia/Taipei
+5 8,18 * * * cd "$SIGNAL_AGENT_HOME" && ./deploy/ubuntu/run-job-search.sh >> logs/job_search.log 2>&1
+
+# Taiwan stock movers every 10 minutes on weekdays (task still guards market hours)
+*/10 * * * 1-5 cd "$SIGNAL_AGENT_HOME" && ./deploy/ubuntu/run-tw-stock-movers.sh >> logs/tw_stock_movers.log 2>&1

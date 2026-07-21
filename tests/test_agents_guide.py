@@ -88,6 +88,8 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/profiles/henry_job_profile.md",
         "app/notifiers/telegram.py",
         "sql/schema.sql",
+        "docs/ubuntu-vm-deployment.md",
+        "deploy/ubuntu/crontab.example",
         "deploy/k3s/cronjob-job-search.yaml",
         ".github/workflows/ci.yml",
     ]

@@ -1,0 +1,11 @@
+[Unit]
+Description=signal-agent tw_stock_movers via Docker Compose
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/signal-agent
+ExecStart=/opt/signal-agent/deploy/ubuntu/run-tw-stock-movers.sh
+StandardOutput=append:/opt/signal-agent/logs/tw_stock_movers.log
+StandardError=append:/opt/signal-agent/logs/tw_stock_movers.log

@@ -1,0 +1,12 @@
+[Unit]
+Description=signal-agent job_search via Docker Compose
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/signal-agent
+ExecStart=/opt/signal-agent/deploy/ubuntu/run-job-search.sh
+# Append stdout/stderr to the same log file cron uses
+StandardOutput=append:/opt/signal-agent/logs/job_search.log
+StandardError=append:/opt/signal-agent/logs/job_search.log
