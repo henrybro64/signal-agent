@@ -29,6 +29,8 @@ python -m pip install -e '.[dev]'
 cp .env.example .env
 python main.py --help
 python main.py --list-tasks
+python main.py --health
+python main.py --recent-runs --limit 5
 python main.py --task dummy
 python main.py --task fetch
 python main.py --task job_search
@@ -206,6 +208,11 @@ signal-agent/
 
 - `python main.py --help` or `signal-agent --help` shows the available options.
 - `python main.py --list-tasks` shows the registered CLI task names.
+- `python main.py --health` prints a concise SQLite health summary for recent
+  scheduled task runs, failed sources, and Telegram credential presence. It does
+  not fetch external sources or send Telegram messages.
+- `python main.py --recent-runs --limit 20` prints the newest source collection
+  rows from `signal_runs`.
 - `python main.py --task dummy` loads `config.yaml`, reads `.env`, and prints a
   short bootstrap summary that proves the entrypoint wiring works.
 - `python main.py --task fetch` runs the configured job-search sources,

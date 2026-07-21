@@ -35,6 +35,8 @@ def test_main_help_command() -> None:
     assert "signal-agent" in result.stdout
     assert "--task" in result.stdout
     assert "--list-tasks" in result.stdout
+    assert "--health" in result.stdout
+    assert "--recent-runs" in result.stdout
     assert "--telegram-test" in result.stdout
 
 

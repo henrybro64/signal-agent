@@ -9,6 +9,13 @@ import sys
 from app.config import ConfigError, SecretError
 from app.core import load_env_settings
 from app.core.error_handling import notify_task_failure
+from app.core.health import (
+    HealthError,
+    format_health_report,
+    format_recent_signal_runs,
+    load_recent_signal_runs,
+    summarize_run_health,
+)
 from app.core.logging import get_logger, log_event
 from app.notifiers import (
     TelegramNotifierError,
@@ -18,6 +25,7 @@ from app.notifiers import (
 from app.tasks import build_task, list_tasks
 
 DEFAULT_CONFIG_PATH = "config.yaml"
+DEFAULT_RECENT_RUNS_LIMIT = 20
 _CLI_LOGGER = get_logger("cli")
 
 
@@ -41,11 +49,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="List the available bootstrap tasks and exit.",
     )
     action_group.add_argument(
+        "--health",
+        action="store_true",
+        help="Print a concise health summary from local SQLite history.",
+    )
+    action_group.add_argument(
+        "--recent-runs",
+        action="store_true",
+        help="Print recent source collection runs from SQLite.",
+    )
+    action_group.add_argument(
         "--telegram-test",
         nargs="?",
         const="",
         metavar="TEXT",
         help="Send a Telegram test message, optionally using custom text.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_RECENT_RUNS_LIMIT,
+        help=(
+            "Maximum rows for --recent-runs. "
+            f"Default: {DEFAULT_RECENT_RUNS_LIMIT}."
+        ),
     )
     parser.add_argument(
         "--config",
@@ -66,6 +93,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        if args.health:
+            print_health_report()
+            return 0
+
+        if args.recent_runs:
+            print_recent_runs(limit=args.limit)
+            return 0
+
         if args.telegram_test is not None:
             send_telegram_test_message(args.telegram_test)
             return 0
@@ -78,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     except (
         FileNotFoundError,
         ConfigError,
+        HealthError,
         SecretError,
         TelegramNotifierError,
         ValueError,
@@ -86,6 +122,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     return 0
+
+
+def print_health_report() -> None:
+    """Print the operator health summary without contacting external services."""
+
+    summary = summarize_run_health()
+    print(format_health_report(summary))
+
+
+def print_recent_runs(*, limit: int) -> None:
+    """Print recent source runs without contacting external services."""
+
+    if limit < 0:
+        raise ValueError("--limit must be a non-negative integer")
+    runs = load_recent_signal_runs(limit=limit)
+    print(format_recent_signal_runs(runs))
 
 
 def send_telegram_test_message(text: str) -> None:
