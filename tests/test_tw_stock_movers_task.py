@@ -158,7 +158,8 @@ def test_tw_stock_movers_task_skips_when_market_is_closed(
     captured = capsys.readouterr()
     assert "Taiwan market is closed" in captured.out
     assert db_path.exists()
-    assert _task_run_statuses(db_path) == ["success"]
+    assert _task_run_statuses(db_path) == ["skipped"]
+    assert _latest_task_error(db_path) == "taiwan_market_closed"
 
 
 def test_tw_stock_movers_task_filters_and_persists_stock_items(
@@ -599,7 +600,7 @@ def test_tw_stock_movers_task_does_not_require_openai_key(
     captured = capsys.readouterr()
     assert "Taiwan market is closed" in captured.out
     assert db_path.exists()
-    assert _task_run_statuses(db_path) == ["success"]
+    assert _task_run_statuses(db_path) == ["skipped"]
 
 
 def _stock_mover_item(
@@ -691,6 +692,21 @@ def _task_run_statuses(db_path: Path) -> list[str]:
             "SELECT status FROM task_runs ORDER BY id"
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def _latest_task_error(db_path: Path) -> str | None:
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT error_message
+            FROM task_runs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    if row is None:
+        return None
+    return None if row[0] is None else str(row[0])
 
 
 def _parse_structured_logs(output: str) -> list[dict[str, object]]:

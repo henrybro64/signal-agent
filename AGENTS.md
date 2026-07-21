@@ -178,9 +178,7 @@ Work in this order unless a human asks otherwise:
 
 ```text
 1. #56  Ubuntu VM deployment runbook (cron / systemd + Compose) — DONE
-2. #54  GitHub Actions CI for pytest, ruff, package smoke
-        Workflow: `.github/workflows/ci.yml` (verify/harden; do not add a
-        second workflow). Local equivalent: `make check`.
+2. #54  GitHub Actions CI for pytest, ruff, package smoke — DONE
 3. #50  Health/status CLI for scheduled runs
 4. #53  Configurable source timeouts, retries, and fetch limits
 5. #49  Multiple job-search profiles and per-profile configuration
@@ -206,7 +204,7 @@ points:
 |-------|---------------------|
 | #56 | `docs/ubuntu-vm-deployment.md`, `deploy/ubuntu/` (wrappers, crontab, `install-systemd.sh`) — done |
 | #54 | `.github/workflows/ci.yml`, `tests/test_ci_workflow.py`, README CI notes |
-| #50 | `app/cli.py`, `app/core/db.py`, new status helper + tests |
+| #50 | `app/cli.py`, `app/core/db.py`, `app/core/health.py`, tests — in this PR |
 | #53 | `config.yaml`, source constructors, `app/core/config.py`, source tests |
 | #49 | `config.yaml`, `app/profiles/`, `app/tasks/job_search.py`, scorers |
 | #55 | `app/scorers/`, `app/tasks/job_search.py`, scoring config keys |

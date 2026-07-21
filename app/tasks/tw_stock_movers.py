@@ -114,8 +114,9 @@ class TwStockMoversTask(BaseTask):
                 )
                 self.end_task_run(
                     db_path=db_path,
-                    status="success",
+                    status="skipped",
                     notified_count=0,
+                    error_message="taiwan_market_closed",
                 )
                 return
 

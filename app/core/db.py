@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal
@@ -47,7 +47,41 @@ class UpsertResult:
 
 
 SignalRunStatus = Literal["completed", "failed"]
-TaskRunStatus = Literal["success", "failed"]
+TaskRunStatus = Literal["success", "failed", "skipped"]
+VALID_TASK_RUN_STATUSES: frozenset[str] = frozenset(
+    {"success", "failed", "skipped"}
+)
+
+
+@dataclass(slots=True, frozen=True)
+class SignalRunRecord:
+    """One persisted source collection run."""
+
+    id: int
+    source: str
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    fetched_count: int
+    inserted_count: int
+    updated_count: int
+    error: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class TaskRunRecord:
+    """One persisted top-level task execution."""
+
+    id: int
+    task_name: str
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    fetched_count: int
+    new_count: int
+    skipped_count: int
+    notified_count: int
+    error_message: str | None
 
 
 def init_db(db_path: str | Path) -> None:
@@ -423,8 +457,9 @@ def finish_task_run(
 ) -> None:
     """Record the completion of one top-level task execution."""
 
-    if status not in {"success", "failed"}:
-        raise ValueError(f"Invalid task run status: {status}")
+    if status not in VALID_TASK_RUN_STATUSES:
+        valid = ", ".join(sorted(VALID_TASK_RUN_STATUSES))
+        raise ValueError(f"Invalid task run status: {status}. Valid: {valid}")
 
     resolved_path = _resolve_db_path(db_path)
     finished_at_text = _format_timestamp(finished_at or datetime.now(UTC))
@@ -456,6 +491,173 @@ def finish_task_run(
         )
         if cursor.rowcount == 0:
             raise ValueError(f"Unknown task run id: {run_id}")
+
+
+def get_recent_signal_runs(
+    *,
+    limit: int = 20,
+    db_path: str | Path | None = None,
+) -> list[SignalRunRecord]:
+    """Return the newest source collection runs, newest first."""
+
+    if limit <= 0:
+        return []
+
+    resolved_path = _resolve_db_path(db_path)
+    with _connect(resolved_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                source,
+                started_at,
+                finished_at,
+                status,
+                fetched_count,
+                inserted_count,
+                updated_count,
+                error
+            FROM signal_runs
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [_row_to_signal_run(row) for row in rows]
+
+
+def get_latest_signal_run_by_source(
+    source: str,
+    *,
+    db_path: str | Path | None = None,
+) -> SignalRunRecord | None:
+    """Return the newest run for one source, if any."""
+
+    resolved_path = _resolve_db_path(db_path)
+    with _connect(resolved_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                source,
+                started_at,
+                finished_at,
+                status,
+                fetched_count,
+                inserted_count,
+                updated_count,
+                error
+            FROM signal_runs
+            WHERE source = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+
+    if row is None:
+        return None
+    return _row_to_signal_run(row)
+
+
+def get_latest_task_run(
+    task_name: str,
+    *,
+    db_path: str | Path | None = None,
+) -> TaskRunRecord | None:
+    """Return the newest task-level run for one task name, if any."""
+
+    resolved_path = _resolve_db_path(db_path)
+    with _connect(resolved_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                task_name,
+                started_at,
+                finished_at,
+                status,
+                fetched_count,
+                new_count,
+                skipped_count,
+                notified_count,
+                error_message
+            FROM task_runs
+            WHERE task_name = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (task_name,),
+        ).fetchone()
+
+    if row is None:
+        return None
+    return _row_to_task_run(row)
+
+
+def count_failed_signal_runs(
+    *,
+    window_hours: int = 24,
+    db_path: str | Path | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Count failed source runs started within the lookback window."""
+
+    if window_hours <= 0:
+        return 0
+
+    resolved_path = _resolve_db_path(db_path)
+    cutoff = _coerce_utc(now or datetime.now(UTC)) - timedelta(hours=window_hours)
+    cutoff_text = _format_timestamp(cutoff)
+
+    with _connect(resolved_path) as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS failed_count
+            FROM signal_runs
+            WHERE status = 'failed'
+              AND started_at >= ?
+            """,
+            (cutoff_text,),
+        ).fetchone()
+
+    return int(row["failed_count"]) if row is not None else 0
+
+
+def _row_to_signal_run(row: sqlite3.Row) -> SignalRunRecord:
+    finished_at = row["finished_at"]
+    return SignalRunRecord(
+        id=int(row["id"]),
+        source=str(row["source"]),
+        started_at=_parse_timestamp(row["started_at"]),
+        finished_at=(
+            _parse_timestamp(finished_at) if finished_at is not None else None
+        ),
+        status=str(row["status"]),
+        fetched_count=int(row["fetched_count"]),
+        inserted_count=int(row["inserted_count"]),
+        updated_count=int(row["updated_count"]),
+        error=row["error"],
+    )
+
+
+def _row_to_task_run(row: sqlite3.Row) -> TaskRunRecord:
+    finished_at = row["finished_at"]
+    return TaskRunRecord(
+        id=int(row["id"]),
+        task_name=str(row["task_name"]),
+        started_at=_parse_timestamp(row["started_at"]),
+        finished_at=(
+            _parse_timestamp(finished_at) if finished_at is not None else None
+        ),
+        status=str(row["status"]),
+        fetched_count=int(row["fetched_count"]),
+        new_count=int(row["new_count"]),
+        skipped_count=int(row["skipped_count"]),
+        notified_count=int(row["notified_count"]),
+        error_message=row["error_message"],
+    )
 
 
 def _resolve_db_path(db_path: str | Path | None) -> Path:

@@ -103,6 +103,10 @@ cd /opt/signal-agent
 # List tasks (Telegram secrets not required for this command)
 docker compose run --rm -T signal-agent python main.py --list-tasks
 
+# Local SQLite health / recent source runs (no network, no Telegram send)
+docker compose run --rm -T signal-agent python main.py --health
+docker compose run --rm -T signal-agent python main.py --recent-runs --limit 5
+
 # Entrypoint wiring
 docker compose run --rm -T signal-agent python main.py --task dummy
 
