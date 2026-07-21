@@ -112,8 +112,35 @@ def test_summarize_run_health_marks_failed_sources_degraded(
 
     assert summary.failed_sources_last_window == 1
     assert summary.overall_status == "DEGRADED"
+    assert "Latest job_search run: completed," in report
     assert "Telegram: not configured" in report
     assert "Overall: DEGRADED" in report
+
+
+def test_summarize_run_health_shows_market_closed_skip(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+
+    task_id = start_task_run("tw_stock_movers", db_path=db_path)
+    finish_task_run(
+        task_id,
+        status="skipped",
+        error_message="taiwan_market_closed",
+        db_path=db_path,
+    )
+
+    summary = summarize_run_health(
+        db_path=db_path,
+        env=EnvSettings(),
+    )
+    report = format_health_report(summary)
+
+    assert summary.overall_status == "OK"
+    assert (
+        "Latest tw_stock_movers run: skipped (taiwan_market_closed)," in report
+    )
 
 
 def test_format_recent_signal_runs_includes_failed_error(tmp_path: Path) -> None:
@@ -186,7 +213,7 @@ def test_cli_health_reads_temp_db(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "Latest job_search run: success," in captured.out
+    assert "Latest job_search run: completed," in captured.out
     assert "Asia/Taipei" in captured.out
     assert "Overall: OK" in captured.out
 

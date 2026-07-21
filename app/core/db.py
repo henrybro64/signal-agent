@@ -47,7 +47,10 @@ class UpsertResult:
 
 
 SignalRunStatus = Literal["completed", "failed"]
-TaskRunStatus = Literal["success", "failed"]
+TaskRunStatus = Literal["success", "failed", "skipped"]
+VALID_TASK_RUN_STATUSES: frozenset[str] = frozenset(
+    {"success", "failed", "skipped"}
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -454,8 +457,9 @@ def finish_task_run(
 ) -> None:
     """Record the completion of one top-level task execution."""
 
-    if status not in {"success", "failed"}:
-        raise ValueError(f"Invalid task run status: {status}")
+    if status not in VALID_TASK_RUN_STATUSES:
+        valid = ", ".join(sorted(VALID_TASK_RUN_STATUSES))
+        raise ValueError(f"Invalid task run status: {status}. Valid: {valid}")
 
     resolved_path = _resolve_db_path(db_path)
     finished_at_text = _format_timestamp(finished_at or datetime.now(UTC))

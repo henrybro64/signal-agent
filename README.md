@@ -209,8 +209,9 @@ signal-agent/
 - `python main.py --help` or `signal-agent --help` shows the available options.
 - `python main.py --list-tasks` shows the registered CLI task names.
 - `python main.py --health` prints a concise SQLite health summary for recent
-  scheduled task runs, failed sources, and Telegram credential presence. It does
-  not fetch external sources or send Telegram messages.
+  scheduled task runs, failed sources, and Telegram credential presence. Market-
+  closed stock runs show as `skipped (taiwan_market_closed)`. It does not fetch
+  external sources or send Telegram messages.
 - `python main.py --recent-runs --limit 20` prints the newest source collection
   rows from `signal_runs`.
 - `python main.py --task dummy` loads `config.yaml`, reads `.env`, and prints a

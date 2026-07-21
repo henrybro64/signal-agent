@@ -169,7 +169,19 @@ def _format_task_run_line(
     if run is None:
         return "none"
     stamp = _format_local_timestamp(run.started_at, timezone_name)
-    return f"{run.status}, {stamp}"
+    label = _display_task_status(run.status)
+    if run.status == "skipped":
+        reason = (run.error_message or "unspecified").strip()
+        return f"{label} ({reason}), {stamp}"
+    return f"{label}, {stamp}"
+
+
+def _display_task_status(status: str) -> str:
+    """Map stored task_runs statuses to operator-facing labels."""
+
+    if status == "success":
+        return "completed"
+    return status
 
 
 def _format_signal_run_line(
