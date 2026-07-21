@@ -46,7 +46,7 @@ def test_ci_workflow_runs_pytest_ruff_and_package_smoke() -> None:
         if "run" in step
     ]
 
-    assert any("pip install --upgrade pip" in command for command in run_commands)
+    assert any("pip install --upgrade pip==" in command for command in run_commands)
     assert any("make test" in command for command in run_commands)
     assert any("make lint" in command for command in run_commands)
     assert any("make package-smoke" in command for command in run_commands)
