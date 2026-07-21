@@ -55,6 +55,7 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
     required_paths = [
         "main.py",
         "app/cli.py",
+        "app/config.py",
         "config.yaml",
         ".env.example",
         "Dockerfile",
@@ -69,11 +70,21 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/core/logging.py",
         "app/core/error_handling.py",
         "app/sources/base.py",
+        "app/sources/dummy.py",
+        "app/sources/job104.py",
+        "app/sources/linkedin_email.py",
+        "app/sources/indeed.py",
+        "app/sources/glassdoor.py",
+        "app/sources/twse.py",
+        "app/sources/tpex.py",
         "app/tasks/base.py",
+        "app/tasks/dummy.py",
+        "app/tasks/fetch.py",
         "app/tasks/job_search.py",
         "app/tasks/tw_stock_movers.py",
         "app/scorers/job_rule_scorer.py",
         "app/scorers/job_llm_scorer.py",
+        "app/scorers/job_search.py",
         "app/profiles/henry_job_profile.md",
         "app/notifiers/telegram.py",
         "sql/schema.sql",
@@ -84,11 +95,45 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
     assert not missing, f"AGENTS.md architecture paths missing on disk: {missing}"
 
 
+def test_agents_guide_names_key_sources_and_tasks() -> None:
+    text = _guide_text()
+    for needle in (
+        "indeed.py",
+        "glassdoor.py",
+        "fetch.py",
+        "dummy.py",
+        "fetch_from_sources",
+        "job104.py",
+        "linkedin_email.py",
+        "twse.py",
+        "tpex.py",
+    ):
+        assert needle in text, f"AGENTS.md missing layout mention: {needle}"
+
+
+def test_agents_guide_mvp_map_has_file_level_direction() -> None:
+    text = _guide_text()
+    marker = "## Completed MVP map (#1–#25)"
+    assert marker in text
+    section = text.split(marker, 1)[1].split("## ", 1)[0]
+    for needle in (
+        "app/core/models.py",
+        "app/sources/base.py",
+        "app/tasks/job_search.py",
+        "app/sources/indeed.py",
+        "app/tasks/fetch.py",
+        "app/core/error_handling.py",
+    ):
+        assert needle in section, f"MVP map missing file-level path: {needle}"
+
+
 def test_agents_guide_does_not_document_removed_pipeline_module() -> None:
     text = _guide_text()
     # Historical issue #26 mentioned app/core/pipeline.py; it was never shipped.
-    assert "app/core/pipeline.py" not in text
     assert not (ROOT / "app/core/pipeline.py").exists()
+    assert "There is **no** shared `app/core/pipeline.py`" in text
+    assert "│   │   ├── pipeline.py" not in text
+    assert "│   │   └── pipeline.py" not in text
 
 
 def test_readme_points_agents_to_agents_md() -> None:

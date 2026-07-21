@@ -42,6 +42,7 @@ signal-agent/
 ├── AGENTS.md               # this guide
 ├── README.md               # human operator docs
 ├── app/
+│   ├── config.py           # backward-compatible re-exports (prefer app.core.*)
 │   ├── core/
 │   │   ├── models.py       # SignalItem and shared models
 │   │   ├── config.py       # config.yaml loader
@@ -50,19 +51,37 @@ signal-agent/
 │   │   ├── time_utils.py   # Taiwan market-hours helpers
 │   │   ├── logging.py      # structured JSON logging
 │   │   └── error_handling.py  # Telegram failure alerts + redaction
-│   ├── sources/            # BaseSource plugins → SignalItem
-│   ├── tasks/              # BaseTask workflows + CLI registry
-│   ├── scorers/            # rule + optional LLM job scoring
+│   ├── sources/
+│   │   ├── base.py         # BaseSource + fetch_from_sources helper
+│   │   ├── dummy.py        # in-memory sample source
+│   │   ├── job104.py       # 104 job search
+│   │   ├── linkedin_email.py  # LinkedIn job-alert email parsing
+│   │   ├── indeed.py       # best-effort Indeed collector
+│   │   ├── glassdoor.py    # best-effort Glassdoor collector
+│   │   ├── twse.py         # TWSE movers
+│   │   └── tpex.py         # TPEx movers
+│   ├── tasks/
+│   │   ├── base.py         # BaseTask
+│   │   ├── dummy.py        # CLI wiring smoke task
+│   │   ├── fetch.py        # multi-source fetch + persist bootstrap
+│   │   ├── job_search.py   # job digest workflow
+│   │   └── tw_stock_movers.py  # TW stock mover digest workflow
+│   ├── scorers/
+│   │   ├── job_rule_scorer.py
+│   │   ├── job_llm_scorer.py   # optional; fail open to rules
+│   │   └── job_search.py   # profile loading + score orchestration
 │   ├── profiles/           # packaged job-scoring profiles (*.md)
-│   └── notifiers/          # Telegram delivery
+│   └── notifiers/
+│       └── telegram.py
 ├── sql/schema.sql
 ├── deploy/k3s/             # CronJob manifests
 ├── data/                   # local SQLite (gitignored)
 └── tests/
 ```
 
-There is **no** shared core pipeline module. Orchestration lives in tasks
-(`app/tasks/*.py`) and shared helpers under `app/core/` and `app/sources/`.
+There is **no** shared `app/core/pipeline.py` module (historical issue #26 sketched
+one; it was never shipped). Orchestration lives in tasks (`app/tasks/*.py`) and
+the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 
 ## Module boundaries
 
@@ -126,19 +145,27 @@ Do not remove earlier stages when adding a later one.
 ## Completed MVP map (#1–#25)
 
 Historical order (already merged). Use as archaeology only — do not reopen unless
-a regression is found.
+a regression is found. Paths below are the current landing spots for each slice.
 
-| # | Topic | Primary areas |
-|---|--------|----------------|
-| 1–2 | Repo + tooling | layout, `pyproject.toml`, Makefile, ruff/pytest |
-| 3–5 | Models, sources, tasks/CLI | `app/core/models.py`, `app/sources/base.py`, `app/tasks/`, `app/cli.py` |
-| 6–7 | Config + secrets | `app/core/config.py`, `app/core/secrets.py`, `.env.example` |
-| 8–9 | SQLite + Telegram | `app/core/db.py`, `sql/schema.sql`, `app/notifiers/telegram.py` |
-| 10–15 | Job search MVP | profiles, scorers, `job104`, `linkedin_email`, `job_search` task, LLM scorer |
-| 16–19 | TW stock movers | `time_utils`, `twse`, `tpex`, `tw_stock_movers` task |
+| # | Topic | Primary files / areas |
+|---|--------|------------------------|
+| 1–2 | Repo + tooling | `pyproject.toml`, `Makefile`, `main.py`, ruff/pytest |
+| 3 | `SignalItem` model | `app/core/models.py` |
+| 4 | Source plugin interface | `app/sources/base.py`, `app/sources/dummy.py` |
+| 5 | Task interface + CLI | `app/tasks/base.py`, `app/tasks/dummy.py`, `app/cli.py` |
+| 6–7 | Config + secrets | `app/core/config.py`, `app/core/secrets.py`, `.env.example`, `deploy/k3s/secret.example.yaml` |
+| 8 | SQLite + dedup | `app/core/db.py`, `sql/schema.sql` |
+| 9 | Telegram notifier | `app/notifiers/telegram.py` |
+| 10–11 | Job profile + rule scorer | `app/profiles/`, `app/scorers/job_rule_scorer.py`, `app/scorers/job_search.py` |
+| 12–13 | Job sources | `app/sources/job104.py`, `app/sources/linkedin_email.py`, `app/sources/indeed.py`, `app/sources/glassdoor.py` |
+| 14–15 | Job-search task + optional LLM | `app/tasks/job_search.py`, `app/scorers/job_llm_scorer.py` |
+| 16 | Market-hours guard | `app/core/time_utils.py` |
+| 17–19 | TW stock movers | `app/sources/twse.py`, `app/sources/tpex.py`, `app/tasks/tw_stock_movers.py` |
 | 20–22 | Packaging / deploy | `Dockerfile`, `docker-compose.yml`, `deploy/k3s/` |
-| 23–25 | Ops hardening | `logging.py`, `task_runs` history, `error_handling.py` failure alerts |
+| 23–25 | Ops hardening | `app/core/logging.py`, `task_runs` in `app/core/db.py`, `app/core/error_handling.py` |
 
+Also present from MVP bootstrap (not a separate open issue): `app/tasks/fetch.py`
+multi-source fetch/persist helper used for wiring and source-level failure isolation.
 ## Next execution order (M6)
 
 Work in this order unless a human asks otherwise:
