@@ -30,6 +30,7 @@ def test_signal_agent_console_script_lists_tasks() -> None:
         "fetch",
         "job_search",
         "stock_watchlist",
+        "tw_market_assistant",
         "tw_stock_movers",
     ]
 

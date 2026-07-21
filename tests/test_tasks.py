@@ -17,6 +17,7 @@ from app.tasks import (
     FetchTask,
     JobSearchTask,
     StockWatchlistTask,
+    TwMarketAssistantTask,
     TwStockMoversTask,
     build_task,
     list_tasks,
@@ -44,6 +45,7 @@ def test_list_tasks_returns_registered_task_names() -> None:
         "fetch",
         "job_search",
         "stock_watchlist",
+        "tw_market_assistant",
         "tw_stock_movers",
     ]
 
@@ -94,6 +96,13 @@ def test_build_task_supports_stock_watchlist_task() -> None:
     assert task.name == "stock_watchlist"
 
 
+def test_build_task_supports_tw_market_assistant_task() -> None:
+    task = build_task("tw_market_assistant", config_path="config.yaml")
+
+    assert isinstance(task, TwMarketAssistantTask)
+    assert task.name == "tw_market_assistant"
+
+
 def test_build_task_supports_tw_stock_movers_task() -> None:
     task = build_task("tw_stock_movers", config_path="config.yaml")
 
@@ -109,7 +118,7 @@ def test_build_task_unknown_name_raises_clear_error() -> None:
         ValueError,
         match=(
             "Available tasks: dummy, fetch, job_search, "
-            "stock_watchlist, tw_stock_movers"
+            "stock_watchlist, tw_market_assistant, tw_stock_movers"
         ),
     ):
         build_task("missing-task", config_path="config.yaml")
