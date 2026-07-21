@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Set User/Group to the account that owns /opt/signal-agent and can run docker.
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/opt/signal-agent
-ExecStart=/opt/signal-agent/deploy/ubuntu/run-tw-stock-movers.sh
-StandardOutput=append:/opt/signal-agent/logs/tw_stock_movers.log
-StandardError=append:/opt/signal-agent/logs/tw_stock_movers.log
+# Placeholders replaced by deploy/ubuntu/install-systemd.sh
+User=__DEPLOY_USER__
+Group=__DEPLOY_GROUP__
+WorkingDirectory=__SIGNAL_AGENT_HOME__
+ExecStart=__SIGNAL_AGENT_HOME__/deploy/ubuntu/run-tw-stock-movers.sh
+StandardOutput=append:__SIGNAL_AGENT_HOME__/logs/tw_stock_movers.log
+StandardError=append:__SIGNAL_AGENT_HOME__/logs/tw_stock_movers.log

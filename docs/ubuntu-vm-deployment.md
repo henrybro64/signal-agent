@@ -94,17 +94,17 @@ Rebuild after every `git pull` that changes application code or the Dockerfile.
 cd /opt/signal-agent
 
 # List tasks (Telegram secrets not required for this command)
-docker compose run --rm signal-agent python main.py --list-tasks
+docker compose run --rm -T signal-agent python main.py --list-tasks
 
 # Entrypoint wiring
-docker compose run --rm signal-agent python main.py --task dummy
+docker compose run --rm -T signal-agent python main.py --task dummy
 
 # Optional Telegram connectivity check (needs Telegram secrets)
-docker compose run --rm signal-agent python main.py --telegram-test
+docker compose run --rm -T signal-agent python main.py --telegram-test
 
 # Manual task runs (may fail clearly if secrets/sources are missing)
-docker compose run --rm signal-agent python main.py --task job_search
-docker compose run --rm signal-agent python main.py --task tw_stock_movers
+docker compose run --rm -T signal-agent python main.py --task job_search
+docker compose run --rm -T signal-agent python main.py --task tw_stock_movers
 ```
 
 Or use the wrappers (same commands; skip cleanly if another run is in progress):
@@ -150,24 +150,20 @@ crontab -l
 
 ## 7. Optional: systemd timers
 
-If you prefer systemd over cron, example units are in
-`deploy/ubuntu/systemd/`.
-
-Before installing, edit each `.service` file and set `User=` / `Group=` to the
-Linux account that owns `/opt/signal-agent` and is in the `docker` group.
+If you prefer systemd over cron, use the installer (it substitutes your Linux
+user and repo path into the unit templates — no hardcoded `User=ubuntu`):
 
 ```bash
 cd /opt/signal-agent
-# Edit User=/Group=/paths in the unit files if needed
-sudo cp deploy/ubuntu/systemd/*.service /etc/systemd/system/
-sudo cp deploy/ubuntu/systemd/*.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now signal-agent-job-search.timer
-sudo systemctl enable --now signal-agent-tw-stock-movers.timer
+sudo ./deploy/ubuntu/install-systemd.sh
+# Or explicitly:
+# sudo DEPLOY_USER="$USER" SIGNAL_AGENT_HOME=/opt/signal-agent \
+#   ./deploy/ubuntu/install-systemd.sh
 systemctl list-timers 'signal-agent-*'
 ```
 
-Timers set `Timezone=Asia/Taipei` (systemd 242+; Ubuntu 22.04 qualifies).
+The installer is safe to re-run after `git pull`. Timers set
+`Timezone=Asia/Taipei` (systemd 242+; Ubuntu 22.04 qualifies).
 
 ## 8. Inspect logs
 
@@ -193,8 +189,8 @@ cd /opt/signal-agent
 ./deploy/ubuntu/run-tw-stock-movers.sh
 
 # Or without wrappers
-docker compose run --rm signal-agent python main.py --task job_search
-docker compose run --rm signal-agent python main.py --task tw_stock_movers
+docker compose run --rm -T signal-agent python main.py --task job_search
+docker compose run --rm -T signal-agent python main.py --task tw_stock_movers
 
 # After code changes
 git pull

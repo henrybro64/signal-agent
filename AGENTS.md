@@ -204,7 +204,7 @@ points:
 
 | Issue | Likely touch points |
 |-------|---------------------|
-| #56 | `docs/ubuntu-vm-deployment.md`, `deploy/ubuntu/`, README pointer |
+| #56 | `docs/ubuntu-vm-deployment.md`, `deploy/ubuntu/` (wrappers, crontab, `install-systemd.sh`) |
 | #54 | `.github/workflows/ci.yml`, Makefile targets (extend if gaps remain) |
 | #50 | `app/cli.py`, `app/core/db.py`, new status helper + tests |
 | #53 | `config.yaml`, source constructors, `app/core/config.py`, source tests |

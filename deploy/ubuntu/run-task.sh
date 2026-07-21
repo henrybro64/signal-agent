@@ -27,11 +27,15 @@ if [[ ! -f .env ]]; then
 fi
 
 LOCK_FILE="${REPO_ROOT}/data/.${TASK_NAME}.lock"
-exec 9>"${LOCK_FILE}"
-if ! flock -n 9; then
-  echo "skipping ${TASK_NAME}: another run is already in progress" >&2
-  exit 0
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"${LOCK_FILE}"
+  if ! flock -n 9; then
+    echo "skipping ${TASK_NAME}: another run is already in progress" >&2
+    exit 0
+  fi
+else
+  echo "warning: flock not found; overlapping runs are not locked" >&2
 fi
 
-exec docker compose run --rm signal-agent \
+exec docker compose run --rm -T signal-agent \
   python main.py --task "${TASK_NAME}" --config /app/config.yaml
