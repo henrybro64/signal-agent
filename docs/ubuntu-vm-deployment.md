@@ -12,16 +12,20 @@ Helper scripts and a crontab example live under `deploy/ubuntu/`.
 ## Prerequisites
 
 - Ubuntu 22.04+ (or similar)
-- Docker Engine + Docker Compose plugin (`docker compose version`)
+- Docker Engine + Compose plugin (`docker compose version`)
+- Your Linux user in the `docker` group (so cron can run without root)
 - Git
 - Ability to set the host timezone or use `CRON_TZ=Asia/Taipei`
 
-Install Docker on Ubuntu if needed (official docs):  
+Install Docker from Docker’s official Ubuntu packages (recommended over the
+distro `docker.io` package):  
 https://docs.docker.com/engine/install/ubuntu/
 
-Confirm:
+Then:
 
 ```bash
+sudo usermod -aG docker "$USER"
+# log out and back in (or reboot) so the group membership applies
 docker --version
 docker compose version
 timedatectl   # prefer Asia/Taipei, or rely on CRON_TZ below
@@ -47,6 +51,9 @@ docker compose build
 
 ## 2. Create `.env`
 
+`.env` is **required** for Compose (`docker-compose.yml` loads it). Create it
+even if some values stay empty for dry runs.
+
 ```bash
 cd /opt/signal-agent
 cp .env.example .env
@@ -70,6 +77,7 @@ mkdir -p data logs
 
 - SQLite persists in `./data` (mounted at `/app/data` in the container).
 - Cron wrappers append to `./logs/*.log`.
+- Per-task lock files under `data/.*.lock` prevent overlapping Compose runs.
 
 ## 4. Build the Docker image
 
@@ -85,7 +93,7 @@ Rebuild after every `git pull` that changes application code or the Dockerfile.
 ```bash
 cd /opt/signal-agent
 
-# List tasks (no secrets required)
+# List tasks (Telegram secrets not required for this command)
 docker compose run --rm signal-agent python main.py --list-tasks
 
 # Entrypoint wiring
@@ -99,7 +107,7 @@ docker compose run --rm signal-agent python main.py --task job_search
 docker compose run --rm signal-agent python main.py --task tw_stock_movers
 ```
 
-Or use the wrappers (same commands, with logging-friendly exit codes):
+Or use the wrappers (same commands; skip cleanly if another run is in progress):
 
 ```bash
 ./deploy/ubuntu/run-job-search.sh
@@ -108,8 +116,8 @@ Or use the wrappers (same commands, with logging-friendly exit codes):
 
 ## 6. Install schedules (cron — preferred)
 
-Copy the example and install for your user (or root if the repo is only
-writable by root):
+Copy the example and install for the same user that owns `/opt/signal-agent`
+and can run `docker` without sudo:
 
 ```bash
 cd /opt/signal-agent
@@ -131,6 +139,9 @@ Intended schedules (Asia/Taipei):
 `tw_stock_movers` still applies its own Taiwan market-hours guard, so
 off-hours weekday runs exit cleanly without sending digests.
 
+The wrappers use `flock` so a slow `job_search` (for example LinkedIn IMAP)
+does not stack concurrent Compose runs on the shared SQLite file.
+
 Verify cron is installed:
 
 ```bash
@@ -140,11 +151,14 @@ crontab -l
 ## 7. Optional: systemd timers
 
 If you prefer systemd over cron, example units are in
-`deploy/ubuntu/systemd/`. Install:
+`deploy/ubuntu/systemd/`.
+
+Before installing, edit each `.service` file and set `User=` / `Group=` to the
+Linux account that owns `/opt/signal-agent` and is in the `docker` group.
 
 ```bash
 cd /opt/signal-agent
-# Edit WorkingDirectory / paths in the unit files if needed
+# Edit User=/Group=/paths in the unit files if needed
 sudo cp deploy/ubuntu/systemd/*.service /etc/systemd/system/
 sudo cp deploy/ubuntu/systemd/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -152,6 +166,8 @@ sudo systemctl enable --now signal-agent-job-search.timer
 sudo systemctl enable --now signal-agent-tw-stock-movers.timer
 systemctl list-timers 'signal-agent-*'
 ```
+
+Timers set `Timezone=Asia/Taipei` (systemd 242+; Ubuntu 22.04 qualifies).
 
 ## 8. Inspect logs
 
@@ -186,13 +202,23 @@ docker compose build
 
 # If a compose run left a stuck container
 docker compose ps -a
-docker compose rm -f
+docker compose rm -f signal-agent
 ```
 
 SQLite recovery tips:
 
 - Stop scheduled runs before copying `data/signals.sqlite3`.
 - Keep occasional backups: `cp data/signals.sqlite3 "data/signals.sqlite3.bak.$(date +%F)"`.
+
+## Troubleshooting
+
+| Symptom | Likely fix |
+|---------|------------|
+| `permission denied` talking to Docker | Add user to `docker` group; re-login |
+| `env_file ... must be a string` on very old Compose | Reinstall Docker Engine from Docker’s docs (or upgrade Compose) |
+| `.env is missing` from wrapper | `cp .env.example .env` |
+| Cron runs but `docker: command not found` | Ensure crontab `PATH` includes `/usr/bin` (see example) |
+| `skipping … another run is already in progress` | Expected under lock; wait or inspect hung containers |
 
 ## Path comparison
 

@@ -5,8 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Set User/Group to the account that owns /opt/signal-agent and can run docker.
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=/opt/signal-agent
 ExecStart=/opt/signal-agent/deploy/ubuntu/run-job-search.sh
-# Append stdout/stderr to the same log file cron uses
 StandardOutput=append:/opt/signal-agent/logs/job_search.log
 StandardError=append:/opt/signal-agent/logs/job_search.log

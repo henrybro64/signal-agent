@@ -56,13 +56,21 @@ def test_ubuntu_deploy_helpers_exist_and_are_executable() -> None:
 def test_crontab_example_matches_intended_schedules() -> None:
     crontab = (UBUNTU_DEPLOY / "crontab.example").read_text(encoding="utf-8")
     assert "CRON_TZ=Asia/Taipei" in crontab
+    assert "PATH=" in crontab
     assert "5 8,18 * * *" in crontab
     assert "*/10 * * * 1-5" in crontab
     assert "run-job-search.sh" in crontab
     assert "run-tw-stock-movers.sh" in crontab
 
 
+def test_run_task_wrapper_guards_env_and_overlap() -> None:
+    script = (UBUNTU_DEPLOY / "run-task.sh").read_text(encoding="utf-8")
+    assert "flock -n" in script
+    assert ".env is missing" in script
+    assert "another run is already in progress" in script
+
+
 def test_readme_points_to_ubuntu_vm_runbook() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "docs/ubuntu-vm-deployment.md" in readme
-    assert "k3s is optional" in readme.lower() or "optional" in readme.lower()
+    assert "k3s is optional" in readme.lower()

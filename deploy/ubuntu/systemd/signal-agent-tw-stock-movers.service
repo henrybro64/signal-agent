@@ -5,6 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Set User/Group to the account that owns /opt/signal-agent and can run docker.
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=/opt/signal-agent
 ExecStart=/opt/signal-agent/deploy/ubuntu/run-tw-stock-movers.sh
 StandardOutput=append:/opt/signal-agent/logs/tw_stock_movers.log

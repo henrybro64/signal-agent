@@ -6,7 +6,10 @@
 #   3. crontab -l  to verify
 #
 # Schedules use Asia/Taipei via CRON_TZ so the host timezone can stay UTC.
+# PATH is set explicitly because cron uses a minimal environment.
 
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 CRON_TZ=Asia/Taipei
 SIGNAL_AGENT_HOME=/opt/signal-agent
 

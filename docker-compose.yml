@@ -5,9 +5,10 @@ services:
       dockerfile: Dockerfile
     image: signal-agent:local
     working_dir: /app
+    # Plain path form stays compatible with older Compose plugins on Ubuntu.
+    # Create `.env` from `.env.example` before the first run (see docs/ubuntu-vm-deployment.md).
     env_file:
-      - path: .env
-        required: false
+      - .env
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data

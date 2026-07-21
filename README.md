@@ -60,8 +60,8 @@ docker compose run --rm signal-agent python main.py --telegram-test
 
 Compose behavior:
 
-- `.env` is loaded when present via `env_file`; it is optional for
-  `docker compose build`, but task runs that need secrets still require it.
+- Create `.env` from `.env.example` before the first `docker compose run`
+  (Compose loads `.env` via `env_file`).
 - Rebuild the image after pulling code changes: `docker compose build`.
 - `config.yaml` is mounted read-only at `/app/config.yaml`.
 - SQLite data persists in `./data`, so the default database lives at
