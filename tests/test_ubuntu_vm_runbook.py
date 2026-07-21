@@ -73,17 +73,34 @@ def test_systemd_units_use_install_placeholders() -> None:
 
 def test_crontab_example_matches_intended_schedules() -> None:
     crontab = (UBUNTU_DEPLOY / "crontab.example").read_text(encoding="utf-8")
-    assert "CRON_TZ=Asia/Taipei" in crontab
+    assert "CRON_TZ=" not in crontab
+    assert "timedatectl set-timezone Asia/Taipei" in crontab
     assert "PATH=" in crontab
     assert "5 8,18 * * *" in crontab
     assert "*/10 * * * 1-5" in crontab
     assert "run-job-search.sh" in crontab
     assert "run-tw-stock-movers.sh" in crontab
+    assert "flock" in crontab
+
+
+def test_systemd_timers_embed_taipei_in_oncalendar() -> None:
+    job_timer = (
+        UBUNTU_DEPLOY / "systemd" / "signal-agent-job-search.timer"
+    ).read_text(encoding="utf-8")
+    stock_timer = (
+        UBUNTU_DEPLOY / "systemd" / "signal-agent-tw-stock-movers.timer"
+    ).read_text(encoding="utf-8")
+    assert "Timezone=" not in job_timer
+    assert "Timezone=" not in stock_timer
+    assert "OnCalendar=Asia/Taipei *-*-* 08:05:00" in job_timer
+    assert "OnCalendar=Asia/Taipei *-*-* 18:05:00" in job_timer
+    assert "OnCalendar=Asia/Taipei Mon..Fri *-*-* *:00/10:00" in stock_timer
 
 
 def test_run_task_wrapper_guards_env_and_overlap() -> None:
     script = (UBUNTU_DEPLOY / "run-task.sh").read_text(encoding="utf-8")
     assert "flock -n" in script
+    assert "flock is required" in script
     assert ".env is missing" in script
     assert "another run is already in progress" in script
     assert "docker compose run --rm -T" in script

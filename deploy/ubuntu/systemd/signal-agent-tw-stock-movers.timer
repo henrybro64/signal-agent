@@ -1,9 +1,8 @@
 [Unit]
-Description=Timer for signal-agent tw_stock_movers (every 10m weekdays)
+Description=Timer for signal-agent tw_stock_movers (every 10m weekdays Asia/Taipei)
 
 [Timer]
-Timezone=Asia/Taipei
-OnCalendar=Mon..Fri *-*-* *:00/10:00
+OnCalendar=Asia/Taipei Mon..Fri *-*-* *:00/10:00
 Persistent=true
 Unit=signal-agent-tw-stock-movers.service
 

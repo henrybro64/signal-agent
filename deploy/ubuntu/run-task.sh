@@ -27,14 +27,14 @@ if [[ ! -f .env ]]; then
 fi
 
 LOCK_FILE="${REPO_ROOT}/data/.${TASK_NAME}.lock"
-if command -v flock >/dev/null 2>&1; then
-  exec 9>"${LOCK_FILE}"
-  if ! flock -n 9; then
-    echo "skipping ${TASK_NAME}: another run is already in progress" >&2
-    exit 0
-  fi
-else
-  echo "warning: flock not found; overlapping runs are not locked" >&2
+if ! command -v flock >/dev/null 2>&1; then
+  echo "error: flock is required to prevent overlapping Compose runs (util-linux)" >&2
+  exit 1
+fi
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+  echo "skipping ${TASK_NAME}: another run is already in progress" >&2
+  exit 0
 fi
 
 exec docker compose run --rm -T signal-agent \

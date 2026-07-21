@@ -15,7 +15,7 @@ Helper scripts and a crontab example live under `deploy/ubuntu/`.
 - Docker Engine + Compose plugin (`docker compose version`)
 - Your Linux user in the `docker` group (so cron can run without root)
 - Git
-- Ability to set the host timezone or use `CRON_TZ=Asia/Taipei`
+- Host timezone **Asia/Taipei** when using cron (see below)
 
 Install Docker from Docker’s official Ubuntu packages (recommended over the
 distro `docker.io` package):  
@@ -26,10 +26,17 @@ Then:
 ```bash
 sudo usermod -aG docker "$USER"
 # log out and back in (or reboot) so the group membership applies
+sudo timedatectl set-timezone Asia/Taipei
 docker --version
 docker compose version
-timedatectl   # prefer Asia/Taipei, or rely on CRON_TZ below
+timedatectl   # Time zone should be Asia/Taipei
 ```
+
+**Cron timezone note (Ubuntu 22.04):** Jammy’s cron daemon uses a single
+system timezone and does **not** honor per-crontab `CRON_TZ`. Set the host
+with `timedatectl` as above. Optional systemd timers embed `Asia/Taipei`
+directly in each `OnCalendar=` expression, so they still fire correctly even
+if the host stays on UTC.
 
 ## 1. Clone the repo
 
@@ -127,7 +134,8 @@ crontab -e
 ```
 
 Paste the contents of `deploy/ubuntu/crontab.example` (adjust `SIGNAL_AGENT_HOME`
-if the repo is not at `/opt/signal-agent`).
+if the repo is not at `/opt/signal-agent`). Confirm `timedatectl` shows
+`Asia/Taipei` first — otherwise 08:05/18:05 will follow the wrong zone.
 
 Intended schedules (Asia/Taipei):
 
@@ -162,8 +170,8 @@ sudo ./deploy/ubuntu/install-systemd.sh
 systemctl list-timers 'signal-agent-*'
 ```
 
-The installer is safe to re-run after `git pull`. Timers set
-`Timezone=Asia/Taipei` (systemd 242+; Ubuntu 22.04 qualifies).
+The installer is safe to re-run after `git pull`. Timer `OnCalendar=` lines
+include `Asia/Taipei` so schedules do not depend on the host timezone.
 
 ## 8. Inspect logs
 
