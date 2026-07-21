@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer for signal-agent tw_stock_movers (every 10m weekdays Asia/Taipei)
+
+[Timer]
+OnCalendar=Asia/Taipei Mon..Fri *-*-* *:00/10:00
+Persistent=true
+Unit=signal-agent-tw-stock-movers.service
+
+[Install]
+WantedBy=timers.target

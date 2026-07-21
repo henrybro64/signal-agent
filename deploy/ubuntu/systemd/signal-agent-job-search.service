@@ -1,0 +1,14 @@
+[Unit]
+Description=signal-agent job_search via Docker Compose
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Placeholders replaced by deploy/ubuntu/install-systemd.sh
+User=__DEPLOY_USER__
+Group=__DEPLOY_GROUP__
+WorkingDirectory=__SIGNAL_AGENT_HOME__
+ExecStart=__SIGNAL_AGENT_HOME__/deploy/ubuntu/run-job-search.sh
+StandardOutput=append:__SIGNAL_AGENT_HOME__/logs/job_search.log
+StandardError=append:__SIGNAL_AGENT_HOME__/logs/job_search.log

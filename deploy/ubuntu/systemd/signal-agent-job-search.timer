@@ -1,0 +1,11 @@
+[Unit]
+Description=Timer for signal-agent job_search (08:05 and 18:05 Asia/Taipei)
+
+[Timer]
+OnCalendar=Asia/Taipei *-*-* 08:05:00
+OnCalendar=Asia/Taipei *-*-* 18:05:00
+Persistent=true
+Unit=signal-agent-job-search.service
+
+[Install]
+WantedBy=timers.target

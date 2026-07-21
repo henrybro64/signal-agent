@@ -18,7 +18,7 @@ def test_docker_compose_signal_agent_service_matches_issue_21_contract() -> None
         },
         "image": "signal-agent:local",
         "working_dir": "/app",
-        "env_file": [{"path": ".env", "required": False}],
+        "env_file": [".env"],
         "volumes": [
             "./config.yaml:/app/config.yaml:ro",
             "./data:/app/data",

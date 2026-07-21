@@ -1,0 +1,23 @@
+# Example crontab for signal-agent on an Ubuntu VM (Docker Compose).
+#
+# Install:
+#   1. Set the host timezone to Asia/Taipei (required on Ubuntu 22.04):
+#        sudo timedatectl set-timezone Asia/Taipei
+#      Jammy cron does NOT honor per-crontab CRON_TZ; schedules follow the
+#      system/daemon timezone only.
+#   2. Set SIGNAL_AGENT_HOME below to your clone path (default /opt/signal-agent)
+#   3. crontab -e  and paste these lines
+#   4. crontab -l  to verify
+#
+# PATH is set explicitly because cron uses a minimal environment.
+# Overlapping runs are serialized by flock inside deploy/ubuntu/run-task.sh.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+SIGNAL_AGENT_HOME=/opt/signal-agent
+
+# Job search at 08:05 and 18:05 (host timezone must be Asia/Taipei)
+5 8,18 * * * cd "$SIGNAL_AGENT_HOME" && ./deploy/ubuntu/run-job-search.sh >> logs/job_search.log 2>&1
+
+# Taiwan stock movers every 10 minutes on weekdays (task still guards market hours)
+*/10 * * * 1-5 cd "$SIGNAL_AGENT_HOME" && ./deploy/ubuntu/run-tw-stock-movers.sh >> logs/tw_stock_movers.log 2>&1

@@ -74,7 +74,11 @@ signal-agent/
 │   └── notifiers/
 │       └── telegram.py
 ├── sql/schema.sql
-├── deploy/k3s/             # CronJob manifests
+├── docs/
+│   └── ubuntu-vm-deployment.md  # Ubuntu VM + Compose + cron/systemd runbook
+├── deploy/
+│   ├── ubuntu/             # cron wrappers, crontab.example, optional systemd units
+│   └── k3s/                # CronJob manifests (optional)
 ├── data/                   # local SQLite (gitignored)
 └── tests/
 ```
@@ -137,8 +141,10 @@ CI (`.github/workflows/ci.yml`) already runs `make test`, `make lint`, and
 ## Deployment evolution
 
 1. **Local** — `python -m venv .venv`, `pip install -e '.[dev]'`, `python main.py --task …`
-2. **Docker Compose** — Ubuntu VM-friendly one-off and scheduled host timers; see README.
+2. **Docker Compose** — Ubuntu VM-friendly one-off and scheduled host timers;
+   see `docs/ubuntu-vm-deployment.md` and `deploy/ubuntu/`.
 3. **k3s** — manifests under `deploy/k3s/` for CronJobs sharing a PVC-backed SQLite volume.
+   Optional; not required for MVP.
 
 Do not remove earlier stages when adding a later one.
 
@@ -186,7 +192,8 @@ Work in this order unless a human asks otherwise:
 
 Also open (schedule separately; not part of the M6 hardening sequence above):
 
-- #29 — Taiwan stock investment assistant digest (product feature)
+- #29 — Taiwan stock investment assistant digest (product feature). Parked behind
+  M6; prefer completing #52 first so the epic can reuse watchlist alerts.
 - #60–#67 — M7 agent-platform evolution (LangChain/LangGraph/MCP). Implement only
   when explicitly requested; preserve the current CLI and scheduled task model.
 
@@ -197,7 +204,7 @@ points:
 
 | Issue | Likely touch points |
 |-------|---------------------|
-| #56 | `README.md`, optional `docs/ubuntu-vm-runbook.md`, Compose/cron examples |
+| #56 | `docs/ubuntu-vm-deployment.md`, `deploy/ubuntu/` (wrappers, crontab, `install-systemd.sh`) |
 | #54 | `.github/workflows/ci.yml`, Makefile targets (extend if gaps remain) |
 | #50 | `app/cli.py`, `app/core/db.py`, new status helper + tests |
 | #53 | `config.yaml`, source constructors, `app/core/config.py`, source tests |
