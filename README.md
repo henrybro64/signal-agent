@@ -4,11 +4,15 @@
 such as job openings and Taiwan stock mover reports, then sending Telegram
 digests.
 
+Coding agents should follow [`AGENTS.md`](AGENTS.md) for architecture,
+coding rules, completed MVP scope (#1–#25), and the recommended M6 execution
+order. Operator docs stay in this README.
+
 ## Status
 
-This repository is in bootstrap mode. It includes a working Python entrypoint,
-sample configuration files, and the initial package layout for future source
-collectors, scoring, and notifier integrations.
+MVP workflows for job search and Taiwan stock movers are implemented, with
+Docker Compose and k3s CronJob deployment paths. Open work focuses on M6
+hardening and later agent-platform evolution; see `AGENTS.md`.
 
 It now includes early best-effort job collectors for `job104`, `indeed`,
 `glassdoor`, and `linkedin_email`. Some live runs can still be blocked by
@@ -135,6 +139,7 @@ sql/                 # SQLite schema for signals and run history
 
 ```text
 signal-agent/
+├── AGENTS.md            # Codex / coding-agent implementation map
 ├── README.md
 ├── .env.example
 ├── .dockerignore
@@ -148,6 +153,8 @@ signal-agent/
 │   ├── core/
 │   │   ├── config.py
 │   │   ├── db.py
+│   │   ├── error_handling.py
+│   │   ├── logging.py
 │   │   ├── models.py
 │   │   ├── secrets.py
 │   │   └── time_utils.py
@@ -156,13 +163,16 @@ signal-agent/
 │   ├── profiles/
 │   │   └── henry_job_profile.md
 │   ├── scorers/
+│   │   ├── job_llm_scorer.py
 │   │   ├── job_rule_scorer.py
 │   │   └── job_search.py
 │   ├── sources/
 │   │   ├── job104.py
 │   │   ├── indeed.py
 │   │   ├── glassdoor.py
-│   │   └── linkedin_email.py
+│   │   ├── linkedin_email.py
+│   │   ├── tpex.py
+│   │   └── twse.py
 │   └── tasks/
 ├── deploy/
 │   └── k3s/
