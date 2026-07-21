@@ -1,7 +1,9 @@
 name: CI
 
-on:
+"on":
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -17,14 +19,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Pin pip to a verified version (Sonar githubactions:S8544).
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip==26.1.2
+
       - name: Install dependencies
-        run: make install-dev
+        run: make install-dev PYTHON=python
 
       - name: Run tests
-        run: make test
+        run: make test PYTHON=python
 
       - name: Run lint
-        run: make lint
+        run: make lint PYTHON=python
 
       - name: Run package smoke test
-        run: make package-smoke
+        run: make package-smoke PYTHON=python

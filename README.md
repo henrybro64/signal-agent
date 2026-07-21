@@ -560,6 +560,17 @@ print(rule_result.score, rule_result.recommendation, rule_result.reason)
 
 ## Development
 
+GitHub Actions CI runs on every pull request and on pushes to `main`. The
+workflow installs Python 3.12, then runs the same checks as local development:
+
+- `make test` (`pytest`)
+- `make lint` (`ruff check .`)
+- `make package-smoke` (build wheel, install it, verify `signal-agent --list-tasks`
+  and bundled profile data)
+
+Use `make check` locally before opening a PR; it runs all three targets in
+order.
+
 Use either the documented commands directly or the `Makefile` targets:
 
 ```bash
