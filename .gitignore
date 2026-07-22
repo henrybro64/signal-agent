@@ -5,9 +5,9 @@ __pycache__/
 .env
 *.env
 deploy/k3s/secret.yaml
-data/
-logs/
-output/
+/data/
+/logs/
+/output/
 *.db
 build/
 dist/

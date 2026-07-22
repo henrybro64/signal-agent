@@ -149,8 +149,8 @@ def test_tw_stock_movers_task_skips_when_market_is_closed(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: False,
+        "tw_market_skip_reason",
+        lambda: "taiwan_market_closed",
     )
 
     TwStockMoversTask(str(config_path)).run()
@@ -160,6 +160,29 @@ def test_tw_stock_movers_task_skips_when_market_is_closed(
     assert db_path.exists()
     assert _task_run_statuses(db_path) == ["skipped"]
     assert _latest_task_error(db_path) == "taiwan_market_closed"
+
+
+def test_tw_stock_movers_task_skips_on_taiwan_market_holiday(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(tmp_path, telegram_enabled=False)
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "tw_market_skip_reason",
+        lambda: "taiwan_market_holiday",
+    )
+
+    TwStockMoversTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert "Taiwan market holiday" in captured.out
+    assert db_path.exists()
+    assert _task_run_statuses(db_path) == ["skipped"]
+    assert _latest_task_error(db_path) == "taiwan_market_holiday"
 
 
 def test_tw_stock_movers_task_filters_and_persists_stock_items(
@@ -172,8 +195,8 @@ def test_tw_stock_movers_task_filters_and_persists_stock_items(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -220,8 +243,8 @@ def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -260,8 +283,8 @@ def test_tw_stock_movers_task_raises_when_all_sources_fail(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -310,8 +333,8 @@ def test_tw_stock_movers_task_sends_failure_digest_when_all_sources_fail(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -422,8 +445,8 @@ def test_tw_stock_movers_task_reports_both_markets_separately(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -463,8 +486,8 @@ def test_tw_stock_movers_task_continues_when_one_market_source_fails(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -491,8 +514,8 @@ def test_tw_stock_movers_task_persists_multiple_snapshot_rows(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -520,8 +543,8 @@ def test_tw_stock_movers_task_sends_partial_failure_warning_in_digest(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: True,
+        "tw_market_skip_reason",
+        lambda: None,
     )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
@@ -590,8 +613,8 @@ def test_tw_stock_movers_task_does_not_require_openai_key(
     monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.setattr(
         tw_stock_movers_task_module,
-        "is_tw_market_open",
-        lambda: False,
+        "tw_market_skip_reason",
+        lambda: "taiwan_market_closed",
     )
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 

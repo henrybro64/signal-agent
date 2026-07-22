@@ -63,6 +63,8 @@ def test_makefile_check_is_local_ci_equivalent() -> None:
     assert "package-smoke:" in makefile
     assert "signal-agent" in makefile
     assert "load_job_search_profile" in makefile
+    assert "load_tw_market_holiday_dates" in makefile
+    assert "is_tw_market_holiday" in makefile
 
 
 def test_readme_documents_make_check_for_local_verification() -> None:

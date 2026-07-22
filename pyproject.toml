@@ -30,6 +30,7 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 "app.profiles" = ["*.md"]
+"app.data" = ["*.yaml"]
 
 [tool.ruff]
 target-version = "py312"
