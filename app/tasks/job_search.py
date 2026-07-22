@@ -26,10 +26,9 @@ from app.core import (
 )
 from app.notifiers import build_telegram_notifier
 from app.scorers import (
-    JobLLMScorer,
     JobRuleScore,
-    JobRuleScorer,
-    load_job_search_profile,
+    JobScorePipeline,
+    build_job_score_pipeline,
 )
 from app.sources import build_job_search_sources_for_profile
 
@@ -66,6 +65,14 @@ class JobSearchSummary:
     ignored_non_job_count: int = 0
     profile_names: list[str] = field(default_factory=list)
     recorded_signal_ids: set[int] = field(default_factory=set)
+
+
+@dataclass(slots=True, frozen=True)
+class DigestContent:
+    """Telegram digest body and the signal ids it includes."""
+
+    text: str
+    signal_ids: list[int]
 
 
 @dataclass(slots=True, frozen=True)
@@ -109,7 +116,7 @@ class JobSearchTask(BaseTask):
                 raise ValueError("No job-search profiles are configured.")
             summary.profile_names = [profile.name for profile in profiles]
 
-            scorers_by_key: dict[str | None, JobRuleScorer | JobLLMScorer] = {}
+            scorers_by_key: dict[str | None, JobScorePipeline] = {}
 
             for profile in profiles:
                 sources = build_job_search_sources_for_profile(
@@ -124,14 +131,14 @@ class JobSearchTask(BaseTask):
                 if not sources:
                     continue
 
-                scorer = scorers_by_key.get(profile.scorer_profile)
-                if scorer is None:
-                    scorer = _build_job_scorer(
-                        config=config,
+                pipeline = scorers_by_key.get(profile.scorer_profile)
+                if pipeline is None:
+                    pipeline = build_job_score_pipeline(
+                        config=config.scoring,
                         env=env,
                         scorer_profile=profile.scorer_profile,
                     )
-                    scorers_by_key[profile.scorer_profile] = scorer
+                    scorers_by_key[profile.scorer_profile] = pipeline
 
                 for source in sources:
                     run_id = start_signal_run(source.name, db_path=db_path)
@@ -167,7 +174,7 @@ class JobSearchTask(BaseTask):
                                     item=item,
                                     signal_id=result.signal_id,
                                     summary=summary,
-                                    scorer=scorer,
+                                    pipeline=pipeline,
                                     db_path=db_path,
                                 )
                             else:
@@ -184,7 +191,7 @@ class JobSearchTask(BaseTask):
                                         item=item,
                                         signal_id=result.signal_id,
                                         summary=summary,
-                                        scorer=scorer,
+                                        pipeline=pipeline,
                                         db_path=db_path,
                                     )
                                 elif evaluation_state == "pending_digest":
@@ -371,15 +378,15 @@ class JobSearchTask(BaseTask):
         summary: JobSearchSummary,
         db_path: Path,
     ) -> NotificationOutcome:
-        reported_signal_ids = _collect_reported_signal_ids(summary)
-        digest = _build_telegram_digest(
+        reported_signal_ids: list[int] = []
+        digest_content = _build_telegram_digest(
             summary,
+            scoring=config.scoring,
             run_status=(
                 "failed" if summary.successful_sources == 0 else "success"
             ),
-            notified_count=len(reported_signal_ids),
         )
-        if not digest:
+        if not digest_content.text:
             self.emit_log(
                 "notification_skipped",
                 message="Telegram digest skipped",
@@ -390,6 +397,9 @@ class JobSearchTask(BaseTask):
             )
             print("telegram digest skipped: no new jobs to report")
             return NotificationOutcome(status="skipped_no_items")
+
+        reported_signal_ids = digest_content.signal_ids
+        digest = digest_content.text
 
         if not config.notifiers.telegram.enabled:
             self.emit_log(
@@ -444,10 +454,11 @@ class JobSearchTask(BaseTask):
         item: SignalItem,
         signal_id: int,
         summary: JobSearchSummary,
-        scorer: JobRuleScorer | JobLLMScorer,
+        pipeline: JobScorePipeline,
         db_path: Path,
     ) -> None:
-        score = scorer.score(item)
+        result = pipeline.score(item)
+        score = result.score
         status = "rejected" if score.recommendation == "reject" else "new"
         update_signal_evaluation(
             signal_id,
@@ -455,6 +466,20 @@ class JobSearchTask(BaseTask):
             reason=score.reason,
             status=status,
             db_path=db_path,
+        )
+        self.emit_log(
+            "job_scored",
+            message="Job scored",
+            db_path=str(db_path),
+            signal_id=signal_id,
+            job_title=item.title,
+            scoring_method=result.scoring_method,
+            llm_attempted=result.llm_attempted,
+            llm_skipped_reason=result.llm_skipped_reason,
+            llm_fallback_reason=result.llm_fallback_reason,
+            rule_score=result.rule_score,
+            final_score=score.score,
+            recommendation=score.recommendation,
         )
 
         scored_job = ScoredJob(signal_id=signal_id, item=item, score=score)
@@ -525,9 +550,9 @@ def _build_console_summary(
 def _build_telegram_digest(
     summary: JobSearchSummary,
     *,
+    scoring,
     run_status: str,
-    notified_count: int,
-) -> str:
+) -> DigestContent:
     has_useful_output = (
         bool(summary.strong_matches)
         or bool(summary.maybe_matches)
@@ -536,7 +561,7 @@ def _build_telegram_digest(
         or bool(summary.unsupported_sources)
     )
     if not has_useful_output:
-        return ""
+        return DigestContent(text="", signal_ids=[])
 
     lines = [
         "signal-agent job search digest",
@@ -550,9 +575,12 @@ def _build_telegram_digest(
             f"rejected={len(summary.rejected_jobs)}"
         ),
     ]
+    included_signal_ids: list[int] = []
 
     profile_names = summary.profile_names or _digest_profile_names(summary)
     group_by_profile = len(profile_names) > 1
+    strong_remaining = scoring.digest_max_strong_matches
+    maybe_remaining = scoring.digest_max_maybe_matches
 
     if group_by_profile:
         for profile_name in profile_names:
@@ -561,29 +589,58 @@ def _build_telegram_digest(
             strong = _jobs_for_profile(summary.strong_matches, profile_name)
             maybe = _jobs_for_profile(summary.maybe_matches, profile_name)
             rejected = _jobs_for_profile(summary.rejected_jobs, profile_name)
-            if strong:
-                lines.extend(_render_job_section("Top recommended jobs", strong))
-            if maybe:
-                lines.extend(_render_job_section("Maybe jobs", maybe))
-            if rejected:
-                lines.extend(_render_rejected_section(rejected))
-            if not strong and not maybe and not rejected:
+            if strong and strong_remaining > 0:
+                section_lines, signal_ids = _render_job_section(
+                    "Top recommended jobs",
+                    strong,
+                    max_items=strong_remaining,
+                )
+                lines.extend(section_lines)
+                included_signal_ids.extend(signal_ids)
+                strong_remaining -= len(signal_ids)
+            if maybe and maybe_remaining > 0:
+                section_lines, signal_ids = _render_job_section(
+                    "Maybe jobs",
+                    maybe,
+                    max_items=maybe_remaining,
+                )
+                lines.extend(section_lines)
+                included_signal_ids.extend(signal_ids)
+                maybe_remaining -= len(signal_ids)
+            if rejected and scoring.include_rejected_summary:
+                section_lines, signal_ids = _render_rejected_section(rejected)
+                lines.extend(section_lines)
+                included_signal_ids.extend(signal_ids)
+            if (
+                not strong
+                and not maybe
+                and not (rejected and scoring.include_rejected_summary)
+            ):
                 lines.append("")
                 lines.append("(no new scored jobs for this profile)")
     else:
-        if summary.strong_matches:
-            lines.extend(
-                _render_job_section(
-                    "Top recommended jobs",
-                    summary.strong_matches,
-                )
+        if summary.strong_matches and strong_remaining > 0:
+            section_lines, signal_ids = _render_job_section(
+                "Top recommended jobs",
+                summary.strong_matches,
+                max_items=strong_remaining,
             )
-        if summary.maybe_matches:
-            lines.extend(
-                _render_job_section("Maybe jobs", summary.maybe_matches)
+            lines.extend(section_lines)
+            included_signal_ids.extend(signal_ids)
+        if summary.maybe_matches and maybe_remaining > 0:
+            section_lines, signal_ids = _render_job_section(
+                "Maybe jobs",
+                summary.maybe_matches,
+                max_items=maybe_remaining,
             )
-        if summary.rejected_jobs:
-            lines.extend(_render_rejected_section(summary.rejected_jobs))
+            lines.extend(section_lines)
+            included_signal_ids.extend(signal_ids)
+        if summary.rejected_jobs and scoring.include_rejected_summary:
+            section_lines, signal_ids = _render_rejected_section(
+                summary.rejected_jobs
+            )
+            lines.extend(section_lines)
+            included_signal_ids.extend(signal_ids)
 
     if summary.failed_sources:
         lines.append("")
@@ -603,10 +660,13 @@ def _build_telegram_digest(
         f"fetched={summary.fetched_count}, "
         f"new={summary.new_count}, "
         f"skipped={summary.duplicate_count + summary.ignored_non_job_count}, "
-        f"notified={notified_count}"
+        f"notified={len(included_signal_ids)}"
     )
 
-    return "\n".join(lines)
+    return DigestContent(
+        text="\n".join(lines),
+        signal_ids=included_signal_ids,
+    )
 
 
 def _digest_profile_names(summary: JobSearchSummary) -> list[str]:
@@ -641,9 +701,22 @@ def _tag_search_profile(item: SignalItem, profile_name: str) -> SignalItem:
     )
 
 
-def _render_job_section(title: str, jobs: list[ScoredJob]) -> list[str]:
+def _render_job_section(
+    title: str,
+    jobs: list[ScoredJob],
+    *,
+    max_items: int | None = None,
+) -> tuple[list[str], list[int]]:
+    ordered = _sorted_jobs(jobs)
+    if max_items is not None:
+        displayed = ordered[:max_items]
+        remaining = len(ordered) - len(displayed)
+    else:
+        displayed = ordered
+        remaining = 0
+
     lines = ["", title]
-    for job in _sorted_jobs(jobs):
+    for job in displayed:
         company = _company_name(job.item)
         location = _location_name(job.item)
         descriptor = f"{company} | {location}" if location else company
@@ -654,23 +727,28 @@ def _render_job_section(title: str, jobs: list[ScoredJob]) -> list[str]:
         if job.item.url:
             lines.append(f"  {job.item.url}")
         lines.append(f"  {job.score.reason}")
-    return lines
+    if remaining > 0:
+        lines.append(f"- ...and {remaining} more job(s)")
+    return lines, [job.signal_id for job in displayed]
 
 
-def _render_rejected_section(jobs: list[ScoredJob]) -> list[str]:
+def _render_rejected_section(
+    jobs: list[ScoredJob],
+) -> tuple[list[str], list[int]]:
     lines = ["", "Rejected jobs summary"]
     ordered_jobs = _sorted_jobs(jobs)
-    for job in ordered_jobs[:_MAX_REJECT_LINES]:
+    displayed = ordered_jobs[:_MAX_REJECT_LINES]
+    for job in displayed:
         company = _company_name(job.item)
         prefix = f"- {job.item.title} [{job.score.score}/100]"
         if company:
             prefix += f" at {company}"
         lines.append(prefix)
         lines.append(f"  {job.score.reason}")
-    remaining = len(ordered_jobs) - _MAX_REJECT_LINES
+    remaining = len(ordered_jobs) - len(displayed)
     if remaining > 0:
         lines.append(f"- ...and {remaining} more rejected job(s)")
-    return lines
+    return lines, [job.signal_id for job in displayed]
 
 
 def _sorted_jobs(jobs: list[ScoredJob]) -> list[ScoredJob]:
@@ -695,17 +773,6 @@ def _location_name(item: SignalItem) -> str:
     return ""
 
 
-def _collect_reported_signal_ids(summary: JobSearchSummary) -> list[int]:
-    return [
-        job.signal_id
-        for job in (
-            summary.strong_matches
-            + summary.maybe_matches
-            + summary.rejected_jobs
-        )
-    ]
-
-
 def _job_rule_score_from_stored(score: float, reason: str) -> JobRuleScore:
     normalized = int(score)
     if normalized >= 60:
@@ -726,21 +793,3 @@ def _resolve_db_path() -> Path:
     if raw_path:
         return Path(raw_path).expanduser()
     return DEFAULT_DB_PATH
-
-
-def _build_job_scorer(
-    *,
-    config,
-    env,
-    scorer_profile: str | None = None,
-) -> JobRuleScorer | JobLLMScorer:
-    profile = load_job_search_profile(scorer_profile)
-    rule_scorer = JobRuleScorer(profile)
-    if not config.scoring.llm_enabled:
-        return rule_scorer
-    return JobLLMScorer(
-        api_key=env.openai_api_key or "",
-        model=config.scoring.llm_model,
-        profile=profile,
-        fallback_scorer=rule_scorer,
-    )

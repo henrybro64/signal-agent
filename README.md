@@ -320,12 +320,16 @@ task.run()
 persists each successful source to SQLite, and skips unsupported or failed
 sources without aborting the whole run.
 
-`python main.py --task job_search` scores newly inserted jobs with the optional
-OpenAI-backed scorer when `scoring.llm_enabled` is true, and falls back to the
-rule-based scorer if the API request fails or returns invalid structured JSON.
-Duplicate jobs are still stored. Unscored duplicates from earlier `fetch` runs
-are scored on the next `job_search` run, but jobs that were already reported in
-a digest are not rescored or included again.
+`python main.py --task job_search` runs rule-based scoring first, then optionally
+refines plausible candidates with the OpenAI-backed scorer when
+`scoring.llm_enabled` is true. Jobs below `scoring.llm_min_rule_score` stay
+rule-only; `scoring.llm_max_jobs_per_run` caps LLM calls per run. LLM failures
+fall back to the rule score without failing the task. Duplicate jobs are still
+stored. Unscored duplicates from earlier `fetch` runs are scored on the next
+`job_search` run, but jobs that were already reported in a digest are not
+rescored or included again. Telegram digests honor
+`digest_max_strong_matches`, `digest_max_maybe_matches`, and
+`include_rejected_summary`.
 
 `python main.py --task tw_stock_movers` checks `is_tw_market_open()` before it
 fetches. While the market is open, it persists only `tw_stock_mover` items,
@@ -500,6 +504,12 @@ scoring:
   priority_weight: 0.4
   llm_enabled: false
   llm_model: gpt-4o-mini
+  # Optional LLM budget and digest caps when llm_enabled: true
+  # llm_min_rule_score: 25
+  # llm_max_jobs_per_run: 20
+  # digest_max_strong_matches: 10
+  # digest_max_maybe_matches: 10
+  # include_rejected_summary: true
 
 # Optional. Omit the whole section (or any nested key) to keep safe defaults.
 sources:
@@ -547,6 +557,12 @@ env = load_env_settings()
 - Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`.
 - Set `scoring.llm_model` in `config.yaml` to choose which OpenAI model powers
   the optional LLM scorer.
+- Two-stage scoring: rule score always runs first; LLM runs only when enabled,
+  the rule score is at or above `scoring.llm_min_rule_score`, and
+  `scoring.llm_max_jobs_per_run` has not been reached. Stored reasons are
+  prefixed with `[rule]`, `[llm]`, or `[rule_fallback]`.
+- Digest caps: `digest_max_strong_matches` and `digest_max_maybe_matches` limit
+  listed jobs; set `include_rejected_summary: false` to omit the rejected summary.
 - Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` before using
   `--telegram-test` or the Telegram notifier.
 - `notifiers.telegram.failure_alerts_enabled` controls best-effort Telegram

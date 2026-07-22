@@ -24,7 +24,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | Milestone | Scope | Status |
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
-| M6 | Hardening / extensions #49–#57 | **In progress** — through #53 done; #49 in progress |
+| M6 | Hardening / extensions #49–#57 | **In progress** — through #49 done; #55 in progress |
 | M7 | LangChain-ready platform evolution #60–#67 | Later — only when asked |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
@@ -70,6 +70,7 @@ signal-agent/
 │   ├── scorers/
 │   │   ├── job_rule_scorer.py
 │   │   ├── job_llm_scorer.py   # optional; fail open to rules
+│   │   ├── job_score_pipeline.py  # two-stage rule → LLM orchestration
 │   │   └── job_search.py   # profile loading + score orchestration
 │   ├── profiles/           # packaged job-scoring profiles (*.md)
 │   └── notifiers/
@@ -182,7 +183,7 @@ Work in this order unless a human asks otherwise:
 2. #54  GitHub Actions CI for pytest, ruff, package smoke — DONE
 3. #50  Health/status CLI for scheduled runs — DONE
 4. #53  Configurable source timeouts, retries, and fetch limits — DONE
-5. #49  Multiple job-search profiles and per-profile configuration
+5. #49  Multiple job-search profiles and per-profile configuration — DONE
 6. #55  Two-stage job scoring with LLM budget and digest limits
 7. #51  Taiwan market holiday calendar in market-hours guard
 8. #52  Stock watchlist alert task (separate from top movers)
@@ -207,8 +208,8 @@ points:
 | #54 | `.github/workflows/ci.yml`, `tests/test_ci_workflow.py`, README CI notes — done |
 | #50 | `app/cli.py`, `app/core/db.py`, `app/core/health.py`, tests — done |
 | #53 | `config.yaml` `sources:`, `app/core/config.py`, source `from_config`, tests — done |
-| #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — in this PR |
-| #55 | `app/scorers/`, `app/tasks/job_search.py`, scoring config keys |
+| #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — done |
+| #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — in this PR |
 | #51 | `app/core/time_utils.py`, holiday data + tests |
 | #52 | new source/task under `app/sources/` / `app/tasks/`, config + Telegram |
 | #57 | `app/core/db.py`, `sql/`, migration runner + tests |

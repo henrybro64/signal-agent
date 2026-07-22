@@ -32,6 +32,11 @@ def test_load_config_reads_sample_file() -> None:
     assert config.scoring.priority_weight == 0.4
     assert config.scoring.llm_enabled is False
     assert config.scoring.llm_model == "gpt-4o-mini"
+    assert config.scoring.llm_min_rule_score == 25
+    assert config.scoring.llm_max_jobs_per_run == 20
+    assert config.scoring.digest_max_strong_matches == 10
+    assert config.scoring.digest_max_maybe_matches == 10
+    assert config.scoring.include_rejected_summary is True
     assert_close(config.sources.job104.timeout_seconds, 10.0)
     assert config.sources.job104.max_retries == 2
     assert_close(config.sources.job104.request_delay_seconds, 1.0)
@@ -214,6 +219,57 @@ def test_app_config_from_dict() -> None:
     assert len(config.tasks.job_search.profiles) == 1
     assert config.tasks.job_search.profiles[0].name == "default"
     assert config.tasks.job_search.profiles[0].keywords == ["data"]
+
+
+def test_app_config_from_dict_reads_custom_scoring_limits() -> None:
+    config = AppConfig.from_dict(
+        {
+            **_base_config_dict(),
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+                "llm_enabled": True,
+                "llm_model": "gpt-5.2",
+                "llm_min_rule_score": 40,
+                "llm_max_jobs_per_run": 5,
+                "digest_max_strong_matches": 3,
+                "digest_max_maybe_matches": 2,
+                "include_rejected_summary": False,
+            },
+        }
+    )
+
+    assert config.scoring.llm_min_rule_score == 40
+    assert config.scoring.llm_max_jobs_per_run == 5
+    assert config.scoring.digest_max_strong_matches == 3
+    assert config.scoring.digest_max_maybe_matches == 2
+    assert config.scoring.include_rejected_summary is False
+
+
+def test_app_config_from_dict_rejects_invalid_scoring_limits() -> None:
+    with pytest.raises(ConfigError, match="scoring.llm_min_rule_score"):
+        AppConfig.from_dict(
+            {
+                **_base_config_dict(),
+                "scoring": {
+                    "freshness_weight": 0.5,
+                    "priority_weight": 0.5,
+                    "llm_min_rule_score": 101,
+                },
+            }
+        )
+
+    with pytest.raises(ConfigError, match="scoring.llm_max_jobs_per_run"):
+        AppConfig.from_dict(
+            {
+                **_base_config_dict(),
+                "scoring": {
+                    "freshness_weight": 0.5,
+                    "priority_weight": 0.5,
+                    "llm_max_jobs_per_run": 0,
+                },
+            }
+        )
 
 
 def test_app_config_from_dict_reads_job_search_profiles() -> None:
