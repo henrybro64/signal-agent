@@ -7,6 +7,7 @@ from .config import (
 )
 from .db import (
     VALID_SIGNAL_STATUSES,
+    PendingDigestJob,
     SignalRunRecord,
     TaskRunRecord,
     UpsertResult,
@@ -19,6 +20,7 @@ from .db import (
     get_signal_evaluation,
     get_signal_evaluation_state,
     init_db,
+    list_pending_digest_jobs,
     mark_signals_digest_reported,
     start_signal_run,
     start_task_run,
@@ -56,6 +58,7 @@ __all__ = [
     "EnvSettings",
     "HealthError",
     "HealthSummary",
+    "PendingDigestJob",
     "SecretError",
     "SignalItem",
     "SignalRunRecord",
@@ -77,6 +80,7 @@ __all__ = [
     "has_telegram_credentials",
     "init_db",
     "is_tw_market_open",
+    "list_pending_digest_jobs",
     "load_config",
     "load_recent_signal_runs",
     "mark_signals_digest_reported",

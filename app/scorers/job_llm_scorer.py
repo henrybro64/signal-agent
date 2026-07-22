@@ -103,6 +103,14 @@ class JobLLMScorer:
 
         return _job_rule_score_from_llm(result)
 
+    def score_with_llm(self, item: SignalItem) -> JobRuleScore:
+        """Score with the LLM only; raise on API or parse failures."""
+
+        if item.item_type != "job":
+            raise JobLLMScorerError("LLM scoring requires item_type='job'")
+
+        return _job_rule_score_from_llm(self._score_with_llm(item))
+
     def _score_with_llm(self, item: SignalItem) -> JobLLMScoreResult:
         payload = {
             "model": self.model,

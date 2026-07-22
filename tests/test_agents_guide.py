@@ -85,6 +85,7 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/tasks/tw_stock_movers.py",
         "app/scorers/job_rule_scorer.py",
         "app/scorers/job_llm_scorer.py",
+        "app/scorers/job_score_pipeline.py",
         "app/scorers/job_search.py",
         "app/profiles/henry_job_profile.md",
         "app/notifiers/telegram.py",

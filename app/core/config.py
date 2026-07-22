@@ -84,6 +84,11 @@ class ScoringConfig:
     priority_weight: float
     llm_enabled: bool = False
     llm_model: str = "gpt-4o-mini"
+    llm_min_rule_score: int = 25
+    llm_max_jobs_per_run: int = 20
+    digest_max_strong_matches: int = 10
+    digest_max_maybe_matches: int = 10
+    include_rejected_summary: bool = True
 
 
 @dataclass(slots=True)
@@ -251,9 +256,87 @@ class AppConfig:
                     parent_path="scoring",
                     source_name=source_name,
                 ),
+                llm_min_rule_score=_parse_scoring_llm_min_rule_score(
+                    scoring,
+                    source_name=source_name,
+                ),
+                llm_max_jobs_per_run=_parse_scoring_positive_int(
+                    scoring,
+                    key="llm_max_jobs_per_run",
+                    default=20,
+                    source_name=source_name,
+                ),
+                digest_max_strong_matches=_parse_scoring_positive_int(
+                    scoring,
+                    key="digest_max_strong_matches",
+                    default=10,
+                    source_name=source_name,
+                ),
+                digest_max_maybe_matches=_parse_scoring_positive_int(
+                    scoring,
+                    key="digest_max_maybe_matches",
+                    default=10,
+                    source_name=source_name,
+                ),
+                include_rejected_summary=_optional_bool(
+                    scoring,
+                    "include_rejected_summary",
+                    default=True,
+                    parent_path="scoring",
+                    source_name=source_name,
+                ),
             ),
             sources=_parse_sources_config(sources, source_name=source_name),
         )
+
+
+def _parse_scoring_llm_min_rule_score(
+    data: dict[str, Any],
+    *,
+    source_name: str,
+) -> int:
+    parent_path = "scoring"
+    value = _optional_int(
+        data,
+        "llm_min_rule_score",
+        default=25,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    _require_non_negative_int(
+        value,
+        config_path=f"{parent_path}.llm_min_rule_score",
+        source_name=source_name,
+    )
+    if value > 100:
+        raise ConfigError(
+            f"Config value '{parent_path}.llm_min_rule_score' must be "
+            f"100 or less in {source_name}"
+        )
+    return value
+
+
+def _parse_scoring_positive_int(
+    data: dict[str, Any],
+    *,
+    key: str,
+    default: int,
+    source_name: str,
+) -> int:
+    parent_path = "scoring"
+    value = _optional_int(
+        data,
+        key,
+        default=default,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    _require_positive_int(
+        value,
+        config_path=f"{parent_path}.{key}",
+        source_name=source_name,
+    )
+    return value
 
 
 def _parse_job_search_task_config(

@@ -143,6 +143,100 @@ def test_job_search_task_skips_duplicates_for_telegram_digest(
     assert _task_run_statuses(db_path) == ["success", "success"]
 
 
+def test_job_search_task_drains_capped_pending_digest_without_refetch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    strong_content = (
+        "Remote role building Python and Pytest automation for Azure, AWS, "
+        "and Kubernetes workloads with SIEM, SOAR, DLP, and API security."
+    )
+    jobs = [
+        SignalItem(
+            source="static_jobs",
+            item_type="job",
+            title="Cloud SDET",
+            observed_at=OBSERVED_AT,
+            url="https://example.com/jobs/cloud-sdet",
+            content=strong_content,
+            metadata={
+                "company": "Example Security Product Company",
+                "location": "Taipei",
+                "work_style": "Hybrid",
+            },
+        ),
+        SignalItem(
+            source="static_jobs",
+            item_type="job",
+            title="Platform SDET",
+            observed_at=OBSERVED_AT,
+            url="https://example.com/jobs/platform-sdet",
+            content=strong_content,
+            metadata={
+                "company": "Example Platform Company",
+                "location": "Taipei",
+                "work_style": "Hybrid",
+            },
+        ),
+    ]
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        digest_max_strong_matches=1,
+        include_rejected_summary=False,
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources_for_profile.__globals__[
+            "SOURCE_FACTORIES"
+        ],
+        "static_jobs",
+        lambda _config: StaticJobSource(jobs),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    JobSearchTask(str(config_path)).run()
+    capsys.readouterr()
+    assert len(notifier.messages) == 1
+    first_message = notifier.messages[0]
+    rows = _fetch_signal_rows(db_path)
+    assert rows["Cloud SDET"]["score"] >= 60
+    assert rows["Platform SDET"]["score"] >= 60
+    reviewed = [
+        title for title, row in rows.items() if row["status"] == "reviewed"
+    ]
+    pending = [title for title, row in rows.items() if row["status"] == "new"]
+    assert len(reviewed) == 1
+    assert len(pending) == 1
+    assert reviewed[0] in first_message
+    assert pending[0] not in first_message
+
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources_for_profile.__globals__[
+            "SOURCE_FACTORIES"
+        ],
+        "static_jobs",
+        lambda _config: StaticJobSource([]),
+    )
+    JobSearchTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert "telegram digest sent" in captured.out
+    assert len(notifier.messages) == 2
+    assert pending[0] in notifier.messages[1]
+    rows = _fetch_signal_rows(db_path)
+    assert rows[pending[0]]["status"] == "reviewed"
+
+
 def test_job_search_task_reports_useful_failures_even_without_new_jobs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -427,7 +521,7 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
         ) -> None:
             calls.append((api_key, model))
 
-        def score(self, item: SignalItem):
+        def score_with_llm(self, item: SignalItem):
             return job_search_task_module.JobRuleScore(
                 score=88,
                 recommendation="strong_match",
@@ -440,8 +534,7 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
             )
 
     monkeypatch.setattr(
-        job_search_task_module,
-        "JobLLMScorer",
+        "app.scorers.job_score_pipeline.JobLLMScorer",
         FakeJobLLMScorer,
     )
 
@@ -452,6 +545,62 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
     assert "LLM fit" in notifier.messages[0]
     rows = _fetch_signal_rows(db_path)
     assert rows["Cloud SDET"]["score"] == 88.0
+    assert rows["Cloud SDET"]["reason"].startswith("[llm]")
+
+
+def test_job_search_task_skips_llm_for_low_rule_score_jobs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        llm_enabled=True,
+        llm_model="gpt-5.2",
+        llm_min_rule_score=25,
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    llm_calls: list[str] = []
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    class FakeJobLLMScorer:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def score_with_llm(self, item: SignalItem):
+            llm_calls.append(item.title)
+            return job_search_task_module.JobRuleScore(
+                score=88,
+                recommendation="strong_match",
+                reason="strong match (88/100): positives: LLM fit.",
+            )
+
+    monkeypatch.setattr(
+        "app.scorers.job_score_pipeline.JobLLMScorer",
+        FakeJobLLMScorer,
+    )
+
+    JobSearchTask(str(config_path)).run()
+
+    assert llm_calls == ["Cloud SDET", "Test Automation Engineer"]
+    rows = _fetch_signal_rows(db_path)
+    assert rows["Helpdesk Support Engineer"]["reason"].startswith("[rule]")
+    assert rows["Cloud SDET"]["reason"].startswith("[llm]")
+    assert rows["Test Automation Engineer"]["reason"].startswith("[llm]")
 
 
 def test_job_search_task_runs_multiple_profiles_and_groups_digest(
@@ -662,8 +811,35 @@ def _write_config(
     telegram_enabled: bool = True,
     llm_enabled: bool = False,
     llm_model: str = "gpt-4o-mini",
+    llm_min_rule_score: int | None = None,
+    digest_max_strong_matches: int | None = None,
+    digest_max_maybe_matches: int | None = None,
+    include_rejected_summary: bool | None = None,
 ) -> Path:
     config_path = tmp_path / "config.yaml"
+    scoring_lines = [
+        "scoring:",
+        "  freshness_weight: 0.6",
+        "  priority_weight: 0.4",
+        f"  llm_enabled: {'true' if llm_enabled else 'false'}",
+        f"  llm_model: {llm_model}",
+    ]
+    if llm_min_rule_score is not None:
+        scoring_lines.append(f"  llm_min_rule_score: {llm_min_rule_score}")
+    if digest_max_strong_matches is not None:
+        scoring_lines.append(
+            f"  digest_max_strong_matches: {digest_max_strong_matches}"
+        )
+    if digest_max_maybe_matches is not None:
+        scoring_lines.append(
+            f"  digest_max_maybe_matches: {digest_max_maybe_matches}"
+        )
+    if include_rejected_summary is not None:
+        scoring_lines.append(
+            f"  include_rejected_summary: "
+            f"{'true' if include_rejected_summary else 'false'}"
+        )
+
     config_path.write_text(
         "\n".join(
             [
@@ -685,11 +861,7 @@ def _write_config(
                 "notifiers:",
                 "  telegram:",
                 f"    enabled: {'true' if telegram_enabled else 'false'}",
-                "scoring:",
-                "  freshness_weight: 0.6",
-                "  priority_weight: 0.4",
-                f"  llm_enabled: {'true' if llm_enabled else 'false'}",
-                f"  llm_model: {llm_model}",
+                *scoring_lines,
             ]
         ),
         encoding="utf-8",
@@ -746,7 +918,7 @@ def _fetch_signal_rows(db_path: Path) -> dict[str, sqlite3.Row]:
     with sqlite3.connect(db_path) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
-            "SELECT title, score, status FROM signals ORDER BY id"
+            "SELECT title, score, status, reason FROM signals ORDER BY id"
         ).fetchall()
     return {str(row["title"]): row for row in rows}
 
