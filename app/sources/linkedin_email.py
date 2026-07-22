@@ -112,13 +112,12 @@ class LinkedInEmailSource(BaseSource):
                 email_paths = [source_path]
 
         # Precedence: explicit kwarg > config.yaml > LINKEDIN_EMAIL_IMAP_MAILBOX.
-        resolved_mailbox = (
-            imap_mailbox
-            if imap_mailbox is not None
-            else settings.imap_mailbox
-            if settings.imap_mailbox is not None
-            else resolved_env.linkedin_email_imap_mailbox
-        )
+        if imap_mailbox is not None:
+            resolved_mailbox = imap_mailbox
+        elif settings.imap_mailbox is not None:
+            resolved_mailbox = settings.imap_mailbox
+        else:
+            resolved_mailbox = resolved_env.linkedin_email_imap_mailbox
         return cls(
             keywords=config.tasks.job_search.keywords,
             locations=config.tasks.job_search.locations,

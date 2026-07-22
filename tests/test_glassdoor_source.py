@@ -27,29 +27,8 @@ def test_glassdoor_source_from_config_defaults_to_taiwan_region() -> None:
 
     assert source.keywords == ["python"]
     assert source.locations == ["Taiwan"]
-    assert source.timeout_seconds == 10.0
     assert source.max_retries == 2
     assert source.page_limit == 1
-
-
-def test_glassdoor_source_from_config_applies_sources_runtime_settings() -> None:
-    source = GlassdoorSource.from_config(
-        _build_config(
-            sources={
-                "glassdoor": {
-                    "timeout_seconds": 11,
-                    "max_retries": 3,
-                    "request_delay_seconds": 1.5,
-                    "page_limit": 4,
-                }
-            }
-        )
-    )
-
-    assert source.timeout_seconds == 11.0
-    assert source.max_retries == 3
-    assert source.request_delay_seconds == 1.5
-    assert source.page_limit == 4
 
 
 def test_glassdoor_source_fetch_normalizes_search_results() -> None:

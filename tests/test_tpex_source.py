@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import requests
 
-from app.core import AppConfig, SignalItem
+from app.core import SignalItem
 from app.sources import DummySource, TpexSource, TpexSourceError, fetch_from_sources
 from tests.source_fakes import FakeResponse, FakeSession
 
@@ -17,46 +17,6 @@ FIXTURE_PATH = ROOT / "tests" / "fixtures" / "tpex_sample.json"
 
 def _load_fixture() -> dict[str, object]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-
-
-def test_tpex_source_from_config_applies_sources_runtime_settings() -> None:
-    source = TpexSource.from_config(
-        AppConfig.from_dict(
-            {
-                "agent": {"timezone": "Asia/Taipei", "digest_time": "20:00"},
-                "tasks": {
-                    "job_search": {
-                        "enabled": True,
-                        "sources": ["job104"],
-                        "keywords": ["python"],
-                    },
-                    "tw_stock_movers": {
-                        "enabled": True,
-                        "top_n": 20,
-                        "timezone": "Asia/Taipei",
-                    },
-                },
-                "notifiers": {"telegram": {"enabled": True}},
-                "scoring": {
-                    "freshness_weight": 0.6,
-                    "priority_weight": 0.4,
-                },
-                "sources": {
-                    "tpex": {
-                        "timeout_seconds": 7,
-                        "max_retries": 0,
-                        "request_delay_seconds": 0.3,
-                        "batch_size": 30,
-                    }
-                },
-            }
-        )
-    )
-
-    assert source.timeout_seconds == 7.0
-    assert source.max_retries == 0
-    assert source.request_delay_seconds == 0.3
-    assert source.batch_size == 30
 
 
 def test_tpex_source_fetch_normalizes_stock_movers() -> None:

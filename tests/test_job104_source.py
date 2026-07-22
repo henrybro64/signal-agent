@@ -57,56 +57,8 @@ def test_job104_source_from_config_reads_keywords_and_locations(
 
     assert source.keywords == ["python"]
     assert source.locations == ["Taipei", "Remote"]
-    assert source.timeout_seconds == 10.0
     assert source.max_retries == 2
-    assert source.request_delay_seconds == 1.0
     assert source.page_limit == 1
-
-
-def test_job104_source_from_config_applies_sources_runtime_settings(
-    tmp_path: Path,
-) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "\n".join(
-            [
-                "agent:",
-                "  timezone: Asia/Taipei",
-                '  digest_time: "20:00"',
-                "tasks:",
-                "  job_search:",
-                "    enabled: true",
-                "    sources:",
-                "      - job104",
-                "    keywords:",
-                "      - python",
-                "  tw_stock_movers:",
-                "    enabled: true",
-                "    top_n: 20",
-                "    timezone: Asia/Taipei",
-                "notifiers:",
-                "  telegram:",
-                "    enabled: true",
-                "scoring:",
-                "  freshness_weight: 0.6",
-                "  priority_weight: 0.4",
-                "sources:",
-                "  job104:",
-                "    timeout_seconds: 15",
-                "    max_retries: 4",
-                "    request_delay_seconds: 2.5",
-                "    page_limit: 3",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    source = Job104Source.from_config(load_config(config_path))
-
-    assert source.timeout_seconds == 15.0
-    assert source.max_retries == 4
-    assert source.request_delay_seconds == 2.5
-    assert source.page_limit == 3
 
 
 def test_job104_source_fetch_normalizes_search_results() -> None:

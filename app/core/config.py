@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,18 @@ from .secrets import load_env_settings as load_env_settings
 
 class ConfigError(ValueError):
     """Raised when application configuration is missing or malformed."""
+
+
+def apply_optional_overrides[TSourceSettings](
+    settings: TSourceSettings,
+    **overrides: object,
+) -> TSourceSettings:
+    """Return dataclass settings with any non-None overrides applied."""
+
+    return replace(
+        settings,  # type: ignore[arg-type]
+        **{key: value for key, value in overrides.items() if value is not None},
+    )
 
 
 @dataclass(slots=True)
@@ -69,29 +81,6 @@ class JobHttpSourceConfig:
     request_delay_seconds: float = 1.0
     page_limit: int = 1
 
-    def with_overrides(
-        self,
-        *,
-        timeout_seconds: float | None = None,
-        max_retries: int | None = None,
-        request_delay_seconds: float | None = None,
-        page_limit: int | None = None,
-    ) -> JobHttpSourceConfig:
-        """Return settings with any non-None overrides applied."""
-
-        return JobHttpSourceConfig(
-            timeout_seconds=(
-                self.timeout_seconds if timeout_seconds is None else timeout_seconds
-            ),
-            max_retries=self.max_retries if max_retries is None else max_retries,
-            request_delay_seconds=(
-                self.request_delay_seconds
-                if request_delay_seconds is None
-                else request_delay_seconds
-            ),
-            page_limit=self.page_limit if page_limit is None else page_limit,
-        )
-
 
 @dataclass(slots=True)
 class LinkedInEmailSourceConfig:
@@ -107,29 +96,6 @@ class TwStockHttpSourceConfig:
     max_retries: int = 2
     request_delay_seconds: float = 0.2
     batch_size: int = 100
-
-    def with_overrides(
-        self,
-        *,
-        timeout_seconds: float | None = None,
-        max_retries: int | None = None,
-        request_delay_seconds: float | None = None,
-        batch_size: int | None = None,
-    ) -> TwStockHttpSourceConfig:
-        """Return settings with any non-None overrides applied."""
-
-        return TwStockHttpSourceConfig(
-            timeout_seconds=(
-                self.timeout_seconds if timeout_seconds is None else timeout_seconds
-            ),
-            max_retries=self.max_retries if max_retries is None else max_retries,
-            request_delay_seconds=(
-                self.request_delay_seconds
-                if request_delay_seconds is None
-                else request_delay_seconds
-            ),
-            batch_size=self.batch_size if batch_size is None else batch_size,
-        )
 
 
 @dataclass(slots=True)

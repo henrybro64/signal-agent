@@ -17,7 +17,7 @@ from app.core import SignalItem
 from app.core.config import AppConfig
 
 from .base import BaseSource
-from .http_settings import validate_http_fetch_settings
+from .http_settings import build_job_http_source, validate_http_fetch_settings
 
 _DEFAULT_SEARCH_URL = "https://tw.indeed.com/jobs"
 _DEFAULT_REQUEST_DELAY_SECONDS = 1.0
@@ -88,35 +88,10 @@ class IndeedSource(BaseSource):
             raise ValueError("page_limit must be greater than zero")
 
     @classmethod
-    def from_config(
-        cls,
-        config: AppConfig,
-        *,
-        session: requests.Session | None = None,
-        request_delay_seconds: float | None = None,
-        timeout_seconds: float | None = None,
-        max_retries: int | None = None,
-        page_limit: int | None = None,
-        sleeper: Callable[[float], None] = time.sleep,
-    ) -> IndeedSource:
+    def from_config(cls, config: AppConfig, **kwargs: object) -> IndeedSource:
         """Build the source from application config."""
 
-        settings = config.sources.indeed.with_overrides(
-            request_delay_seconds=request_delay_seconds,
-            timeout_seconds=timeout_seconds,
-            max_retries=max_retries,
-            page_limit=page_limit,
-        )
-        return cls(
-            keywords=config.tasks.job_search.keywords,
-            locations=config.tasks.job_search.locations,
-            session=session,
-            request_delay_seconds=settings.request_delay_seconds,
-            timeout_seconds=settings.timeout_seconds,
-            max_retries=settings.max_retries,
-            page_limit=settings.page_limit,
-            sleeper=sleeper,
-        )
+        return build_job_http_source(cls, config, config.sources.indeed, **kwargs)  # type: ignore[arg-type]
 
     def fetch(self) -> list[SignalItem]:
         if not self.keywords:

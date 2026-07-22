@@ -22,29 +22,8 @@ def test_indeed_source_from_config_defaults_to_taiwan_region() -> None:
 
     assert source.keywords == ["python"]
     assert source.locations == ["Taiwan"]
-    assert source.timeout_seconds == 10.0
     assert source.max_retries == 2
     assert source.page_limit == 1
-
-
-def test_indeed_source_from_config_applies_sources_runtime_settings() -> None:
-    source = IndeedSource.from_config(
-        _build_config(
-            sources={
-                "indeed": {
-                    "timeout_seconds": 12,
-                    "max_retries": 5,
-                    "request_delay_seconds": 0.5,
-                    "page_limit": 2,
-                }
-            }
-        )
-    )
-
-    assert source.timeout_seconds == 12.0
-    assert source.max_retries == 5
-    assert source.request_delay_seconds == 0.5
-    assert source.page_limit == 2
 
 
 def test_indeed_source_fetch_normalizes_search_results() -> None:

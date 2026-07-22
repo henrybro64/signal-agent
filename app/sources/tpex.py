@@ -15,7 +15,7 @@ from app.core import SignalItem
 from app.core.config import AppConfig
 
 from .base import BaseSource
-from .http_settings import validate_http_fetch_settings
+from .http_settings import build_tw_stock_http_source, validate_http_fetch_settings
 
 _DEFAULT_INDUSTRY_URL = "https://mis.twse.com.tw/stock/api/getIndustry.jsp"
 _DEFAULT_CATEGORY_URL = "https://mis.twse.com.tw/stock/api/getCategory.jsp"
@@ -83,33 +83,10 @@ class TpexSource(BaseSource):
             raise ValueError("batch_size must be greater than zero")
 
     @classmethod
-    def from_config(
-        cls,
-        config: AppConfig,
-        *,
-        session: requests.Session | None = None,
-        request_delay_seconds: float | None = None,
-        timeout_seconds: float | None = None,
-        max_retries: int | None = None,
-        batch_size: int | None = None,
-        sleeper: Callable[[float], None] = time.sleep,
-    ) -> TpexSource:
+    def from_config(cls, config: AppConfig, **kwargs: object) -> TpexSource:
         """Build the source from application config."""
 
-        settings = config.sources.tpex.with_overrides(
-            request_delay_seconds=request_delay_seconds,
-            timeout_seconds=timeout_seconds,
-            max_retries=max_retries,
-            batch_size=batch_size,
-        )
-        return cls(
-            session=session,
-            request_delay_seconds=settings.request_delay_seconds,
-            timeout_seconds=settings.timeout_seconds,
-            max_retries=settings.max_retries,
-            batch_size=settings.batch_size,
-            sleeper=sleeper,
-        )
+        return build_tw_stock_http_source(cls, config.sources.tpex, **kwargs)  # type: ignore[arg-type]
 
     def fetch(self) -> list[SignalItem]:
         session = self.session
