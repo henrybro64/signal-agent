@@ -392,11 +392,17 @@ no-trade days. Skip reasons:
 
 - `taiwan_market_holiday` — date listed in the static holiday calendar
 - `taiwan_market_closed` — weekend or outside market hours
+- `taiwan_market_calendar_unavailable` — the holiday YAML has no entries for the
+  requested year (fail closed until the calendar is updated)
 
 ### Updating the holiday calendar
 
 Holiday data lives in `app/data/tw_market_holidays.yaml` and ships with the
-package. When TWSE publishes the next year's schedule
+package. Keep every year you plan to schedule covered: if the requested Taipei
+year has zero holiday rows, stock tasks skip with
+`taiwan_market_calendar_unavailable` instead of assuming the market is open.
+
+When TWSE publishes the next year's schedule
 (https://www.twse.com.tw/holidaySchedule/holidaySchedule):
 
 1. Add each no-trade date under `holidays:` with `date` (`YYYY-MM-DD`) and
@@ -405,7 +411,9 @@ package. When TWSE publishes the next year's schedule
 3. Do not list ordinary weekends; weekday/time checks already cover those.
 4. Leave informational “開始交易日” / “最後交易日” rows out — those are trading
    days.
-5. Run `make check` and commit the YAML update.
+5. Add announced ad-hoc closures (for example typhoon / emergency no-trade days)
+   when TWSE publishes them; the static file cannot discover those automatically.
+6. Run `make check` and commit the YAML update.
 
 ## Storage
 

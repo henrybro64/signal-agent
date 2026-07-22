@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from app.core import (
+    TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
     TW_MARKET_SKIP_CLOSED,
     TW_MARKET_SKIP_HOLIDAY,
     is_tw_market_holiday,
@@ -84,6 +85,22 @@ def test_is_tw_market_open_returns_false_on_settlement_only_day() -> None:
     assert is_tw_market_holiday(date(2026, 2, 12)) is True
     assert is_tw_market_open(settlement_day) is False
     assert tw_market_skip_reason(settlement_day) == TW_MARKET_SKIP_HOLIDAY
+
+
+def test_is_tw_market_open_returns_false_on_announced_typhoon_closure() -> None:
+    typhoon_day = datetime.fromisoformat("2026-07-10T10:00:00+08:00")
+
+    assert is_tw_market_holiday(date(2026, 7, 10)) is True
+    assert is_tw_market_open(typhoon_day) is False
+    assert tw_market_skip_reason(typhoon_day) == TW_MARKET_SKIP_HOLIDAY
+
+
+def test_is_tw_market_open_fails_closed_when_year_not_in_calendar() -> None:
+    # Packaged YAML currently covers 2026 only; uncovered years must not look open.
+    uncovered = datetime.fromisoformat("2027-01-04T10:00:00+08:00")
+
+    assert is_tw_market_open(uncovered) is False
+    assert tw_market_skip_reason(uncovered) == TW_MARKET_SKIP_CALENDAR_UNAVAILABLE
 
 
 def test_is_tw_market_holiday_accepts_datetime() -> None:

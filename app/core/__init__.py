@@ -52,12 +52,15 @@ from .secrets import (
 )
 from .time_utils import is_tw_market_open, tw_market_skip_reason
 from .tw_market_calendar import (
+    TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
     TW_MARKET_SKIP_CLOSED,
     TW_MARKET_SKIP_HOLIDAY,
     TwMarketCalendarError,
     clear_tw_market_holiday_cache,
+    is_tw_market_calendar_year_covered,
     is_tw_market_holiday,
     load_tw_market_holiday_dates,
+    tw_market_calendar_years,
 )
 
 __all__ = [
@@ -70,6 +73,7 @@ __all__ = [
     "SecretError",
     "SignalItem",
     "SignalRunRecord",
+    "TW_MARKET_SKIP_CALENDAR_UNAVAILABLE",
     "TW_MARKET_SKIP_CLOSED",
     "TW_MARKET_SKIP_HOLIDAY",
     "TaskRunRecord",
@@ -91,6 +95,7 @@ __all__ = [
     "has_openai_api_key",
     "has_telegram_credentials",
     "init_db",
+    "is_tw_market_calendar_year_covered",
     "is_tw_market_holiday",
     "is_tw_market_open",
     "list_pending_digest_jobs",
@@ -104,6 +109,7 @@ __all__ = [
     "start_task_run",
     "start_signal_run",
     "summarize_run_health",
+    "tw_market_calendar_years",
     "tw_market_skip_reason",
     "update_signal_evaluation",
     "update_signal_status",

@@ -15,6 +15,7 @@ _DEFAULT_PACKAGE = "app.data"
 
 TW_MARKET_SKIP_HOLIDAY = "taiwan_market_holiday"
 TW_MARKET_SKIP_CLOSED = "taiwan_market_closed"
+TW_MARKET_SKIP_CALENDAR_UNAVAILABLE = "taiwan_market_calendar_unavailable"
 
 
 class TwMarketCalendarError(ValueError):
@@ -50,6 +51,29 @@ def load_tw_market_holiday_dates(path: Path | str | None = None) -> frozenset[da
         ) from exc
 
     return _parse_holiday_payload(payload, source_label=source_label)
+
+
+def tw_market_calendar_years(
+    holiday_dates: frozenset[date] | None = None,
+) -> frozenset[int]:
+    """Return calendar years covered by the holiday dataset."""
+
+    dates = (
+        holiday_dates
+        if holiday_dates is not None
+        else _cached_packaged_holiday_dates()
+    )
+    return frozenset(day.year for day in dates)
+
+
+def is_tw_market_calendar_year_covered(
+    year: int,
+    *,
+    holiday_dates: frozenset[date] | None = None,
+) -> bool:
+    """Return whether ``year`` has at least one entry in the holiday calendar."""
+
+    return year in tw_market_calendar_years(holiday_dates)
 
 
 def is_tw_market_holiday(

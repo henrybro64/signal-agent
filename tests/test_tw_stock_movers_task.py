@@ -185,6 +185,29 @@ def test_tw_stock_movers_task_skips_on_taiwan_market_holiday(
     assert _latest_task_error(db_path) == "taiwan_market_holiday"
 
 
+def test_tw_stock_movers_task_skips_when_calendar_year_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(tmp_path, telegram_enabled=False)
+    db_path = tmp_path / "signals.sqlite3"
+    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "tw_market_skip_reason",
+        lambda: "taiwan_market_calendar_unavailable",
+    )
+
+    TwStockMoversTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert "Taiwan market calendar unavailable" in captured.out
+    assert db_path.exists()
+    assert _task_run_statuses(db_path) == ["skipped"]
+    assert _latest_task_error(db_path) == "taiwan_market_calendar_unavailable"
+
+
 def test_tw_stock_movers_task_filters_and_persists_stock_items(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

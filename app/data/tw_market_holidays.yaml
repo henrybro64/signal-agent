@@ -1,7 +1,8 @@
 # Taiwan stock market no-trade dates (TWSE / TPEx).
 # Source: Taiwan Stock Exchange holiday schedule (https://www.twse.com.tw/).
 # Update annually when TWSE publishes the next year's calendar.
-# Include settlement-only (no trading) days as well as public holidays.
+# Include settlement-only (no trading) days, public holidays, and announced
+# ad-hoc closures (e.g. typhoon). Years with no rows fail closed at runtime.
 # Weekends do not need to be listed; the market-hours guard already skips them.
 holidays:
   - date: 2026-01-01
@@ -38,6 +39,8 @@ holidays:
     name: 勞動節
   - date: 2026-06-19
     name: 端午節
+  - date: 2026-07-10
+    name: 颱風巴威休市
   - date: 2026-09-25
     name: 中秋節
   - date: 2026-09-28
