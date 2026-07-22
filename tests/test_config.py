@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,11 @@ from app.core.config import AppConfig, ConfigError, load_config, load_env_settin
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "config.yaml"
+
+
+def assert_close(actual: float, expected: float) -> None:
+    assert math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-9)
+
 
 
 def test_load_config_reads_sample_file() -> None:
@@ -26,6 +32,14 @@ def test_load_config_reads_sample_file() -> None:
     assert config.scoring.priority_weight == 0.4
     assert config.scoring.llm_enabled is False
     assert config.scoring.llm_model == "gpt-4o-mini"
+    assert_close(config.sources.job104.timeout_seconds, 10.0)
+    assert config.sources.job104.max_retries == 2
+    assert_close(config.sources.job104.request_delay_seconds, 1.0)
+    assert config.sources.job104.page_limit == 1
+    assert config.sources.linkedin_email.lookback_days == 14
+    assert config.sources.linkedin_email.imap_mailbox is None
+    assert config.sources.twse.batch_size == 100
+    assert_close(config.sources.tpex.request_delay_seconds, 0.2)
 
 
 def test_load_config_missing_file_raises() -> None:
@@ -191,6 +205,123 @@ def test_app_config_from_dict() -> None:
     assert config.notifiers.telegram.failure_alerts_enabled is False
     assert config.scoring.llm_enabled is True
     assert config.scoring.llm_model == "gpt-5.2"
+    assert config.sources.job104.page_limit == 1
+    assert_close(config.sources.indeed.request_delay_seconds, 1.0)
+    assert config.sources.linkedin_email.lookback_days == 14
+    assert config.sources.linkedin_email.imap_mailbox is None
+    assert config.sources.twse.batch_size == 100
+    assert_close(config.sources.tpex.timeout_seconds, 10.0)
+
+
+def test_app_config_from_dict_reads_custom_sources_settings() -> None:
+    config = AppConfig.from_dict(
+        {
+            **_base_config_dict(),
+            "sources": {
+                "job104": {
+                    "timeout_seconds": 15,
+                    "max_retries": 4,
+                    "request_delay_seconds": 2.5,
+                    "page_limit": 3,
+                },
+                "linkedin_email": {
+                    "lookback_days": 7,
+                    "imap_mailbox": "LinkedIn",
+                },
+                "twse": {
+                    "timeout_seconds": 8,
+                    "max_retries": 1,
+                    "request_delay_seconds": 0.5,
+                    "batch_size": 50,
+                },
+                "tpex": {
+                    "batch_size": 25,
+                },
+            },
+        }
+    )
+
+    assert_close(config.sources.job104.timeout_seconds, 15.0)
+    assert config.sources.job104.max_retries == 4
+    assert_close(config.sources.job104.request_delay_seconds, 2.5)
+    assert config.sources.job104.page_limit == 3
+    assert config.sources.linkedin_email.lookback_days == 7
+    assert config.sources.linkedin_email.imap_mailbox == "LinkedIn"
+    assert_close(config.sources.twse.timeout_seconds, 8.0)
+    assert config.sources.twse.max_retries == 1
+    assert_close(config.sources.twse.request_delay_seconds, 0.5)
+    assert config.sources.twse.batch_size == 50
+    assert config.sources.tpex.batch_size == 25
+    assert_close(config.sources.tpex.timeout_seconds, 10.0)
+
+
+@pytest.mark.parametrize(
+    ("sources", "match"),
+    [
+        (
+            {"job104": {"timeout_seconds": 0}},
+            "sources.job104.timeout_seconds",
+        ),
+        (
+            {"job104": {"page_limit": 0}},
+            "sources.job104.page_limit",
+        ),
+        (
+            {"job104": {"max_retries": -1}},
+            "sources.job104.max_retries",
+        ),
+        (
+            {"job104": {"request_delay_seconds": -0.1}},
+            "sources.job104.request_delay_seconds",
+        ),
+        (
+            {"linkedin_email": {"lookback_days": 0}},
+            "sources.linkedin_email.lookback_days",
+        ),
+        (
+            {"linkedin_email": {"imap_mailbox": "   "}},
+            "sources.linkedin_email.imap_mailbox",
+        ),
+        (
+            {"twse": {"batch_size": 0}},
+            "sources.twse.batch_size",
+        ),
+        (
+            {"tpex": {"timeout_seconds": -5}},
+            "sources.tpex.timeout_seconds",
+        ),
+    ],
+)
+def test_app_config_from_dict_rejects_invalid_sources_settings(
+    sources: dict[str, object],
+    match: str,
+) -> None:
+    payload = {**_base_config_dict(), "sources": sources}
+    with pytest.raises(ConfigError, match=match):
+        AppConfig.from_dict(payload)
+
+
+def _base_config_dict() -> dict[str, object]:
+    return {
+        "agent": {"timezone": "UTC", "digest_time": "09:00"},
+        "tasks": {
+            "job_search": {
+                "enabled": True,
+                "sources": ["job104"],
+                "keywords": ["python"],
+            },
+            "tw_stock_movers": {
+                "enabled": True,
+                "top_n": 5,
+                "timezone": "UTC",
+            },
+        },
+        "notifiers": {"telegram": {"enabled": False}},
+        "scoring": {
+            "freshness_weight": 0.5,
+            "priority_weight": 0.5,
+        },
+    }
 
 
 def test_app_config_from_dict_reads_optional_job_search_locations() -> None:

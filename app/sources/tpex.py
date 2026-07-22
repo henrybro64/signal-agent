@@ -15,12 +15,13 @@ from app.core import SignalItem
 from app.core.config import AppConfig
 
 from .base import BaseSource
+from .http_settings import build_tw_stock_http_source, validate_http_fetch_settings
 
 _DEFAULT_INDUSTRY_URL = "https://mis.twse.com.tw/stock/api/getIndustry.jsp"
 _DEFAULT_CATEGORY_URL = "https://mis.twse.com.tw/stock/api/getCategory.jsp"
 _DEFAULT_STOCK_INFO_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
 _DEFAULT_REQUEST_DELAY_SECONDS = 0.2
-_REQUEST_TIMEOUT_SECONDS = 10
+_DEFAULT_TIMEOUT_SECONDS = 10.0
 _TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 _EQUITY_LIKE_CATEGORY_CODES = {"E0", "H0", "Q0"}
 _TAIPEI = ZoneInfo("Asia/Taipei")
@@ -61,6 +62,7 @@ class TpexSource(BaseSource):
 
     session: requests.Session | None = None
     request_delay_seconds: float = _DEFAULT_REQUEST_DELAY_SECONDS
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
     max_retries: int = 2
     batch_size: int = 100
     industry_url: str = _DEFAULT_INDUSTRY_URL
@@ -72,33 +74,19 @@ class TpexSource(BaseSource):
     name: ClassVar[str] = "tpex"
 
     def __post_init__(self) -> None:
-        if self.request_delay_seconds < 0:
-            raise ValueError("request_delay_seconds must be zero or greater")
-        if self.max_retries < 0:
-            raise ValueError("max_retries must be zero or greater")
+        validate_http_fetch_settings(
+            timeout_seconds=self.timeout_seconds,
+            request_delay_seconds=self.request_delay_seconds,
+            max_retries=self.max_retries,
+        )
         if self.batch_size <= 0:
             raise ValueError("batch_size must be greater than zero")
 
     @classmethod
-    def from_config(
-        cls,
-        _config: AppConfig,
-        *,
-        session: requests.Session | None = None,
-        request_delay_seconds: float = _DEFAULT_REQUEST_DELAY_SECONDS,
-        max_retries: int = 2,
-        batch_size: int = 100,
-        sleeper: Callable[[float], None] = time.sleep,
-    ) -> TpexSource:
+    def from_config(cls, config: AppConfig, **kwargs: object) -> TpexSource:
         """Build the source from application config."""
 
-        return cls(
-            session=session,
-            request_delay_seconds=request_delay_seconds,
-            max_retries=max_retries,
-            batch_size=batch_size,
-            sleeper=sleeper,
-        )
+        return build_tw_stock_http_source(cls, config.sources.tpex, **kwargs)  # type: ignore[arg-type]
 
     def fetch(self) -> list[SignalItem]:
         session = self.session
@@ -265,7 +253,7 @@ class TpexSource(BaseSource):
                 response = session.get(
                     url,
                     params=params,
-                    timeout=_REQUEST_TIMEOUT_SECONDS,
+                    timeout=self.timeout_seconds,
                 )
             except requests.RequestException as exc:
                 if attempt >= self.max_retries:

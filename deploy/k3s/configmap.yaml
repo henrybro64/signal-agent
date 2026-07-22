@@ -38,3 +38,34 @@ data:
       priority_weight: 0.4
       llm_enabled: false
       llm_model: gpt-4o-mini
+
+    # Optional source runtime tuning. Safe defaults apply when this section
+    # (or any nested key) is omitted.
+    sources:
+      job104:
+        timeout_seconds: 10
+        max_retries: 2
+        request_delay_seconds: 1.0
+        page_limit: 1
+      indeed:
+        timeout_seconds: 10
+        max_retries: 2
+        request_delay_seconds: 1.0
+        page_limit: 1
+      glassdoor:
+        timeout_seconds: 10
+        max_retries: 2
+        request_delay_seconds: 1.0
+        page_limit: 1
+      linkedin_email:
+        lookback_days: 14
+      twse:
+        timeout_seconds: 10
+        max_retries: 2
+        request_delay_seconds: 0.2
+        batch_size: 100
+      tpex:
+        timeout_seconds: 10
+        max_retries: 2
+        request_delay_seconds: 0.2
+        batch_size: 100

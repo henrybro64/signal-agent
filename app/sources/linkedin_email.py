@@ -94,11 +94,13 @@ class LinkedInEmailSource(BaseSource):
         config: AppConfig,
         *,
         env: EnvSettings | None = None,
-        lookback_days: int = _DEFAULT_LOOKBACK_DAYS,
+        lookback_days: int | None = None,
+        imap_mailbox: str | None = None,
     ) -> LinkedInEmailSource:
         """Build the source from config and environment settings."""
 
         resolved_env = env or load_env_settings()
+        settings = config.sources.linkedin_email
         email_paths: list[Path] = []
         if resolved_env.linkedin_email_source_path:
             source_path = Path(
@@ -109,6 +111,13 @@ class LinkedInEmailSource(BaseSource):
             else:
                 email_paths = [source_path]
 
+        # Precedence: explicit kwarg > config.yaml > LINKEDIN_EMAIL_IMAP_MAILBOX.
+        if imap_mailbox is not None:
+            resolved_mailbox = imap_mailbox
+        elif settings.imap_mailbox is not None:
+            resolved_mailbox = settings.imap_mailbox
+        else:
+            resolved_mailbox = resolved_env.linkedin_email_imap_mailbox
         return cls(
             keywords=config.tasks.job_search.keywords,
             locations=config.tasks.job_search.locations,
@@ -116,8 +125,12 @@ class LinkedInEmailSource(BaseSource):
             imap_host=resolved_env.linkedin_email_imap_host,
             imap_username=resolved_env.linkedin_email_imap_username,
             imap_password=resolved_env.linkedin_email_imap_password,
-            imap_mailbox=resolved_env.linkedin_email_imap_mailbox,
-            lookback_days=lookback_days,
+            imap_mailbox=resolved_mailbox,
+            lookback_days=(
+                settings.lookback_days
+                if lookback_days is None
+                else lookback_days
+            ),
         )
 
     def fetch(self) -> list[SignalItem]:

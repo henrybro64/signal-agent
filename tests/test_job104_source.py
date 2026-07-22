@@ -57,6 +57,8 @@ def test_job104_source_from_config_reads_keywords_and_locations(
 
     assert source.keywords == ["python"]
     assert source.locations == ["Taipei", "Remote"]
+    assert source.max_retries == 2
+    assert source.page_limit == 1
 
 
 def test_job104_source_fetch_normalizes_search_results() -> None:

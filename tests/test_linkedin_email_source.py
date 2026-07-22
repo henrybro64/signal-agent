@@ -25,6 +25,54 @@ def test_linkedin_email_source_from_config_reads_local_fixture_path(
 
     assert source.email_paths == [FIXTURE_PATH]
     assert source.keywords == ["python", "agent"]
+    assert source.lookback_days == 14
+    assert source.imap_mailbox == "INBOX"
+
+
+def test_linkedin_email_source_from_config_applies_sources_runtime_settings() -> (
+    None
+):
+    source = LinkedInEmailSource.from_config(
+        _build_config(
+            sources={
+                "linkedin_email": {
+                    "lookback_days": 7,
+                    "imap_mailbox": "Alerts",
+                }
+            }
+        )
+    )
+
+    assert source.lookback_days == 7
+    assert source.imap_mailbox == "Alerts"
+
+
+def test_linkedin_email_source_from_config_falls_back_to_env_mailbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LINKEDIN_EMAIL_IMAP_MAILBOX", "EnvMailbox")
+
+    source = LinkedInEmailSource.from_config(_build_config())
+
+    assert source.imap_mailbox == "EnvMailbox"
+
+
+def test_linkedin_email_source_from_config_prefers_config_mailbox_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LINKEDIN_EMAIL_IMAP_MAILBOX", "EnvMailbox")
+
+    source = LinkedInEmailSource.from_config(
+        _build_config(
+            sources={
+                "linkedin_email": {
+                    "imap_mailbox": "ConfigMailbox",
+                }
+            }
+        )
+    )
+
+    assert source.imap_mailbox == "ConfigMailbox"
 
 
 def test_linkedin_email_source_fetch_normalizes_fixture_email() -> None:
@@ -263,34 +311,35 @@ def test_linkedin_email_source_failure_can_be_skipped_in_source_pipeline() -> No
     ]
 
 
-def _build_config() -> AppConfig:
-    return AppConfig.from_dict(
-        {
-            "agent": {
+def _build_config(*, sources: dict[str, object] | None = None) -> AppConfig:
+    payload: dict[str, object] = {
+        "agent": {
+            "timezone": "Asia/Taipei",
+            "digest_time": "20:00",
+        },
+        "tasks": {
+            "job_search": {
+                "enabled": True,
+                "sources": ["linkedin_email"],
+                "keywords": ["python", "agent"],
+                "locations": ["Taiwan"],
+            },
+            "tw_stock_movers": {
+                "enabled": True,
+                "top_n": 20,
                 "timezone": "Asia/Taipei",
-                "digest_time": "20:00",
             },
-            "tasks": {
-                "job_search": {
-                    "enabled": True,
-                    "sources": ["linkedin_email"],
-                    "keywords": ["python", "agent"],
-                    "locations": ["Taiwan"],
-                },
-                "tw_stock_movers": {
-                    "enabled": True,
-                    "top_n": 20,
-                    "timezone": "Asia/Taipei",
-                },
-            },
-            "notifiers": {
-                "telegram": {
-                    "enabled": True,
-                }
-            },
-            "scoring": {
-                "freshness_weight": 0.6,
-                "priority_weight": 0.4,
-            },
-        }
-    )
+        },
+        "notifiers": {
+            "telegram": {
+                "enabled": True,
+            }
+        },
+        "scoring": {
+            "freshness_weight": 0.6,
+            "priority_weight": 0.4,
+        },
+    }
+    if sources is not None:
+        payload["sources"] = sources
+    return AppConfig.from_dict(payload)
