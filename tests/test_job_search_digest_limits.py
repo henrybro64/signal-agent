@@ -86,7 +86,7 @@ def test_build_telegram_digest_omits_rejected_summary_when_disabled() -> None:
 
     digest = _build_telegram_digest(summary, scoring=scoring, run_status="success")
 
-    assert "Rejected jobs summary" not in digest.text
+    assert digest.text == ""
     assert digest.signal_ids == []
 
 

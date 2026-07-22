@@ -563,7 +563,9 @@ def _build_telegram_digest(
     has_useful_output = (
         bool(summary.strong_matches)
         or bool(summary.maybe_matches)
-        or bool(summary.rejected_jobs)
+        or (
+            bool(summary.rejected_jobs) and scoring.include_rejected_summary
+        )
         or bool(summary.failed_sources)
         or bool(summary.unsupported_sources)
     )
