@@ -14,6 +14,29 @@ from .job_search import load_job_search_profile
 
 
 @dataclass(slots=True)
+class LlmCallBudget:
+    """Shared per-task-run budget for LLM scoring attempts."""
+
+    max_calls: int
+    _calls: int = 0
+
+    @property
+    def calls(self) -> int:
+        return self._calls
+
+    def remaining(self) -> int:
+        return max(0, self.max_calls - self._calls)
+
+    def try_consume(self) -> bool:
+        """Reserve one LLM attempt when budget remains."""
+
+        if self._calls >= self.max_calls:
+            return False
+        self._calls += 1
+        return True
+
+
+@dataclass(slots=True)
 class JobScorePipelineResult:
     """Final score plus metadata about how it was produced."""
 
@@ -35,14 +58,17 @@ class JobScorePipeline:
         llm_scorer: JobLLMScorer | None,
         llm_enabled: bool,
         llm_min_rule_score: int,
-        llm_max_jobs_per_run: int,
+        llm_budget: LlmCallBudget,
     ) -> None:
         self.rule_scorer = rule_scorer
         self.llm_scorer = llm_scorer
         self.llm_enabled = llm_enabled
         self.llm_min_rule_score = llm_min_rule_score
-        self.llm_max_jobs_per_run = llm_max_jobs_per_run
-        self._llm_calls = 0
+        self.llm_budget = llm_budget
+
+    @property
+    def llm_max_jobs_per_run(self) -> int:
+        return self.llm_budget.max_calls
 
     def score(self, item: SignalItem) -> JobScorePipelineResult:
         rule_result = self.rule_scorer.score(item)
@@ -56,13 +82,12 @@ class JobScorePipeline:
                 llm_skipped_reason="below_min_rule_score",
             )
 
-        if self._llm_calls >= self.llm_max_jobs_per_run:
+        if not self.llm_budget.try_consume():
             return self._rule_only_result(
                 rule_result,
                 llm_skipped_reason="max_jobs_per_run_reached",
             )
 
-        self._llm_calls += 1
         try:
             llm_result = self.llm_scorer.score_with_llm(item)
         except JobLLMScorerError as exc:
@@ -100,6 +125,7 @@ def build_job_score_pipeline(
     config: ScoringConfig,
     env: EnvSettings,
     scorer_profile: str | None = None,
+    llm_budget: LlmCallBudget | None = None,
 ) -> JobScorePipeline:
     """Build a configured two-stage scoring pipeline."""
 
@@ -113,12 +139,13 @@ def build_job_score_pipeline(
             profile=profile,
             fallback_scorer=rule_scorer,
         )
+    budget = llm_budget or LlmCallBudget(max_calls=config.llm_max_jobs_per_run)
     return JobScorePipeline(
         rule_scorer=rule_scorer,
         llm_scorer=llm_scorer,
         llm_enabled=config.llm_enabled,
         llm_min_rule_score=config.llm_min_rule_score,
-        llm_max_jobs_per_run=config.llm_max_jobs_per_run,
+        llm_budget=budget,
     )
 
 

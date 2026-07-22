@@ -274,6 +274,17 @@ def update_signal_evaluation(
 SignalEvaluationState = Literal["unscored", "pending_digest", "complete"]
 
 
+@dataclass(slots=True, frozen=True)
+class PendingDigestJob:
+    """A scored job that still needs Telegram digest reporting."""
+
+    signal_id: int
+    item: SignalItem
+    score: float
+    reason: str
+    status: str
+
+
 def get_signal_evaluation_state(
     signal_id: int,
     *,
@@ -343,6 +354,76 @@ def mark_signals_digest_reported(
             """,
             signal_ids,
         )
+
+
+def list_pending_digest_jobs(
+    *,
+    db_path: str | Path | None = None,
+    item_type: str = "job",
+    limit: int = 200,
+) -> list[PendingDigestJob]:
+    """Return scored jobs that still need digest reporting."""
+
+    if limit <= 0:
+        return []
+
+    resolved_path = _resolve_db_path(db_path)
+    with _connect(resolved_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                source,
+                item_type,
+                external_id,
+                title,
+                url,
+                content,
+                metadata_json,
+                last_seen_at,
+                status,
+                score,
+                reason
+            FROM signals
+            WHERE item_type = ?
+              AND status IN ('new', 'rejected')
+              AND score IS NOT NULL
+            ORDER BY score DESC, last_seen_at DESC, id DESC
+            LIMIT ?
+            """,
+            (item_type, limit),
+        ).fetchall()
+
+    pending: list[PendingDigestJob] = []
+    for row in rows:
+        metadata: dict[str, object] = {}
+        raw_metadata = row["metadata_json"]
+        if raw_metadata:
+            try:
+                loaded = json.loads(raw_metadata)
+            except json.JSONDecodeError:
+                loaded = {}
+            if isinstance(loaded, dict):
+                metadata = loaded
+        pending.append(
+            PendingDigestJob(
+                signal_id=int(row["id"]),
+                item=SignalItem(
+                    source=str(row["source"]),
+                    item_type=str(row["item_type"]),
+                    title=str(row["title"]),
+                    observed_at=_parse_timestamp(str(row["last_seen_at"])),
+                    url=row["url"],
+                    external_id=row["external_id"],
+                    content=row["content"],
+                    metadata=metadata,
+                ),
+                score=float(row["score"]),
+                reason=str(row["reason"] or ""),
+                status=str(row["status"]),
+            )
+        )
+    return pending
 
 
 def start_signal_run(

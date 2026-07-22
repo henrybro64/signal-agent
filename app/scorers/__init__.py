@@ -5,6 +5,7 @@ from .job_rule_scorer import JobRuleScore, JobRuleScorer
 from .job_score_pipeline import (
     JobScorePipeline,
     JobScorePipelineResult,
+    LlmCallBudget,
     build_job_score_pipeline,
 )
 from .job_search import (
@@ -29,6 +30,7 @@ __all__ = [
     "JobScorePipeline",
     "JobScorePipelineResult",
     "JobSearchProfile",
+    "LlmCallBudget",
     "build_job_score_pipeline",
     "load_job_search_profile",
     "match_job_posting",

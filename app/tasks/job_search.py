@@ -19,6 +19,7 @@ from app.core import (
     finish_signal_run,
     get_signal_evaluation,
     get_signal_evaluation_state,
+    list_pending_digest_jobs,
     mark_signals_digest_reported,
     start_signal_run,
     update_signal_evaluation,
@@ -28,6 +29,7 @@ from app.notifiers import build_telegram_notifier
 from app.scorers import (
     JobRuleScore,
     JobScorePipeline,
+    LlmCallBudget,
     build_job_score_pipeline,
 )
 from app.sources import build_job_search_sources_for_profile
@@ -116,6 +118,9 @@ class JobSearchTask(BaseTask):
                 raise ValueError("No job-search profiles are configured.")
             summary.profile_names = [profile.name for profile in profiles]
 
+            llm_budget = LlmCallBudget(
+                max_calls=config.scoring.llm_max_jobs_per_run
+            )
             scorers_by_key: dict[str | None, JobScorePipeline] = {}
 
             for profile in profiles:
@@ -137,6 +142,7 @@ class JobSearchTask(BaseTask):
                         config=config.scoring,
                         env=env,
                         scorer_profile=profile.scorer_profile,
+                        llm_budget=llm_budget,
                     )
                     scorers_by_key[profile.scorer_profile] = pipeline
 
@@ -379,6 +385,7 @@ class JobSearchTask(BaseTask):
         db_path: Path,
     ) -> NotificationOutcome:
         reported_signal_ids: list[int] = []
+        _merge_pending_digest_jobs(summary, db_path=db_path)
         digest_content = _build_telegram_digest(
             summary,
             scoring=config.scoring,
@@ -579,34 +586,60 @@ def _build_telegram_digest(
 
     profile_names = summary.profile_names or _digest_profile_names(summary)
     group_by_profile = len(profile_names) > 1
-    strong_remaining = scoring.digest_max_strong_matches
-    maybe_remaining = scoring.digest_max_maybe_matches
+    strong_cap = scoring.digest_max_strong_matches
+    maybe_cap = scoring.digest_max_maybe_matches
 
     if group_by_profile:
+        strong_by_profile = {
+            name: _jobs_for_profile(summary.strong_matches, name)
+            for name in profile_names
+        }
+        maybe_by_profile = {
+            name: _jobs_for_profile(summary.maybe_matches, name)
+            for name in profile_names
+        }
+        strong_slots = _allocate_digest_slots(
+            strong_by_profile,
+            profile_names,
+            max_items=strong_cap,
+        )
+        maybe_slots = _allocate_digest_slots(
+            maybe_by_profile,
+            profile_names,
+            max_items=maybe_cap,
+        )
         for profile_name in profile_names:
             lines.append("")
             lines.append(f"## {profile_name}")
-            strong = _jobs_for_profile(summary.strong_matches, profile_name)
-            maybe = _jobs_for_profile(summary.maybe_matches, profile_name)
+            strong = strong_by_profile[profile_name]
+            maybe = maybe_by_profile[profile_name]
             rejected = _jobs_for_profile(summary.rejected_jobs, profile_name)
-            if strong and strong_remaining > 0:
+            strong_limit = len(strong_slots[profile_name])
+            maybe_limit = len(maybe_slots[profile_name])
+            if strong and strong_limit > 0:
                 section_lines, signal_ids = _render_job_section(
                     "Top recommended jobs",
                     strong,
-                    max_items=strong_remaining,
+                    max_items=strong_limit,
                 )
                 lines.extend(section_lines)
                 included_signal_ids.extend(signal_ids)
-                strong_remaining -= len(signal_ids)
-            if maybe and maybe_remaining > 0:
+            elif strong:
+                lines.append("")
+                lines.append("Top recommended jobs")
+                lines.append(f"- ...and {len(strong)} more job(s)")
+            if maybe and maybe_limit > 0:
                 section_lines, signal_ids = _render_job_section(
                     "Maybe jobs",
                     maybe,
-                    max_items=maybe_remaining,
+                    max_items=maybe_limit,
                 )
                 lines.extend(section_lines)
                 included_signal_ids.extend(signal_ids)
-                maybe_remaining -= len(signal_ids)
+            elif maybe:
+                lines.append("")
+                lines.append("Maybe jobs")
+                lines.append(f"- ...and {len(maybe)} more job(s)")
             if rejected and scoring.include_rejected_summary:
                 section_lines, signal_ids = _render_rejected_section(rejected)
                 lines.extend(section_lines)
@@ -619,19 +652,19 @@ def _build_telegram_digest(
                 lines.append("")
                 lines.append("(no new scored jobs for this profile)")
     else:
-        if summary.strong_matches and strong_remaining > 0:
+        if summary.strong_matches and strong_cap > 0:
             section_lines, signal_ids = _render_job_section(
                 "Top recommended jobs",
                 summary.strong_matches,
-                max_items=strong_remaining,
+                max_items=strong_cap,
             )
             lines.extend(section_lines)
             included_signal_ids.extend(signal_ids)
-        if summary.maybe_matches and maybe_remaining > 0:
+        if summary.maybe_matches and maybe_cap > 0:
             section_lines, signal_ids = _render_job_section(
                 "Maybe jobs",
                 summary.maybe_matches,
-                max_items=maybe_remaining,
+                max_items=maybe_cap,
             )
             lines.extend(section_lines)
             included_signal_ids.extend(signal_ids)
@@ -653,6 +686,14 @@ def _build_telegram_digest(
             "Skipped unsupported sources: "
             + ", ".join(summary.unsupported_sources)
         )
+
+    if (
+        not included_signal_ids
+        and not summary.failed_sources
+        and not summary.unsupported_sources
+    ):
+        return DigestContent(text="", signal_ids=[])
+
     lines.append("")
     lines.append(
         "run summary: "
@@ -681,6 +722,64 @@ def _digest_profile_names(summary: JobSearchSummary) -> list[str]:
         seen.add(name)
         names.append(name)
     return names
+
+
+def _allocate_digest_slots(
+    jobs_by_profile: dict[str, list[ScoredJob]],
+    profile_names: list[str],
+    *,
+    max_items: int,
+) -> dict[str, list[ScoredJob]]:
+    """Round-robin the best jobs across profiles until the digest cap is used."""
+
+    queues = {
+        name: _sorted_jobs(jobs_by_profile.get(name, [])) for name in profile_names
+    }
+    indices = {name: 0 for name in profile_names}
+    selected: dict[str, list[ScoredJob]] = {name: [] for name in profile_names}
+    remaining = max(0, max_items)
+
+    while remaining > 0:
+        progressed = False
+        for name in profile_names:
+            if remaining <= 0:
+                break
+            index = indices[name]
+            queue = queues[name]
+            if index >= len(queue):
+                continue
+            selected[name].append(queue[index])
+            indices[name] = index + 1
+            remaining -= 1
+            progressed = True
+        if not progressed:
+            break
+    return selected
+
+
+def _merge_pending_digest_jobs(
+    summary: JobSearchSummary,
+    *,
+    db_path: Path,
+) -> None:
+    """Fold scored-but-unreported DB jobs into the digest summary."""
+
+    for pending in list_pending_digest_jobs(db_path=db_path):
+        if pending.signal_id in summary.recorded_signal_ids:
+            continue
+        score = _job_rule_score_from_stored(pending.score, pending.reason)
+        scored_job = ScoredJob(
+            signal_id=pending.signal_id,
+            item=pending.item,
+            score=score,
+        )
+        if score.recommendation == "strong_match":
+            summary.strong_matches.append(scored_job)
+        elif score.recommendation == "maybe":
+            summary.maybe_matches.append(scored_job)
+        else:
+            summary.rejected_jobs.append(scored_job)
+        summary.recorded_signal_ids.add(pending.signal_id)
 
 
 def _jobs_for_profile(jobs: list[ScoredJob], profile_name: str) -> list[ScoredJob]:

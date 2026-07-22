@@ -6,6 +6,7 @@ from app.scorers import (
     JobLLMScorer,
     JobRuleScore,
     JobScorePipeline,
+    LlmCallBudget,
     build_job_score_pipeline,
 )
 from app.scorers.job_llm_scorer import JobLLMScorerError
@@ -19,7 +20,7 @@ def test_pipeline_rule_only_when_llm_disabled() -> None:
         llm_scorer=None,
         llm_enabled=False,
         llm_min_rule_score=25,
-        llm_max_jobs_per_run=20,
+        llm_budget=LlmCallBudget(max_calls=20),
     )
 
     result = pipeline.score(_job("good"))
@@ -38,7 +39,7 @@ def test_pipeline_skips_llm_below_min_rule_score() -> None:
         llm_scorer=llm_scorer,
         llm_enabled=True,
         llm_min_rule_score=25,
-        llm_max_jobs_per_run=20,
+        llm_budget=LlmCallBudget(max_calls=20),
     )
 
     result = pipeline.score(_job("bad"))
@@ -56,7 +57,7 @@ def test_pipeline_calls_llm_for_plausible_candidates() -> None:
         llm_scorer=llm_scorer,
         llm_enabled=True,
         llm_min_rule_score=25,
-        llm_max_jobs_per_run=20,
+        llm_budget=LlmCallBudget(max_calls=20),
     )
 
     result = pipeline.score(_job("good"))
@@ -77,7 +78,7 @@ def test_pipeline_enforces_llm_max_jobs_per_run() -> None:
         llm_scorer=llm_scorer,
         llm_enabled=True,
         llm_min_rule_score=25,
-        llm_max_jobs_per_run=2,
+        llm_budget=LlmCallBudget(max_calls=2),
     )
 
     first = pipeline.score(_job("a"))
@@ -91,6 +92,34 @@ def test_pipeline_enforces_llm_max_jobs_per_run() -> None:
     assert llm_scorer.calls == 2
 
 
+def test_shared_llm_budget_is_enforced_across_pipelines() -> None:
+    budget = LlmCallBudget(max_calls=2)
+    llm_scorer = _FakeLLMScorer(score=90)
+    first = JobScorePipeline(
+        rule_scorer=_FakeRuleScorer({"a": 80}),
+        llm_scorer=llm_scorer,
+        llm_enabled=True,
+        llm_min_rule_score=25,
+        llm_budget=budget,
+    )
+    second = JobScorePipeline(
+        rule_scorer=_FakeRuleScorer({"b": 70, "c": 60}),
+        llm_scorer=llm_scorer,
+        llm_enabled=True,
+        llm_min_rule_score=25,
+        llm_budget=budget,
+    )
+
+    assert first.score(_job("a")).scoring_method == "llm"
+    assert second.score(_job("b")).scoring_method == "llm"
+    skipped = second.score(_job("c"))
+
+    assert skipped.scoring_method == "rule"
+    assert skipped.llm_skipped_reason == "max_jobs_per_run_reached"
+    assert budget.calls == 2
+    assert llm_scorer.calls == 2
+
+
 def test_pipeline_falls_back_to_rule_score_when_llm_fails() -> None:
     rule_scorer = _FakeRuleScorer({"good": 80})
     llm_scorer = _FailingLLMScorer()
@@ -99,7 +128,7 @@ def test_pipeline_falls_back_to_rule_score_when_llm_fails() -> None:
         llm_scorer=llm_scorer,
         llm_enabled=True,
         llm_min_rule_score=25,
-        llm_max_jobs_per_run=20,
+        llm_budget=LlmCallBudget(max_calls=20),
     )
 
     result = pipeline.score(_job("good"))
