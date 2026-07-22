@@ -211,6 +211,107 @@ def test_app_config_from_dict() -> None:
     assert config.sources.linkedin_email.imap_mailbox is None
     assert config.sources.twse.batch_size == 100
     assert_close(config.sources.tpex.timeout_seconds, 10.0)
+    assert len(config.tasks.job_search.profiles) == 1
+    assert config.tasks.job_search.profiles[0].name == "default"
+    assert config.tasks.job_search.profiles[0].keywords == ["data"]
+
+
+def test_app_config_from_dict_reads_job_search_profiles() -> None:
+    config = AppConfig.from_dict(
+        {
+            **_base_config_dict(),
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "profiles": [
+                        {
+                            "name": "cloud_sdet",
+                            "sources": ["job104", "linkedin_email"],
+                            "keywords": ["Cloud SDET", "Python"],
+                            "locations": ["Taiwan", "Remote"],
+                            "scorer_profile": "app/profiles/henry_job_profile.md",
+                        },
+                        {
+                            "name": "devsecops_security",
+                            "sources": ["job104"],
+                            "keywords": ["DevSecOps"],
+                            "locations": ["Remote"],
+                        },
+                    ],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 5,
+                    "timezone": "UTC",
+                },
+            },
+        }
+    )
+
+    assert [profile.name for profile in config.tasks.job_search.profiles] == [
+        "cloud_sdet",
+        "devsecops_security",
+    ]
+    assert config.tasks.job_search.sources == ["job104", "linkedin_email"]
+    assert config.tasks.job_search.keywords == ["Cloud SDET", "Python"]
+    assert config.tasks.job_search.locations == ["Taiwan", "Remote"]
+    first = config.tasks.job_search.profiles[0]
+    assert first.scorer_profile == "app/profiles/henry_job_profile.md"
+    assert first.sources == ["job104", "linkedin_email"]
+    second = config.tasks.job_search.profiles[1]
+    assert second.keywords == ["DevSecOps"]
+    assert second.scorer_profile is None
+
+
+def test_app_config_from_dict_rejects_duplicate_job_search_profile_names() -> None:
+    with pytest.raises(ConfigError, match="Duplicate job-search profile name"):
+        AppConfig.from_dict(
+            {
+                **_base_config_dict(),
+                "tasks": {
+                    "job_search": {
+                        "enabled": True,
+                        "profiles": [
+                            {
+                                "name": "cloud_sdet",
+                                "sources": ["job104"],
+                                "keywords": ["python"],
+                            },
+                            {
+                                "name": "cloud_sdet",
+                                "sources": ["linkedin_email"],
+                                "keywords": ["agent"],
+                            },
+                        ],
+                    },
+                    "tw_stock_movers": {
+                        "enabled": True,
+                        "top_n": 5,
+                        "timezone": "UTC",
+                    },
+                },
+            }
+        )
+
+
+def test_app_config_from_dict_rejects_empty_job_search_profiles() -> None:
+    with pytest.raises(ConfigError, match="must contain at least one profile"):
+        AppConfig.from_dict(
+            {
+                **_base_config_dict(),
+                "tasks": {
+                    "job_search": {
+                        "enabled": True,
+                        "profiles": [],
+                    },
+                    "tw_stock_movers": {
+                        "enabled": True,
+                        "top_n": 5,
+                        "timezone": "UTC",
+                    },
+                },
+            }
+        )
 
 
 def test_app_config_from_dict_reads_custom_sources_settings() -> None:

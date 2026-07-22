@@ -44,7 +44,7 @@ def test_job_search_task_runs_end_to_end_and_sends_digest(
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -118,7 +118,7 @@ def test_job_search_task_skips_duplicates_for_telegram_digest(
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -164,12 +164,12 @@ def test_job_search_task_reports_useful_failures_even_without_new_jobs(
             raise RuntimeError("cloudflare challenge")
 
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "failing_source",
         lambda _config: FailingSource(),
     )
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -183,7 +183,7 @@ def test_job_search_task_reports_useful_failures_even_without_new_jobs(
     notifier.messages.clear()
 
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -236,7 +236,7 @@ def test_job_search_task_skips_telegram_validation_without_digest(
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -268,7 +268,7 @@ def test_job_search_task_requires_telegram_credentials_when_sending_digest(
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -291,7 +291,7 @@ def test_job_search_task_scores_unscored_duplicates_from_fetch(
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -332,7 +332,7 @@ def test_job_search_task_sends_failure_digest_when_all_sources_fail(
             raise RuntimeError("imap auth failed")
 
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "failing_source",
         lambda _config: FailingSource(),
     )
@@ -366,7 +366,7 @@ def test_job_search_task_retries_telegram_digest_after_credential_failure(
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()),
     )
@@ -406,7 +406,7 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
     monkeypatch.setitem(
-        job_search_task_module.build_job_search_sources.__globals__["SOURCE_FACTORIES"],
+        job_search_task_module.build_job_search_sources_for_profile.__globals__["SOURCE_FACTORIES"],
         "static_jobs",
         lambda _config: StaticJobSource(_sample_jobs()[:1]),
     )
@@ -452,6 +452,155 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
     assert "LLM fit" in notifier.messages[0]
     rows = _fetch_signal_rows(db_path)
     assert rows["Cloud SDET"]["score"] == 88.0
+
+
+def test_job_search_task_runs_multiple_profiles_and_groups_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_multi_profile_config(tmp_path)
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+
+    cloud_jobs = [
+        SignalItem(
+            source="cloud_jobs",
+            item_type="job",
+            title="Cloud SDET",
+            observed_at=OBSERVED_AT,
+            url="https://example.com/jobs/cloud-sdet",
+            content=(
+                "Remote role building Python and Pytest automation for Azure, AWS, "
+                "and Kubernetes workloads with SIEM, SOAR, DLP, and API security."
+            ),
+            metadata={"company": "Cloud Co", "location": "Taipei"},
+        )
+    ]
+    security_jobs = [
+        SignalItem(
+            source="security_jobs",
+            item_type="job",
+            title="DevSecOps Engineer",
+            observed_at=OBSERVED_AT,
+            url="https://example.com/jobs/devsecops",
+            content=(
+                "Cloud security and DevSecOps role with Kubernetes, Python, and "
+                "security automation for product security teams."
+            ),
+            metadata={"company": "Sec Co", "location": "Remote"},
+        ),
+        # Same URL as cloud profile — must dedup to one DB row.
+        SignalItem(
+            source="security_jobs",
+            item_type="job",
+            title="Cloud SDET",
+            observed_at=OBSERVED_AT,
+            url="https://example.com/jobs/cloud-sdet",
+            content="Duplicate listing across profiles.",
+            metadata={"company": "Cloud Co", "location": "Taipei"},
+        ),
+    ]
+
+    factories = (
+        job_search_task_module.build_job_search_sources_for_profile.__globals__[
+            "SOURCE_FACTORIES"
+        ]
+    )
+    monkeypatch.setitem(
+        factories,
+        "cloud_jobs",
+        lambda _config: StaticJobSource(cloud_jobs),
+    )
+    monkeypatch.setitem(
+        factories,
+        "security_jobs",
+        lambda _config: StaticJobSource(security_jobs),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    JobSearchTask(str(config_path)).run()
+
+    assert len(notifier.messages) == 1
+    message = notifier.messages[0]
+    assert "## cloud_sdet" in message
+    assert "## devsecops_security" in message
+    assert "Cloud SDET" in message
+    assert "DevSecOps Engineer" in message
+    assert "default/cloud_jobs" not in message
+
+    assert _count_rows(db_path, "signals") == 2
+    rows = _fetch_signal_rows(db_path)
+    assert "Cloud SDET" in rows
+    assert "DevSecOps Engineer" in rows
+
+
+def test_job_search_task_reports_source_failures_per_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_multi_profile_config(tmp_path)
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+
+    class FailingSource:
+        name = "cloud_jobs"
+
+        def fetch(self) -> list[SignalItem]:
+            raise RuntimeError("rate limited")
+
+    factories = (
+        job_search_task_module.build_job_search_sources_for_profile.__globals__[
+            "SOURCE_FACTORIES"
+        ]
+    )
+    monkeypatch.setitem(
+        factories,
+        "cloud_jobs",
+        lambda _config: FailingSource(),
+    )
+    monkeypatch.setitem(
+        factories,
+        "security_jobs",
+        lambda _config: StaticJobSource(
+            [
+                SignalItem(
+                    source="security_jobs",
+                    item_type="job",
+                    title="Cloud SDET",
+                    observed_at=OBSERVED_AT,
+                    url="https://example.com/jobs/cloud-sdet",
+                    content=(
+                        "Remote role building Python and Pytest automation for "
+                        "Azure, AWS, and Kubernetes workloads with SIEM, SOAR, "
+                        "DLP, and API security."
+                    ),
+                    metadata={"company": "Cloud Co", "location": "Taipei"},
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    JobSearchTask(str(config_path)).run()
+
+    assert len(notifier.messages) == 1
+    assert "cloud_sdet/cloud_jobs: rate limited" in notifier.messages[0]
+    assert "## cloud_sdet" in notifier.messages[0]
+    assert "## devsecops_security" in notifier.messages[0]
 
 
 def _sample_jobs() -> list[SignalItem]:
@@ -541,6 +690,51 @@ def _write_config(
                 "  priority_weight: 0.4",
                 f"  llm_enabled: {'true' if llm_enabled else 'false'}",
                 f"  llm_model: {llm_model}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _write_multi_profile_config(tmp_path: Path) -> Path:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "agent:",
+                "  timezone: Asia/Taipei",
+                '  digest_time: "20:00"',
+                "tasks:",
+                "  job_search:",
+                "    enabled: true",
+                "    profiles:",
+                "      - name: cloud_sdet",
+                "        sources:",
+                "          - cloud_jobs",
+                "        keywords:",
+                "          - Cloud SDET",
+                "        locations:",
+                "          - Taiwan",
+                "      - name: devsecops_security",
+                "        sources:",
+                "          - security_jobs",
+                "        keywords:",
+                "          - DevSecOps",
+                "        locations:",
+                "          - Remote",
+                "  tw_stock_movers:",
+                "    enabled: true",
+                "    top_n: 20",
+                "    timezone: Asia/Taipei",
+                "notifiers:",
+                "  telegram:",
+                "    enabled: true",
+                "scoring:",
+                "  freshness_weight: 0.6",
+                "  priority_weight: 0.4",
+                "  llm_enabled: false",
+                "  llm_model: gpt-4o-mini",
             ]
         ),
         encoding="utf-8",

@@ -462,6 +462,7 @@ agent:
 tasks:
   job_search:
     enabled: true
+    # Legacy single-profile shape (still supported). Omit `profiles` to use this.
     sources:
       - job104
       - indeed
@@ -473,6 +474,17 @@ tasks:
       - agent
     locations:
       - Taiwan
+    # Or use multiple named profiles in one job_search run:
+    # profiles:
+    #   - name: cloud_sdet
+    #     sources: [job104, linkedin_email]
+    #     keywords: [Cloud SDET, Python]
+    #     locations: [Taiwan, Remote]
+    #     scorer_profile: app/profiles/henry_job_profile.md
+    #   - name: devsecops_security
+    #     sources: [job104, linkedin_email]
+    #     keywords: [DevSecOps, Cloud Security]
+    #     locations: [Taiwan, Remote]
   tw_stock_movers:
     enabled: true
     top_n: 20
@@ -544,6 +556,12 @@ env = load_env_settings()
   job-search `page_limit`, stock `batch_size`, and LinkedIn email
   `lookback_days` / `imap_mailbox` without code changes. Invalid values raise
   `ConfigError` at load time.
+- `tasks.job_search.profiles` runs multiple named searches in one task. Each
+  profile has its own `sources`, `keywords`, `locations`, and optional
+  `scorer_profile` Markdown path. When `profiles` is omitted, the legacy
+  top-level `sources` / `keywords` / `locations` become a single `default`
+  profile. Digests group under `## profile_name` when more than one profile is
+  configured; duplicate URLs still upsert to one DB row across profiles.
 - For `linkedin_email`, either set `LINKEDIN_EMAIL_SOURCE_PATH` to a local
   `.eml` file or directory, or set `LINKEDIN_EMAIL_IMAP_HOST`,
   `LINKEDIN_EMAIL_IMAP_USERNAME`, and `LINKEDIN_EMAIL_IMAP_PASSWORD`. Prefer
