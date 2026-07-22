@@ -16,10 +16,12 @@ from app.config import (
     validate_telegram_notifier_secrets,
 )
 from app.core import (
+    TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
+    TW_MARKET_SKIP_HOLIDAY,
     SignalItem,
     finish_signal_run,
-    is_tw_market_open,
     start_signal_run,
+    tw_market_skip_reason,
     upsert_signal,
 )
 from app.notifiers import build_telegram_notifier
@@ -101,22 +103,29 @@ class TwStockMoversTask(BaseTask):
                 raise ValueError("Task 'tw_stock_movers' is disabled in config")
 
             env = load_env_settings()
-            if not is_tw_market_open():
+            skip_reason = tw_market_skip_reason()
+            if skip_reason is not None:
+                if skip_reason == TW_MARKET_SKIP_HOLIDAY:
+                    skip_label = "Taiwan market holiday"
+                elif skip_reason == TW_MARKET_SKIP_CALENDAR_UNAVAILABLE:
+                    skip_label = "Taiwan market calendar unavailable"
+                else:
+                    skip_label = "Taiwan market is closed"
                 self.emit_log(
                     "task_skipped",
                     message="Taiwan stock movers task skipped",
                     db_path=str(db_path),
-                    skip_reason="taiwan_market_closed",
+                    skip_reason=skip_reason,
                 )
                 print(
                     "tw_stock_movers task skipped using "
-                    f"{self.config_path}: Taiwan market is closed"
+                    f"{self.config_path}: {skip_label}"
                 )
                 self.end_task_run(
                     db_path=db_path,
                     status="skipped",
                     notified_count=0,
-                    error_message="taiwan_market_closed",
+                    error_message=skip_reason,
                 )
                 return
 

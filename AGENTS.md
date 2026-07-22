@@ -24,7 +24,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | Milestone | Scope | Status |
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
-| M6 | Hardening / extensions #49–#57 | **In progress** — through #49 done; #55 in progress |
+| M6 | Hardening / extensions #49–#57 | **In progress** — through #55 done; #51 in progress |
 | M7 | LangChain-ready platform evolution #60–#67 | Later — only when asked |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
@@ -49,8 +49,11 @@ signal-agent/
 │   │   ├── db.py           # SQLite storage, dedup, run history
 │   │   ├── secrets.py      # env-based secrets
 │   │   ├── time_utils.py   # Taiwan market-hours helpers
+│   │   ├── tw_market_calendar.py  # static TW holiday calendar
 │   │   ├── logging.py      # structured JSON logging
 │   │   └── error_handling.py  # Telegram failure alerts + redaction
+│   ├── data/
+│   │   └── tw_market_holidays.yaml  # TWSE/TPEx no-trade dates
 │   ├── sources/
 │   │   ├── base.py         # BaseSource + fetch_from_sources helper
 │   │   ├── http_settings.py  # shared HTTP timeout/retry/delay validation
@@ -167,7 +170,7 @@ a regression is found. Paths below are the current landing spots for each slice.
 | 10–11 | Job profile + rule scorer | `app/profiles/`, `app/scorers/job_rule_scorer.py`, `app/scorers/job_search.py` |
 | 12–13 | Job sources | `app/sources/job104.py`, `app/sources/linkedin_email.py`, `app/sources/indeed.py`, `app/sources/glassdoor.py` |
 | 14–15 | Job-search task + optional LLM | `app/tasks/job_search.py`, `app/scorers/job_llm_scorer.py` |
-| 16 | Market-hours guard | `app/core/time_utils.py` |
+| 16 | Market-hours guard | `app/core/time_utils.py` (+ holiday calendar in #51) |
 | 17–19 | TW stock movers | `app/sources/twse.py`, `app/sources/tpex.py`, `app/tasks/tw_stock_movers.py` |
 | 20–22 | Packaging / deploy | `Dockerfile`, `docker-compose.yml`, `deploy/k3s/` |
 | 23–25 | Ops hardening | `app/core/logging.py`, `task_runs` in `app/core/db.py`, `app/core/error_handling.py` |
@@ -184,7 +187,7 @@ Work in this order unless a human asks otherwise:
 3. #50  Health/status CLI for scheduled runs — DONE
 4. #53  Configurable source timeouts, retries, and fetch limits — DONE
 5. #49  Multiple job-search profiles and per-profile configuration — DONE
-6. #55  Two-stage job scoring with LLM budget and digest limits
+6. #55  Two-stage job scoring with LLM budget and digest limits — DONE
 7. #51  Taiwan market holiday calendar in market-hours guard
 8. #52  Stock watchlist alert task (separate from top movers)
 9. #57  SQLite schema versioning and migration path
@@ -209,8 +212,8 @@ points:
 | #50 | `app/cli.py`, `app/core/db.py`, `app/core/health.py`, tests — done |
 | #53 | `config.yaml` `sources:`, `app/core/config.py`, source `from_config`, tests — done |
 | #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — done |
-| #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — in this PR |
-| #51 | `app/core/time_utils.py`, holiday data + tests |
+| #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — done |
+| #51 | `app/core/tw_market_calendar.py`, `app/data/tw_market_holidays.yaml`, `app/core/time_utils.py`, tests — in this PR |
 | #52 | new source/task under `app/sources/` / `app/tasks/`, config + Telegram |
 | #57 | `app/core/db.py`, `sql/`, migration runner + tests |
 

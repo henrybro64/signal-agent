@@ -50,7 +50,18 @@ from .secrets import (
     validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
-from .time_utils import is_tw_market_open
+from .time_utils import is_tw_market_open, tw_market_skip_reason
+from .tw_market_calendar import (
+    TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
+    TW_MARKET_SKIP_CLOSED,
+    TW_MARKET_SKIP_HOLIDAY,
+    TwMarketCalendarError,
+    clear_tw_market_holiday_cache,
+    is_tw_market_calendar_year_covered,
+    is_tw_market_holiday,
+    load_tw_market_holiday_dates,
+    tw_market_calendar_years,
+)
 
 __all__ = [
     "AppConfig",
@@ -62,9 +73,14 @@ __all__ = [
     "SecretError",
     "SignalItem",
     "SignalRunRecord",
+    "TW_MARKET_SKIP_CALENDAR_UNAVAILABLE",
+    "TW_MARKET_SKIP_CLOSED",
+    "TW_MARKET_SKIP_HOLIDAY",
     "TaskRunRecord",
+    "TwMarketCalendarError",
     "UpsertResult",
     "VALID_SIGNAL_STATUSES",
+    "clear_tw_market_holiday_cache",
     "count_failed_signal_runs",
     "finish_task_run",
     "finish_signal_run",
@@ -79,10 +95,13 @@ __all__ = [
     "has_openai_api_key",
     "has_telegram_credentials",
     "init_db",
+    "is_tw_market_calendar_year_covered",
+    "is_tw_market_holiday",
     "is_tw_market_open",
     "list_pending_digest_jobs",
     "load_config",
     "load_recent_signal_runs",
+    "load_tw_market_holiday_dates",
     "mark_signals_digest_reported",
     "load_env_settings",
     "require_readable_db",
@@ -90,6 +109,8 @@ __all__ = [
     "start_task_run",
     "start_signal_run",
     "summarize_run_health",
+    "tw_market_calendar_years",
+    "tw_market_skip_reason",
     "update_signal_evaluation",
     "update_signal_status",
     "upsert_signal",

@@ -67,6 +67,8 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/core/db.py",
         "app/core/secrets.py",
         "app/core/time_utils.py",
+        "app/core/tw_market_calendar.py",
+        "app/data/tw_market_holidays.yaml",
         "app/core/logging.py",
         "app/core/error_handling.py",
         "app/sources/base.py",

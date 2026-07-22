@@ -166,7 +166,10 @@ signal-agent/
 │   │   ├── logging.py
 │   │   ├── models.py
 │   │   ├── secrets.py
-│   │   └── time_utils.py
+│   │   ├── time_utils.py
+│   │   └── tw_market_calendar.py
+│   ├── data/
+│   │   └── tw_market_holidays.yaml
 │   ├── notifiers/
 │   │   └── telegram.py
 │   ├── profiles/
@@ -365,19 +368,52 @@ adds a short warning under `資料來源異常`.
 
 ## Taiwan market hours
 
-`tw_stock_movers` workflows should call `is_tw_market_open()` before fetching or
-sending reports so frequent schedulers can no-op outside 台股開盤時間:
+`tw_stock_movers` workflows should call `is_tw_market_open()` (or
+`tw_market_skip_reason()`) before fetching or sending reports so frequent
+schedulers can no-op outside 台股開盤時間:
 
 ```python
-from app.core import is_tw_market_open
+from app.core import is_tw_market_open, tw_market_skip_reason
 
+skip_reason = tw_market_skip_reason()
+if skip_reason is not None:
+    print(f"tw market unavailable ({skip_reason}); skipping stock mover run")
+    return
+
+# Equivalent boolean check:
 if not is_tw_market_open():
     print("tw market closed; skipping stock mover run")
     return
 ```
 
-The MVP guard treats Monday through Friday, 09:00 through 13:30 inclusive, in
-`Asia/Taipei`. Public holidays are not handled yet.
+The guard treats Monday through Friday, 09:00 through 13:30 inclusive, in
+`Asia/Taipei`, and also skips configured Taiwan market holidays / settlement-only
+no-trade days. Skip reasons:
+
+- `taiwan_market_holiday` — date listed in the static holiday calendar
+- `taiwan_market_closed` — weekend or outside market hours
+- `taiwan_market_calendar_unavailable` — the holiday YAML has no entries for the
+  requested year (fail closed until the calendar is updated)
+
+### Updating the holiday calendar
+
+Holiday data lives in `app/data/tw_market_holidays.yaml` and ships with the
+package. Keep every year you plan to schedule covered: if the requested Taipei
+year has zero holiday rows, stock tasks skip with
+`taiwan_market_calendar_unavailable` instead of assuming the market is open.
+
+When TWSE publishes the next year's schedule
+(https://www.twse.com.tw/holidaySchedule/holidaySchedule):
+
+1. Add each no-trade date under `holidays:` with `date` (`YYYY-MM-DD`) and
+   `name`.
+2. Include settlement-only days (市場無交易，僅辦理結算交割作業).
+3. Do not list ordinary weekends; weekday/time checks already cover those.
+4. Leave informational “開始交易日” / “最後交易日” rows out — those are trading
+   days.
+5. Add announced ad-hoc closures (for example typhoon / emergency no-trade days)
+   when TWSE publishes them; the static file cannot discover those automatically.
+6. Run `make check` and commit the YAML update.
 
 ## Storage
 
