@@ -111,6 +111,14 @@ class LinkedInEmailSource(BaseSource):
             else:
                 email_paths = [source_path]
 
+        # Precedence: explicit kwarg > config.yaml > LINKEDIN_EMAIL_IMAP_MAILBOX.
+        resolved_mailbox = (
+            imap_mailbox
+            if imap_mailbox is not None
+            else settings.imap_mailbox
+            if settings.imap_mailbox is not None
+            else resolved_env.linkedin_email_imap_mailbox
+        )
         return cls(
             keywords=config.tasks.job_search.keywords,
             locations=config.tasks.job_search.locations,
@@ -118,11 +126,7 @@ class LinkedInEmailSource(BaseSource):
             imap_host=resolved_env.linkedin_email_imap_host,
             imap_username=resolved_env.linkedin_email_imap_username,
             imap_password=resolved_env.linkedin_email_imap_password,
-            imap_mailbox=(
-                settings.imap_mailbox
-                if imap_mailbox is None
-                else imap_mailbox
-            ),
+            imap_mailbox=resolved_mailbox,
             lookback_days=(
                 settings.lookback_days
                 if lookback_days is None

@@ -59,7 +59,6 @@ data:
         page_limit: 1
       linkedin_email:
         lookback_days: 14
-        imap_mailbox: INBOX
       twse:
         timeout_seconds: 10
         max_retries: 2

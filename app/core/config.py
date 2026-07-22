@@ -73,7 +73,9 @@ class JobHttpSourceConfig:
 @dataclass(slots=True)
 class LinkedInEmailSourceConfig:
     lookback_days: int = 14
-    imap_mailbox: str = "INBOX"
+    # None means "omit from config" so from_config can fall back to
+    # LINKEDIN_EMAIL_IMAP_MAILBOX (default INBOX).
+    imap_mailbox: str | None = None
 
 
 @dataclass(slots=True)
@@ -400,23 +402,24 @@ def _parse_linkedin_email_source_config(
         parent_path=parent_path,
         source_name=source_name,
     )
-    imap_mailbox = _optional_str(
-        data,
-        "imap_mailbox",
-        default="INBOX",
-        parent_path=parent_path,
-        source_name=source_name,
-    ).strip()
     _require_positive_int(
         lookback_days,
         config_path=f"{parent_path}.lookback_days",
         source_name=source_name,
     )
-    if not imap_mailbox:
-        raise ConfigError(
-            f"Config value '{parent_path}.imap_mailbox' must be a "
-            f"non-empty string in {source_name}"
-        )
+    imap_mailbox: str | None = None
+    if "imap_mailbox" in data:
+        imap_mailbox = _require_str(
+            data,
+            "imap_mailbox",
+            parent_path=parent_path,
+            source_name=source_name,
+        ).strip()
+        if not imap_mailbox:
+            raise ConfigError(
+                f"Config value '{parent_path}.imap_mailbox' must be a "
+                f"non-empty string in {source_name}"
+            )
     return LinkedInEmailSourceConfig(
         lookback_days=lookback_days,
         imap_mailbox=imap_mailbox,

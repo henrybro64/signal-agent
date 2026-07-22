@@ -31,7 +31,7 @@ def test_load_config_reads_sample_file() -> None:
     assert config.sources.job104.request_delay_seconds == 1.0
     assert config.sources.job104.page_limit == 1
     assert config.sources.linkedin_email.lookback_days == 14
-    assert config.sources.linkedin_email.imap_mailbox == "INBOX"
+    assert config.sources.linkedin_email.imap_mailbox is None
     assert config.sources.twse.batch_size == 100
     assert config.sources.tpex.request_delay_seconds == 0.2
 
@@ -202,6 +202,7 @@ def test_app_config_from_dict() -> None:
     assert config.sources.job104.page_limit == 1
     assert config.sources.indeed.request_delay_seconds == 1.0
     assert config.sources.linkedin_email.lookback_days == 14
+    assert config.sources.linkedin_email.imap_mailbox is None
     assert config.sources.twse.batch_size == 100
     assert config.sources.tpex.timeout_seconds == 10.0
 

@@ -508,6 +508,7 @@ sources:
     page_limit: 1
   linkedin_email:
     lookback_days: 14
+    # Optional; when omitted, LINKEDIN_EMAIL_IMAP_MAILBOX is used (default INBOX).
     imap_mailbox: INBOX
   twse:
     timeout_seconds: 10
@@ -545,9 +546,10 @@ env = load_env_settings()
   `ConfigError` at load time.
 - For `linkedin_email`, either set `LINKEDIN_EMAIL_SOURCE_PATH` to a local
   `.eml` file or directory, or set `LINKEDIN_EMAIL_IMAP_HOST`,
-  `LINKEDIN_EMAIL_IMAP_USERNAME`, and `LINKEDIN_EMAIL_IMAP_PASSWORD`. Configure
-  the IMAP mailbox via `sources.linkedin_email.imap_mailbox` in `config.yaml`
-  (default `INBOX`).
+  `LINKEDIN_EMAIL_IMAP_USERNAME`, and `LINKEDIN_EMAIL_IMAP_PASSWORD`. Prefer
+  `sources.linkedin_email.imap_mailbox` in `config.yaml` for the mailbox; if
+  that key is omitted, `LINKEDIN_EMAIL_IMAP_MAILBOX` is used (default
+  `INBOX`).
 - `.env.example` documents the expected local secret variables.
 - `deploy/k3s/secret.example.yaml` shows the Kubernetes Secret shape. Copy it to
   `deploy/k3s/secret.yaml`, fill in real values, and apply that file in k3s.
