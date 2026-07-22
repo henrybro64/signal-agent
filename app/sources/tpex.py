@@ -20,7 +20,7 @@ _DEFAULT_INDUSTRY_URL = "https://mis.twse.com.tw/stock/api/getIndustry.jsp"
 _DEFAULT_CATEGORY_URL = "https://mis.twse.com.tw/stock/api/getCategory.jsp"
 _DEFAULT_STOCK_INFO_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
 _DEFAULT_REQUEST_DELAY_SECONDS = 0.2
-_REQUEST_TIMEOUT_SECONDS = 10
+_DEFAULT_TIMEOUT_SECONDS = 10.0
 _TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 _EQUITY_LIKE_CATEGORY_CODES = {"E0", "H0", "Q0"}
 _TAIPEI = ZoneInfo("Asia/Taipei")
@@ -61,6 +61,7 @@ class TpexSource(BaseSource):
 
     session: requests.Session | None = None
     request_delay_seconds: float = _DEFAULT_REQUEST_DELAY_SECONDS
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
     max_retries: int = 2
     batch_size: int = 100
     industry_url: str = _DEFAULT_INDUSTRY_URL
@@ -72,6 +73,8 @@ class TpexSource(BaseSource):
     name: ClassVar[str] = "tpex"
 
     def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
         if self.request_delay_seconds < 0:
             raise ValueError("request_delay_seconds must be zero or greater")
         if self.max_retries < 0:
@@ -82,21 +85,36 @@ class TpexSource(BaseSource):
     @classmethod
     def from_config(
         cls,
-        _config: AppConfig,
+        config: AppConfig,
         *,
         session: requests.Session | None = None,
-        request_delay_seconds: float = _DEFAULT_REQUEST_DELAY_SECONDS,
-        max_retries: int = 2,
-        batch_size: int = 100,
+        request_delay_seconds: float | None = None,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+        batch_size: int | None = None,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> TpexSource:
         """Build the source from application config."""
 
+        settings = config.sources.tpex
         return cls(
             session=session,
-            request_delay_seconds=request_delay_seconds,
-            max_retries=max_retries,
-            batch_size=batch_size,
+            request_delay_seconds=(
+                settings.request_delay_seconds
+                if request_delay_seconds is None
+                else request_delay_seconds
+            ),
+            timeout_seconds=(
+                settings.timeout_seconds
+                if timeout_seconds is None
+                else timeout_seconds
+            ),
+            max_retries=(
+                settings.max_retries if max_retries is None else max_retries
+            ),
+            batch_size=(
+                settings.batch_size if batch_size is None else batch_size
+            ),
             sleeper=sleeper,
         )
 
@@ -265,7 +283,7 @@ class TpexSource(BaseSource):
                 response = session.get(
                     url,
                     params=params,
-                    timeout=_REQUEST_TIMEOUT_SECONDS,
+                    timeout=self.timeout_seconds,
                 )
             except requests.RequestException as exc:
                 if attempt >= self.max_retries:

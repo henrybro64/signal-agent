@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import requests
 
-from app.core import SignalItem
+from app.core import AppConfig, SignalItem
 from app.sources import DummySource, TwseSource, TwseSourceError, fetch_from_sources
 from tests.source_fakes import FakeResponse, FakeSession
 
@@ -17,6 +17,46 @@ FIXTURE_PATH = ROOT / "tests" / "fixtures" / "twse_sample.json"
 
 def _load_fixture() -> dict[str, object]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def test_twse_source_from_config_applies_sources_runtime_settings() -> None:
+    source = TwseSource.from_config(
+        AppConfig.from_dict(
+            {
+                "agent": {"timezone": "Asia/Taipei", "digest_time": "20:00"},
+                "tasks": {
+                    "job_search": {
+                        "enabled": True,
+                        "sources": ["job104"],
+                        "keywords": ["python"],
+                    },
+                    "tw_stock_movers": {
+                        "enabled": True,
+                        "top_n": 20,
+                        "timezone": "Asia/Taipei",
+                    },
+                },
+                "notifiers": {"telegram": {"enabled": True}},
+                "scoring": {
+                    "freshness_weight": 0.6,
+                    "priority_weight": 0.4,
+                },
+                "sources": {
+                    "twse": {
+                        "timeout_seconds": 9,
+                        "max_retries": 3,
+                        "request_delay_seconds": 0.4,
+                        "batch_size": 40,
+                    }
+                },
+            }
+        )
+    )
+
+    assert source.timeout_seconds == 9.0
+    assert source.max_retries == 3
+    assert source.request_delay_seconds == 0.4
+    assert source.batch_size == 40
 
 
 def test_twse_source_fetch_normalizes_stock_movers() -> None:

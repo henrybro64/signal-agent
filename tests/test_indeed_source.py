@@ -22,6 +22,29 @@ def test_indeed_source_from_config_defaults_to_taiwan_region() -> None:
 
     assert source.keywords == ["python"]
     assert source.locations == ["Taiwan"]
+    assert source.timeout_seconds == 10.0
+    assert source.max_retries == 2
+    assert source.page_limit == 1
+
+
+def test_indeed_source_from_config_applies_sources_runtime_settings() -> None:
+    source = IndeedSource.from_config(
+        _build_config(
+            sources={
+                "indeed": {
+                    "timeout_seconds": 12,
+                    "max_retries": 5,
+                    "request_delay_seconds": 0.5,
+                    "page_limit": 2,
+                }
+            }
+        )
+    )
+
+    assert source.timeout_seconds == 12.0
+    assert source.max_retries == 5
+    assert source.request_delay_seconds == 0.5
+    assert source.page_limit == 2
 
 
 def test_indeed_source_fetch_normalizes_search_results() -> None:
@@ -144,7 +167,11 @@ def test_indeed_source_surfaces_bot_challenges_cleanly() -> None:
         source.fetch()
 
 
-def _build_config(*, locations: list[str] | None = None) -> AppConfig:
+def _build_config(
+    *,
+    locations: list[str] | None = None,
+    sources: dict[str, object] | None = None,
+) -> AppConfig:
     job_search: dict[str, object] = {
         "enabled": True,
         "sources": ["indeed"],
@@ -153,28 +180,29 @@ def _build_config(*, locations: list[str] | None = None) -> AppConfig:
     if locations is not None:
         job_search["locations"] = locations
 
-    return AppConfig.from_dict(
-        {
-            "agent": {
+    payload: dict[str, object] = {
+        "agent": {
+            "timezone": "Asia/Taipei",
+            "digest_time": "20:00",
+        },
+        "tasks": {
+            "job_search": job_search,
+            "tw_stock_movers": {
+                "enabled": True,
+                "top_n": 20,
                 "timezone": "Asia/Taipei",
-                "digest_time": "20:00",
             },
-            "tasks": {
-                "job_search": job_search,
-                "tw_stock_movers": {
-                    "enabled": True,
-                    "top_n": 20,
-                    "timezone": "Asia/Taipei",
-                },
-            },
-            "notifiers": {
-                "telegram": {
-                    "enabled": True,
-                }
-            },
-            "scoring": {
-                "freshness_weight": 0.6,
-                "priority_weight": 0.4,
-            },
-        }
-    )
+        },
+        "notifiers": {
+            "telegram": {
+                "enabled": True,
+            }
+        },
+        "scoring": {
+            "freshness_weight": 0.6,
+            "priority_weight": 0.4,
+        },
+    }
+    if sources is not None:
+        payload["sources"] = sources
+    return AppConfig.from_dict(payload)

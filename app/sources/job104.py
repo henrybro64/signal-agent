@@ -18,7 +18,7 @@ from .base import BaseSource
 
 _DEFAULT_SEARCH_URL = "https://www.104.com.tw/jobs/search/list"
 _DEFAULT_REQUEST_DELAY_SECONDS = 1.0
-_REQUEST_TIMEOUT_SECONDS = 10
+_DEFAULT_TIMEOUT_SECONDS = 10.0
 _TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 _DEFAULT_HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -51,6 +51,7 @@ class Job104Source(BaseSource):
     locations: list[str] | None = None
     session: requests.Session | None = None
     request_delay_seconds: float = _DEFAULT_REQUEST_DELAY_SECONDS
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
     max_retries: int = 2
     page_limit: int = 1
     search_url: str = _DEFAULT_SEARCH_URL
@@ -69,6 +70,8 @@ class Job104Source(BaseSource):
             for location in (self.locations or [])
             if location.strip()
         ]
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
         if self.request_delay_seconds < 0:
             raise ValueError("request_delay_seconds must be zero or greater")
         if self.max_retries < 0:
@@ -82,20 +85,33 @@ class Job104Source(BaseSource):
         config: AppConfig,
         *,
         session: requests.Session | None = None,
-        request_delay_seconds: float = _DEFAULT_REQUEST_DELAY_SECONDS,
-        max_retries: int = 2,
-        page_limit: int = 1,
+        request_delay_seconds: float | None = None,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+        page_limit: int | None = None,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> Job104Source:
         """Build the source from application config."""
 
+        settings = config.sources.job104
         return cls(
             keywords=config.tasks.job_search.keywords,
             locations=config.tasks.job_search.locations,
             session=session,
-            request_delay_seconds=request_delay_seconds,
-            max_retries=max_retries,
-            page_limit=page_limit,
+            request_delay_seconds=(
+                settings.request_delay_seconds
+                if request_delay_seconds is None
+                else request_delay_seconds
+            ),
+            timeout_seconds=(
+                settings.timeout_seconds
+                if timeout_seconds is None
+                else timeout_seconds
+            ),
+            max_retries=(
+                settings.max_retries if max_retries is None else max_retries
+            ),
+            page_limit=settings.page_limit if page_limit is None else page_limit,
             sleeper=sleeper,
         )
 
@@ -185,7 +201,7 @@ class Job104Source(BaseSource):
                 response = session.get(
                     self.search_url,
                     params=params,
-                    timeout=_REQUEST_TIMEOUT_SECONDS,
+                    timeout=self.timeout_seconds,
                 )
             except requests.RequestException as exc:
                 if attempt >= self.max_retries:

@@ -63,11 +63,46 @@ class ScoringConfig:
 
 
 @dataclass(slots=True)
+class JobHttpSourceConfig:
+    timeout_seconds: float = 10.0
+    max_retries: int = 2
+    request_delay_seconds: float = 1.0
+    page_limit: int = 1
+
+
+@dataclass(slots=True)
+class LinkedInEmailSourceConfig:
+    lookback_days: int = 14
+    imap_mailbox: str = "INBOX"
+
+
+@dataclass(slots=True)
+class TwStockHttpSourceConfig:
+    timeout_seconds: float = 10.0
+    max_retries: int = 2
+    request_delay_seconds: float = 0.2
+    batch_size: int = 100
+
+
+@dataclass(slots=True)
+class SourcesConfig:
+    job104: JobHttpSourceConfig = field(default_factory=JobHttpSourceConfig)
+    indeed: JobHttpSourceConfig = field(default_factory=JobHttpSourceConfig)
+    glassdoor: JobHttpSourceConfig = field(default_factory=JobHttpSourceConfig)
+    linkedin_email: LinkedInEmailSourceConfig = field(
+        default_factory=LinkedInEmailSourceConfig
+    )
+    twse: TwStockHttpSourceConfig = field(default_factory=TwStockHttpSourceConfig)
+    tpex: TwStockHttpSourceConfig = field(default_factory=TwStockHttpSourceConfig)
+
+
+@dataclass(slots=True)
 class AppConfig:
     agent: AgentConfig
     tasks: TasksConfig
     notifiers: NotifiersConfig
     scoring: ScoringConfig
+    sources: SourcesConfig = field(default_factory=SourcesConfig)
 
     @classmethod
     def from_dict(
@@ -104,6 +139,11 @@ class AppConfig:
             source_name=source_name,
         )
         scoring = _require_mapping(data, "scoring", source_name=source_name)
+        sources = _optional_mapping(
+            data,
+            "sources",
+            source_name=source_name,
+        )
 
         return cls(
             agent=AgentConfig(
@@ -209,6 +249,344 @@ class AppConfig:
                     source_name=source_name,
                 ),
             ),
+            sources=_parse_sources_config(sources, source_name=source_name),
+        )
+
+
+def _parse_sources_config(
+    data: dict[str, Any],
+    *,
+    source_name: str,
+) -> SourcesConfig:
+    return SourcesConfig(
+        job104=_parse_job_http_source_config(
+            _optional_mapping(
+                data,
+                "job104",
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            parent_path="sources.job104",
+            source_name=source_name,
+            default_request_delay_seconds=1.0,
+        ),
+        indeed=_parse_job_http_source_config(
+            _optional_mapping(
+                data,
+                "indeed",
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            parent_path="sources.indeed",
+            source_name=source_name,
+            default_request_delay_seconds=1.0,
+        ),
+        glassdoor=_parse_job_http_source_config(
+            _optional_mapping(
+                data,
+                "glassdoor",
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            parent_path="sources.glassdoor",
+            source_name=source_name,
+            default_request_delay_seconds=1.0,
+        ),
+        linkedin_email=_parse_linkedin_email_source_config(
+            _optional_mapping(
+                data,
+                "linkedin_email",
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            source_name=source_name,
+        ),
+        twse=_parse_tw_stock_http_source_config(
+            _optional_mapping(
+                data,
+                "twse",
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            parent_path="sources.twse",
+            source_name=source_name,
+        ),
+        tpex=_parse_tw_stock_http_source_config(
+            _optional_mapping(
+                data,
+                "tpex",
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            parent_path="sources.tpex",
+            source_name=source_name,
+        ),
+    )
+
+
+def _parse_job_http_source_config(
+    data: dict[str, Any],
+    *,
+    parent_path: str,
+    source_name: str,
+    default_request_delay_seconds: float,
+) -> JobHttpSourceConfig:
+    timeout_seconds = _optional_float(
+        data,
+        "timeout_seconds",
+        default=10.0,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    max_retries = _optional_int(
+        data,
+        "max_retries",
+        default=2,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    request_delay_seconds = _optional_float(
+        data,
+        "request_delay_seconds",
+        default=default_request_delay_seconds,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    page_limit = _optional_int(
+        data,
+        "page_limit",
+        default=1,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout_seconds,
+        config_path=f"{parent_path}.timeout_seconds",
+        source_name=source_name,
+    )
+    _require_non_negative_int(
+        max_retries,
+        config_path=f"{parent_path}.max_retries",
+        source_name=source_name,
+    )
+    _require_non_negative_number(
+        request_delay_seconds,
+        config_path=f"{parent_path}.request_delay_seconds",
+        source_name=source_name,
+    )
+    _require_positive_int(
+        page_limit,
+        config_path=f"{parent_path}.page_limit",
+        source_name=source_name,
+    )
+    return JobHttpSourceConfig(
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        request_delay_seconds=request_delay_seconds,
+        page_limit=page_limit,
+    )
+
+
+def _parse_linkedin_email_source_config(
+    data: dict[str, Any],
+    *,
+    source_name: str,
+) -> LinkedInEmailSourceConfig:
+    parent_path = "sources.linkedin_email"
+    lookback_days = _optional_int(
+        data,
+        "lookback_days",
+        default=14,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    imap_mailbox = _optional_str(
+        data,
+        "imap_mailbox",
+        default="INBOX",
+        parent_path=parent_path,
+        source_name=source_name,
+    ).strip()
+    _require_positive_int(
+        lookback_days,
+        config_path=f"{parent_path}.lookback_days",
+        source_name=source_name,
+    )
+    if not imap_mailbox:
+        raise ConfigError(
+            f"Config value '{parent_path}.imap_mailbox' must be a "
+            f"non-empty string in {source_name}"
+        )
+    return LinkedInEmailSourceConfig(
+        lookback_days=lookback_days,
+        imap_mailbox=imap_mailbox,
+    )
+
+
+def _parse_tw_stock_http_source_config(
+    data: dict[str, Any],
+    *,
+    parent_path: str,
+    source_name: str,
+) -> TwStockHttpSourceConfig:
+    timeout_seconds = _optional_float(
+        data,
+        "timeout_seconds",
+        default=10.0,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    max_retries = _optional_int(
+        data,
+        "max_retries",
+        default=2,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    request_delay_seconds = _optional_float(
+        data,
+        "request_delay_seconds",
+        default=0.2,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    batch_size = _optional_int(
+        data,
+        "batch_size",
+        default=100,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout_seconds,
+        config_path=f"{parent_path}.timeout_seconds",
+        source_name=source_name,
+    )
+    _require_non_negative_int(
+        max_retries,
+        config_path=f"{parent_path}.max_retries",
+        source_name=source_name,
+    )
+    _require_non_negative_number(
+        request_delay_seconds,
+        config_path=f"{parent_path}.request_delay_seconds",
+        source_name=source_name,
+    )
+    _require_positive_int(
+        batch_size,
+        config_path=f"{parent_path}.batch_size",
+        source_name=source_name,
+    )
+    return TwStockHttpSourceConfig(
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        request_delay_seconds=request_delay_seconds,
+        batch_size=batch_size,
+    )
+
+
+def _optional_mapping(
+    data: dict[str, Any],
+    key: str,
+    *,
+    source_name: str,
+    parent_path: str | None = None,
+) -> dict[str, Any]:
+    if key not in data:
+        return {}
+    return _require_mapping(
+        data,
+        key,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+
+
+def _optional_int(
+    data: dict[str, Any],
+    key: str,
+    *,
+    default: int,
+    source_name: str,
+    parent_path: str | None = None,
+) -> int:
+    if key not in data:
+        return default
+    return _require_int(
+        data,
+        key,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+
+
+def _optional_float(
+    data: dict[str, Any],
+    key: str,
+    *,
+    default: float,
+    source_name: str,
+    parent_path: str | None = None,
+) -> float:
+    if key not in data:
+        return default
+    return _require_float(
+        data,
+        key,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+
+
+def _require_positive_number(
+    value: float,
+    *,
+    config_path: str,
+    source_name: str,
+) -> None:
+    if value <= 0:
+        raise ConfigError(
+            f"Config value '{config_path}' must be greater than zero "
+            f"in {source_name}"
+        )
+
+
+def _require_non_negative_number(
+    value: float,
+    *,
+    config_path: str,
+    source_name: str,
+) -> None:
+    if value < 0:
+        raise ConfigError(
+            f"Config value '{config_path}' must be zero or greater "
+            f"in {source_name}"
+        )
+
+
+def _require_positive_int(
+    value: int,
+    *,
+    config_path: str,
+    source_name: str,
+) -> None:
+    if value <= 0:
+        raise ConfigError(
+            f"Config value '{config_path}' must be greater than zero "
+            f"in {source_name}"
+        )
+
+
+def _require_non_negative_int(
+    value: int,
+    *,
+    config_path: str,
+    source_name: str,
+) -> None:
+    if value < 0:
+        raise ConfigError(
+            f"Config value '{config_path}' must be zero or greater "
+            f"in {source_name}"
         )
 
 
