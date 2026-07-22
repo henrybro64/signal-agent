@@ -15,6 +15,7 @@ from app.core import SignalItem
 from app.core.config import AppConfig
 
 from .base import BaseSource
+from .http_settings import validate_http_fetch_settings
 
 _DEFAULT_INDUSTRY_URL = "https://mis.twse.com.tw/stock/api/getIndustry.jsp"
 _DEFAULT_CATEGORY_URL = "https://mis.twse.com.tw/stock/api/getCategory.jsp"
@@ -73,12 +74,11 @@ class TpexSource(BaseSource):
     name: ClassVar[str] = "tpex"
 
     def __post_init__(self) -> None:
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be greater than zero")
-        if self.request_delay_seconds < 0:
-            raise ValueError("request_delay_seconds must be zero or greater")
-        if self.max_retries < 0:
-            raise ValueError("max_retries must be zero or greater")
+        validate_http_fetch_settings(
+            timeout_seconds=self.timeout_seconds,
+            request_delay_seconds=self.request_delay_seconds,
+            max_retries=self.max_retries,
+        )
         if self.batch_size <= 0:
             raise ValueError("batch_size must be greater than zero")
 
@@ -96,25 +96,18 @@ class TpexSource(BaseSource):
     ) -> TpexSource:
         """Build the source from application config."""
 
-        settings = config.sources.tpex
+        settings = config.sources.tpex.with_overrides(
+            request_delay_seconds=request_delay_seconds,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+            batch_size=batch_size,
+        )
         return cls(
             session=session,
-            request_delay_seconds=(
-                settings.request_delay_seconds
-                if request_delay_seconds is None
-                else request_delay_seconds
-            ),
-            timeout_seconds=(
-                settings.timeout_seconds
-                if timeout_seconds is None
-                else timeout_seconds
-            ),
-            max_retries=(
-                settings.max_retries if max_retries is None else max_retries
-            ),
-            batch_size=(
-                settings.batch_size if batch_size is None else batch_size
-            ),
+            request_delay_seconds=settings.request_delay_seconds,
+            timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+            batch_size=settings.batch_size,
             sleeper=sleeper,
         )
 

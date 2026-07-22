@@ -70,6 +70,7 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/core/logging.py",
         "app/core/error_handling.py",
         "app/sources/base.py",
+        "app/sources/http_settings.py",
         "app/sources/dummy.py",
         "app/sources/job104.py",
         "app/sources/linkedin_email.py",
@@ -102,6 +103,7 @@ def test_agents_guide_names_key_sources_and_tasks() -> None:
     for needle in (
         "indeed.py",
         "glassdoor.py",
+        "http_settings.py",
         "fetch.py",
         "dummy.py",
         "fetch_from_sources",

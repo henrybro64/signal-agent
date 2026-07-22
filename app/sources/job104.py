@@ -15,6 +15,7 @@ from app.core import SignalItem
 from app.core.config import AppConfig
 
 from .base import BaseSource
+from .http_settings import validate_http_fetch_settings
 
 _DEFAULT_SEARCH_URL = "https://www.104.com.tw/jobs/search/list"
 _DEFAULT_REQUEST_DELAY_SECONDS = 1.0
@@ -70,12 +71,11 @@ class Job104Source(BaseSource):
             for location in (self.locations or [])
             if location.strip()
         ]
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be greater than zero")
-        if self.request_delay_seconds < 0:
-            raise ValueError("request_delay_seconds must be zero or greater")
-        if self.max_retries < 0:
-            raise ValueError("max_retries must be zero or greater")
+        validate_http_fetch_settings(
+            timeout_seconds=self.timeout_seconds,
+            request_delay_seconds=self.request_delay_seconds,
+            max_retries=self.max_retries,
+        )
         if self.page_limit <= 0:
             raise ValueError("page_limit must be greater than zero")
 
@@ -93,25 +93,20 @@ class Job104Source(BaseSource):
     ) -> Job104Source:
         """Build the source from application config."""
 
-        settings = config.sources.job104
+        settings = config.sources.job104.with_overrides(
+            request_delay_seconds=request_delay_seconds,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+            page_limit=page_limit,
+        )
         return cls(
             keywords=config.tasks.job_search.keywords,
             locations=config.tasks.job_search.locations,
             session=session,
-            request_delay_seconds=(
-                settings.request_delay_seconds
-                if request_delay_seconds is None
-                else request_delay_seconds
-            ),
-            timeout_seconds=(
-                settings.timeout_seconds
-                if timeout_seconds is None
-                else timeout_seconds
-            ),
-            max_retries=(
-                settings.max_retries if max_retries is None else max_retries
-            ),
-            page_limit=settings.page_limit if page_limit is None else page_limit,
+            request_delay_seconds=settings.request_delay_seconds,
+            timeout_seconds=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+            page_limit=settings.page_limit,
             sleeper=sleeper,
         )
 

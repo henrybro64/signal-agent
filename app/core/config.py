@@ -69,6 +69,29 @@ class JobHttpSourceConfig:
     request_delay_seconds: float = 1.0
     page_limit: int = 1
 
+    def with_overrides(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+        request_delay_seconds: float | None = None,
+        page_limit: int | None = None,
+    ) -> JobHttpSourceConfig:
+        """Return settings with any non-None overrides applied."""
+
+        return JobHttpSourceConfig(
+            timeout_seconds=(
+                self.timeout_seconds if timeout_seconds is None else timeout_seconds
+            ),
+            max_retries=self.max_retries if max_retries is None else max_retries,
+            request_delay_seconds=(
+                self.request_delay_seconds
+                if request_delay_seconds is None
+                else request_delay_seconds
+            ),
+            page_limit=self.page_limit if page_limit is None else page_limit,
+        )
+
 
 @dataclass(slots=True)
 class LinkedInEmailSourceConfig:
@@ -84,6 +107,29 @@ class TwStockHttpSourceConfig:
     max_retries: int = 2
     request_delay_seconds: float = 0.2
     batch_size: int = 100
+
+    def with_overrides(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+        request_delay_seconds: float | None = None,
+        batch_size: int | None = None,
+    ) -> TwStockHttpSourceConfig:
+        """Return settings with any non-None overrides applied."""
+
+        return TwStockHttpSourceConfig(
+            timeout_seconds=(
+                self.timeout_seconds if timeout_seconds is None else timeout_seconds
+            ),
+            max_retries=self.max_retries if max_retries is None else max_retries,
+            request_delay_seconds=(
+                self.request_delay_seconds
+                if request_delay_seconds is None
+                else request_delay_seconds
+            ),
+            batch_size=self.batch_size if batch_size is None else batch_size,
+        )
 
 
 @dataclass(slots=True)
@@ -260,40 +306,34 @@ def _parse_sources_config(
     *,
     source_name: str,
 ) -> SourcesConfig:
+    def job_http(key: str) -> JobHttpSourceConfig:
+        return _parse_job_http_source_config(
+            _optional_mapping(
+                data,
+                key,
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            parent_path=f"sources.{key}",
+            source_name=source_name,
+        )
+
+    def tw_stock_http(key: str) -> TwStockHttpSourceConfig:
+        return _parse_tw_stock_http_source_config(
+            _optional_mapping(
+                data,
+                key,
+                parent_path="sources",
+                source_name=source_name,
+            ),
+            parent_path=f"sources.{key}",
+            source_name=source_name,
+        )
+
     return SourcesConfig(
-        job104=_parse_job_http_source_config(
-            _optional_mapping(
-                data,
-                "job104",
-                parent_path="sources",
-                source_name=source_name,
-            ),
-            parent_path="sources.job104",
-            source_name=source_name,
-            default_request_delay_seconds=1.0,
-        ),
-        indeed=_parse_job_http_source_config(
-            _optional_mapping(
-                data,
-                "indeed",
-                parent_path="sources",
-                source_name=source_name,
-            ),
-            parent_path="sources.indeed",
-            source_name=source_name,
-            default_request_delay_seconds=1.0,
-        ),
-        glassdoor=_parse_job_http_source_config(
-            _optional_mapping(
-                data,
-                "glassdoor",
-                parent_path="sources",
-                source_name=source_name,
-            ),
-            parent_path="sources.glassdoor",
-            source_name=source_name,
-            default_request_delay_seconds=1.0,
-        ),
+        job104=job_http("job104"),
+        indeed=job_http("indeed"),
+        glassdoor=job_http("glassdoor"),
         linkedin_email=_parse_linkedin_email_source_config(
             _optional_mapping(
                 data,
@@ -303,27 +343,57 @@ def _parse_sources_config(
             ),
             source_name=source_name,
         ),
-        twse=_parse_tw_stock_http_source_config(
-            _optional_mapping(
-                data,
-                "twse",
-                parent_path="sources",
-                source_name=source_name,
-            ),
-            parent_path="sources.twse",
-            source_name=source_name,
-        ),
-        tpex=_parse_tw_stock_http_source_config(
-            _optional_mapping(
-                data,
-                "tpex",
-                parent_path="sources",
-                source_name=source_name,
-            ),
-            parent_path="sources.tpex",
-            source_name=source_name,
-        ),
+        twse=tw_stock_http("twse"),
+        tpex=tw_stock_http("tpex"),
     )
+
+
+def _parse_http_runtime_settings(
+    data: dict[str, Any],
+    *,
+    parent_path: str,
+    source_name: str,
+    timeout_seconds: float,
+    max_retries: int,
+    request_delay_seconds: float,
+) -> tuple[float, int, float]:
+    parsed_timeout = _optional_float(
+        data,
+        "timeout_seconds",
+        default=timeout_seconds,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    parsed_retries = _optional_int(
+        data,
+        "max_retries",
+        default=max_retries,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    parsed_delay = _optional_float(
+        data,
+        "request_delay_seconds",
+        default=request_delay_seconds,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        parsed_timeout,
+        config_path=f"{parent_path}.timeout_seconds",
+        source_name=source_name,
+    )
+    _require_non_negative_int(
+        parsed_retries,
+        config_path=f"{parent_path}.max_retries",
+        source_name=source_name,
+    )
+    _require_non_negative_number(
+        parsed_delay,
+        config_path=f"{parent_path}.request_delay_seconds",
+        source_name=source_name,
+    )
+    return parsed_timeout, parsed_retries, parsed_delay
 
 
 def _parse_job_http_source_config(
@@ -331,49 +401,23 @@ def _parse_job_http_source_config(
     *,
     parent_path: str,
     source_name: str,
-    default_request_delay_seconds: float,
 ) -> JobHttpSourceConfig:
-    timeout_seconds = _optional_float(
-        data,
-        "timeout_seconds",
-        default=10.0,
-        parent_path=parent_path,
-        source_name=source_name,
-    )
-    max_retries = _optional_int(
-        data,
-        "max_retries",
-        default=2,
-        parent_path=parent_path,
-        source_name=source_name,
-    )
-    request_delay_seconds = _optional_float(
-        data,
-        "request_delay_seconds",
-        default=default_request_delay_seconds,
-        parent_path=parent_path,
-        source_name=source_name,
+    defaults = JobHttpSourceConfig()
+    timeout_seconds, max_retries, request_delay_seconds = (
+        _parse_http_runtime_settings(
+            data,
+            parent_path=parent_path,
+            source_name=source_name,
+            timeout_seconds=defaults.timeout_seconds,
+            max_retries=defaults.max_retries,
+            request_delay_seconds=defaults.request_delay_seconds,
+        )
     )
     page_limit = _optional_int(
         data,
         "page_limit",
-        default=1,
+        default=defaults.page_limit,
         parent_path=parent_path,
-        source_name=source_name,
-    )
-    _require_positive_number(
-        timeout_seconds,
-        config_path=f"{parent_path}.timeout_seconds",
-        source_name=source_name,
-    )
-    _require_non_negative_int(
-        max_retries,
-        config_path=f"{parent_path}.max_retries",
-        source_name=source_name,
-    )
-    _require_non_negative_number(
-        request_delay_seconds,
-        config_path=f"{parent_path}.request_delay_seconds",
         source_name=source_name,
     )
     _require_positive_int(
@@ -432,47 +476,22 @@ def _parse_tw_stock_http_source_config(
     parent_path: str,
     source_name: str,
 ) -> TwStockHttpSourceConfig:
-    timeout_seconds = _optional_float(
-        data,
-        "timeout_seconds",
-        default=10.0,
-        parent_path=parent_path,
-        source_name=source_name,
-    )
-    max_retries = _optional_int(
-        data,
-        "max_retries",
-        default=2,
-        parent_path=parent_path,
-        source_name=source_name,
-    )
-    request_delay_seconds = _optional_float(
-        data,
-        "request_delay_seconds",
-        default=0.2,
-        parent_path=parent_path,
-        source_name=source_name,
+    defaults = TwStockHttpSourceConfig()
+    timeout_seconds, max_retries, request_delay_seconds = (
+        _parse_http_runtime_settings(
+            data,
+            parent_path=parent_path,
+            source_name=source_name,
+            timeout_seconds=defaults.timeout_seconds,
+            max_retries=defaults.max_retries,
+            request_delay_seconds=defaults.request_delay_seconds,
+        )
     )
     batch_size = _optional_int(
         data,
         "batch_size",
-        default=100,
+        default=defaults.batch_size,
         parent_path=parent_path,
-        source_name=source_name,
-    )
-    _require_positive_number(
-        timeout_seconds,
-        config_path=f"{parent_path}.timeout_seconds",
-        source_name=source_name,
-    )
-    _require_non_negative_int(
-        max_retries,
-        config_path=f"{parent_path}.max_retries",
-        source_name=source_name,
-    )
-    _require_non_negative_number(
-        request_delay_seconds,
-        config_path=f"{parent_path}.request_delay_seconds",
         source_name=source_name,
     )
     _require_positive_int(

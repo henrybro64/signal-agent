@@ -24,7 +24,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | Milestone | Scope | Status |
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
-| M6 | Hardening / extensions #49–#57 | **In progress** — #56/#54/#50 done; #53 next |
+| M6 | Hardening / extensions #49–#57 | **In progress** — #56/#54/#50/#53 done; #49 next |
 | M7 | LangChain-ready platform evolution #60–#67 | Later — only when asked |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
@@ -53,6 +53,7 @@ signal-agent/
 │   │   └── error_handling.py  # Telegram failure alerts + redaction
 │   ├── sources/
 │   │   ├── base.py         # BaseSource + fetch_from_sources helper
+│   │   ├── http_settings.py  # shared HTTP timeout/retry/delay validation
 │   │   ├── dummy.py        # in-memory sample source
 │   │   ├── job104.py       # 104 job search
 │   │   ├── linkedin_email.py  # LinkedIn job-alert email parsing
@@ -180,7 +181,7 @@ Work in this order unless a human asks otherwise:
 1. #56  Ubuntu VM deployment runbook (cron / systemd + Compose) — DONE
 2. #54  GitHub Actions CI for pytest, ruff, package smoke — DONE
 3. #50  Health/status CLI for scheduled runs — DONE
-4. #53  Configurable source timeouts, retries, and fetch limits
+4. #53  Configurable source timeouts, retries, and fetch limits — DONE
 5. #49  Multiple job-search profiles and per-profile configuration
 6. #55  Two-stage job scoring with LLM budget and digest limits
 7. #51  Taiwan market holiday calendar in market-hours guard
@@ -205,7 +206,7 @@ points:
 | #56 | `docs/ubuntu-vm-deployment.md`, `deploy/ubuntu/` (wrappers, crontab, `install-systemd.sh`) — done |
 | #54 | `.github/workflows/ci.yml`, `tests/test_ci_workflow.py`, README CI notes — done |
 | #50 | `app/cli.py`, `app/core/db.py`, `app/core/health.py`, tests — done |
-| #53 | `config.yaml`, source constructors, `app/core/config.py`, source tests — in this PR |
+| #53 | `config.yaml` `sources:`, `app/core/config.py`, source `from_config`, tests — done |
 | #49 | `config.yaml`, `app/profiles/`, `app/tasks/job_search.py`, scorers |
 | #55 | `app/scorers/`, `app/tasks/job_search.py`, scoring config keys |
 | #51 | `app/core/time_utils.py`, holiday data + tests |
