@@ -35,11 +35,23 @@ class AgentConfig:
 
 
 @dataclass(slots=True)
+class JobSearchProfileConfig:
+    """One named job-search profile with its own sources and keywords."""
+
+    name: str
+    sources: list[str]
+    keywords: list[str]
+    locations: list[str] = field(default_factory=list)
+    scorer_profile: str | None = None
+
+
+@dataclass(slots=True)
 class JobSearchTaskConfig:
     enabled: bool
     sources: list[str]
     keywords: list[str]
     locations: list[str] = field(default_factory=list)
+    profiles: list[JobSearchProfileConfig] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -175,32 +187,9 @@ class AppConfig:
                 ),
             ),
             tasks=TasksConfig(
-                job_search=JobSearchTaskConfig(
-                    enabled=_require_bool(
-                        job_search,
-                        "enabled",
-                        parent_path="tasks.job_search",
-                        source_name=source_name,
-                    ),
-                    sources=_require_str_list(
-                        job_search,
-                        "sources",
-                        parent_path="tasks.job_search",
-                        source_name=source_name,
-                    ),
-                    keywords=_require_str_list(
-                        job_search,
-                        "keywords",
-                        parent_path="tasks.job_search",
-                        source_name=source_name,
-                    ),
-                    locations=_optional_str_list(
-                        job_search,
-                        "locations",
-                        default=[],
-                        parent_path="tasks.job_search",
-                        source_name=source_name,
-                    ),
+                job_search=_parse_job_search_task_config(
+                    job_search,
+                    source_name=source_name,
                 ),
                 tw_stock_movers=TwStockMoversTaskConfig(
                     enabled=_require_bool(
@@ -265,6 +254,165 @@ class AppConfig:
             ),
             sources=_parse_sources_config(sources, source_name=source_name),
         )
+
+
+def _parse_job_search_task_config(
+    data: dict[str, Any],
+    *,
+    source_name: str,
+) -> JobSearchTaskConfig:
+    parent_path = "tasks.job_search"
+    enabled = _require_bool(
+        data,
+        "enabled",
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    raw_profiles = data.get("profiles")
+    if raw_profiles is not None:
+        profiles = _parse_job_search_profiles(
+            raw_profiles,
+            parent_path=f"{parent_path}.profiles",
+            source_name=source_name,
+        )
+        if not profiles:
+            raise ConfigError(
+                f"Config value '{parent_path}.profiles' must contain at least "
+                f"one profile in {source_name}"
+            )
+        sources = _unique_preserve_order(
+            source
+            for profile in profiles
+            for source in profile.sources
+        )
+        # Keep legacy top-level fields populated for fetch/helpers that still
+        # read tasks.job_search.sources/keywords/locations.
+        keywords = list(profiles[0].keywords)
+        locations = list(profiles[0].locations)
+        return JobSearchTaskConfig(
+            enabled=enabled,
+            sources=sources,
+            keywords=keywords,
+            locations=locations,
+            profiles=profiles,
+        )
+
+    sources = _require_str_list(
+        data,
+        "sources",
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    keywords = _require_str_list(
+        data,
+        "keywords",
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    locations = _optional_str_list(
+        data,
+        "locations",
+        default=[],
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    return JobSearchTaskConfig(
+        enabled=enabled,
+        sources=sources,
+        keywords=keywords,
+        locations=locations,
+        profiles=[
+            JobSearchProfileConfig(
+                name="default",
+                sources=list(sources),
+                keywords=list(keywords),
+                locations=list(locations),
+            )
+        ],
+    )
+
+
+def _parse_job_search_profiles(
+    raw_profiles: object,
+    *,
+    parent_path: str,
+    source_name: str,
+) -> list[JobSearchProfileConfig]:
+    if not isinstance(raw_profiles, list):
+        raise ConfigError(
+            f"Config value '{parent_path}' must be a list in {source_name}"
+        )
+
+    profiles: list[JobSearchProfileConfig] = []
+    seen_names: set[str] = set()
+    for index, entry in enumerate(raw_profiles):
+        entry_path = f"{parent_path}[{index}]"
+        if not isinstance(entry, dict):
+            raise ConfigError(
+                f"Config value '{entry_path}' must be a mapping in {source_name}"
+            )
+        name = _require_str(
+            entry,
+            "name",
+            parent_path=entry_path,
+            source_name=source_name,
+        ).strip()
+        if not name:
+            raise ConfigError(
+                f"Config value '{entry_path}.name' must be a "
+                f"non-empty string in {source_name}"
+            )
+        if name in seen_names:
+            raise ConfigError(
+                f"Duplicate job-search profile name '{name}' "
+                f"in {parent_path} of {source_name}"
+            )
+        seen_names.add(name)
+        scorer_profile = None
+        if "scorer_profile" in entry:
+            scorer_profile = _require_str(
+                entry,
+                "scorer_profile",
+                parent_path=entry_path,
+                source_name=source_name,
+            ).strip() or None
+        profiles.append(
+            JobSearchProfileConfig(
+                name=name,
+                sources=_require_str_list(
+                    entry,
+                    "sources",
+                    parent_path=entry_path,
+                    source_name=source_name,
+                ),
+                keywords=_require_str_list(
+                    entry,
+                    "keywords",
+                    parent_path=entry_path,
+                    source_name=source_name,
+                ),
+                locations=_optional_str_list(
+                    entry,
+                    "locations",
+                    default=[],
+                    parent_path=entry_path,
+                    source_name=source_name,
+                ),
+                scorer_profile=scorer_profile,
+            )
+        )
+    return profiles
+
+
+def _unique_preserve_order(values: Any) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(str(value))
+        ordered.append(str(value))
+    return ordered
 
 
 def _parse_sources_config(

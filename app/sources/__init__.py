@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 
-from app.core.config import AppConfig
+from app.core.config import AppConfig, JobSearchProfileConfig
 
 from .base import BaseSource, SourceErrorHandler, fetch_from_sources
 from .dummy import DummySource
@@ -77,6 +78,33 @@ def build_job_search_sources(
     )
 
 
+def build_job_search_sources_for_profile(
+    config: AppConfig,
+    profile: JobSearchProfileConfig,
+    *,
+    on_unknown: UnknownSourceHandler | None = None,
+) -> list[BaseSource]:
+    """Build sources for one job-search profile's keywords and source list."""
+
+    profile_config = replace(
+        config,
+        tasks=replace(
+            config.tasks,
+            job_search=replace(
+                config.tasks.job_search,
+                sources=list(profile.sources),
+                keywords=list(profile.keywords),
+                locations=list(profile.locations),
+            ),
+        ),
+    )
+    return build_sources(
+        profile_config,
+        profile.sources,
+        on_unknown=on_unknown,
+    )
+
+
 def build_tw_stock_mover_sources(config: AppConfig) -> list[BaseSource]:
     """Build the currently supported Taiwan stock-mover sources."""
 
@@ -95,6 +123,7 @@ def list_source_names() -> list[str]:
 __all__ = [
     "BaseSource",
     "build_job_search_sources",
+    "build_job_search_sources_for_profile",
     "build_tw_stock_mover_sources",
     "build_sources",
     "DummySource",

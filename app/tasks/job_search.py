@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import ClassVar
 
@@ -31,12 +31,14 @@ from app.scorers import (
     JobRuleScorer,
     load_job_search_profile,
 )
-from app.sources import build_job_search_sources
+from app.sources import build_job_search_sources_for_profile
 
 from .base import BaseTask
 from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
 
 _MAX_REJECT_LINES = 5
+_SEARCH_PROFILE_METADATA_KEY = "search_profile"
+_DEFAULT_PROFILE_NAME = "default"
 
 
 @dataclass(slots=True)
@@ -62,6 +64,8 @@ class JobSearchSummary:
     failed_sources: list[tuple[str, str]] = field(default_factory=list)
     unsupported_sources: list[str] = field(default_factory=list)
     ignored_non_job_count: int = 0
+    profile_names: list[str] = field(default_factory=list)
+    recorded_signal_ids: set[int] = field(default_factory=set)
 
 
 @dataclass(slots=True, frozen=True)
@@ -100,62 +104,65 @@ class JobSearchTask(BaseTask):
                 env=env,
             )
 
-            sources = build_job_search_sources(
-                config,
-                on_unknown=summary.unsupported_sources.append,
-            )
-            if not sources:
-                if summary.unsupported_sources:
-                    unsupported = ", ".join(summary.unsupported_sources)
-                    raise ValueError(
-                        "No supported job-search sources are configured. "
-                        f"Unsupported sources: {unsupported}"
-                    )
-                raise ValueError("No job-search sources are configured.")
+            profiles = list(config.tasks.job_search.profiles)
+            if not profiles:
+                raise ValueError("No job-search profiles are configured.")
+            summary.profile_names = [profile.name for profile in profiles]
 
-            scorer = _build_job_scorer(config=config, env=env)
+            scorers_by_key: dict[str | None, JobRuleScorer | JobLLMScorer] = {}
 
-            for source in sources:
-                run_id = start_signal_run(source.name, db_path=db_path)
-                self.emit_log(
-                    "source_run_started",
-                    message="Source run started",
-                    db_path=str(db_path),
-                    source_name=source.name,
-                    run_id=run_id,
+            for profile in profiles:
+                sources = build_job_search_sources_for_profile(
+                    config,
+                    profile,
+                    on_unknown=lambda name, profile_name=profile.name: (
+                        summary.unsupported_sources.append(
+                            f"{profile_name}/{name}"
+                        )
+                    ),
                 )
-                try:
-                    fetched_items = source.fetch()
-                    job_items = [
-                        item for item in fetched_items if item.item_type == "job"
-                    ]
-                    ignored_count = len(fetched_items) - len(job_items)
-                    summary.ignored_non_job_count += ignored_count
-                    summary.fetched_count += len(job_items)
+                if not sources:
+                    continue
 
-                    inserted_count = 0
-                    updated_count = 0
+                scorer = scorers_by_key.get(profile.scorer_profile)
+                if scorer is None:
+                    scorer = _build_job_scorer(
+                        config=config,
+                        env=env,
+                        scorer_profile=profile.scorer_profile,
+                    )
+                    scorers_by_key[profile.scorer_profile] = scorer
 
-                    for item in job_items:
-                        result = upsert_signal(item, db_path=db_path)
-                        if result.action == "inserted":
-                            inserted_count += 1
-                            summary.new_count += 1
-                            self._score_and_record(
-                                item=item,
-                                signal_id=result.signal_id,
-                                summary=summary,
-                                scorer=scorer,
-                                db_path=db_path,
-                            )
-                        else:
-                            updated_count += 1
-                            summary.duplicate_count += 1
-                            evaluation_state = get_signal_evaluation_state(
-                                result.signal_id,
-                                db_path=db_path,
-                            )
-                            if evaluation_state == "unscored":
+                for source in sources:
+                    run_id = start_signal_run(source.name, db_path=db_path)
+                    source_label = f"{profile.name}/{source.name}"
+                    self.emit_log(
+                        "source_run_started",
+                        message="Source run started",
+                        db_path=str(db_path),
+                        source_name=source.name,
+                        search_profile=profile.name,
+                        run_id=run_id,
+                    )
+                    try:
+                        fetched_items = source.fetch()
+                        job_items = [
+                            _tag_search_profile(item, profile.name)
+                            for item in fetched_items
+                            if item.item_type == "job"
+                        ]
+                        ignored_count = len(fetched_items) - len(job_items)
+                        summary.ignored_non_job_count += ignored_count
+                        summary.fetched_count += len(job_items)
+
+                        inserted_count = 0
+                        updated_count = 0
+
+                        for item in job_items:
+                            result = upsert_signal(item, db_path=db_path)
+                            if result.action == "inserted":
+                                inserted_count += 1
+                                summary.new_count += 1
                                 self._score_and_record(
                                     item=item,
                                     signal_id=result.signal_id,
@@ -163,54 +170,92 @@ class JobSearchTask(BaseTask):
                                     scorer=scorer,
                                     db_path=db_path,
                                 )
-                            elif evaluation_state == "pending_digest":
-                                self._record_pending_digest_job(
-                                    item=item,
-                                    signal_id=result.signal_id,
-                                    summary=summary,
+                            else:
+                                updated_count += 1
+                                summary.duplicate_count += 1
+                                if result.signal_id in summary.recorded_signal_ids:
+                                    continue
+                                evaluation_state = get_signal_evaluation_state(
+                                    result.signal_id,
                                     db_path=db_path,
                                 )
+                                if evaluation_state == "unscored":
+                                    self._score_and_record(
+                                        item=item,
+                                        signal_id=result.signal_id,
+                                        summary=summary,
+                                        scorer=scorer,
+                                        db_path=db_path,
+                                    )
+                                elif evaluation_state == "pending_digest":
+                                    self._record_pending_digest_job(
+                                        item=item,
+                                        signal_id=result.signal_id,
+                                        summary=summary,
+                                        db_path=db_path,
+                                    )
 
-                    finish_signal_run(
-                        run_id,
-                        status="completed",
-                        fetched_count=len(job_items),
-                        inserted_count=inserted_count,
-                        updated_count=updated_count,
-                        db_path=db_path,
-                    )
-                    self.emit_log(
-                        "source_run_completed",
-                        message="Source run completed",
-                        db_path=str(db_path),
-                        source_name=source.name,
-                        run_id=run_id,
-                        fetched_count=len(fetched_items),
-                        accepted_count=len(job_items),
-                        ignored_count=ignored_count,
-                        new_count=inserted_count,
-                        duplicate_count=updated_count,
-                        skipped_count=updated_count + ignored_count,
-                    )
-                    summary.successful_sources += 1
-                except Exception as exc:
-                    finish_signal_run(
-                        run_id,
-                        status="failed",
-                        error=str(exc),
-                        db_path=db_path,
-                    )
-                    summary.failed_sources.append((source.name, str(exc)))
-                    self.emit_log(
-                        "source_run_failed",
-                        message="Source run failed",
-                        level=logging.ERROR,
-                        exc_info=exc,
-                        db_path=str(db_path),
-                        source_name=source.name,
-                        run_id=run_id,
-                        error=str(exc),
-                    )
+                        finish_signal_run(
+                            run_id,
+                            status="completed",
+                            fetched_count=len(job_items),
+                            inserted_count=inserted_count,
+                            updated_count=updated_count,
+                            db_path=db_path,
+                        )
+                        self.emit_log(
+                            "source_run_completed",
+                            message="Source run completed",
+                            db_path=str(db_path),
+                            source_name=source.name,
+                            search_profile=profile.name,
+                            run_id=run_id,
+                            fetched_count=len(fetched_items),
+                            accepted_count=len(job_items),
+                            ignored_count=ignored_count,
+                            new_count=inserted_count,
+                            duplicate_count=updated_count,
+                            skipped_count=updated_count + ignored_count,
+                        )
+                        summary.successful_sources += 1
+                    except Exception as exc:
+                        finish_signal_run(
+                            run_id,
+                            status="failed",
+                            error=str(exc),
+                            db_path=db_path,
+                        )
+                        summary.failed_sources.append(
+                            (source_label, str(exc))
+                        )
+                        self.emit_log(
+                            "source_run_failed",
+                            message="Source run failed",
+                            level=logging.ERROR,
+                            exc_info=exc,
+                            db_path=str(db_path),
+                            source_name=source.name,
+                            search_profile=profile.name,
+                            run_id=run_id,
+                            error=str(exc),
+                        )
+
+            if (
+                summary.successful_sources == 0
+                and not summary.failed_sources
+                and summary.unsupported_sources
+            ):
+                unsupported = ", ".join(summary.unsupported_sources)
+                raise ValueError(
+                    "No supported job-search sources are configured. "
+                    f"Unsupported sources: {unsupported}"
+                )
+            if (
+                summary.successful_sources == 0
+                and not summary.failed_sources
+                and not summary.unsupported_sources
+            ):
+                raise ValueError("No job-search sources are configured.")
 
             if summary.successful_sources == 0:
                 failure_summary = "; ".join(
@@ -419,6 +464,7 @@ class JobSearchTask(BaseTask):
             summary.maybe_matches.append(scored_job)
         else:
             summary.rejected_jobs.append(scored_job)
+        summary.recorded_signal_ids.add(signal_id)
 
     def _record_pending_digest_job(
         self,
@@ -437,6 +483,7 @@ class JobSearchTask(BaseTask):
             summary.maybe_matches.append(scored_job)
         else:
             summary.rejected_jobs.append(scored_job)
+        summary.recorded_signal_ids.add(signal_id)
 
 
 def _build_console_summary(
@@ -504,14 +551,40 @@ def _build_telegram_digest(
         ),
     ]
 
-    if summary.strong_matches:
-        lines.extend(
-            _render_job_section("Top recommended jobs", summary.strong_matches)
-        )
-    if summary.maybe_matches:
-        lines.extend(_render_job_section("Maybe jobs", summary.maybe_matches))
-    if summary.rejected_jobs:
-        lines.extend(_render_rejected_section(summary.rejected_jobs))
+    profile_names = summary.profile_names or _digest_profile_names(summary)
+    group_by_profile = len(profile_names) > 1
+
+    if group_by_profile:
+        for profile_name in profile_names:
+            lines.append("")
+            lines.append(f"## {profile_name}")
+            strong = _jobs_for_profile(summary.strong_matches, profile_name)
+            maybe = _jobs_for_profile(summary.maybe_matches, profile_name)
+            rejected = _jobs_for_profile(summary.rejected_jobs, profile_name)
+            if strong:
+                lines.extend(_render_job_section("Top recommended jobs", strong))
+            if maybe:
+                lines.extend(_render_job_section("Maybe jobs", maybe))
+            if rejected:
+                lines.extend(_render_rejected_section(rejected))
+            if not strong and not maybe and not rejected:
+                lines.append("")
+                lines.append("(no new scored jobs for this profile)")
+    else:
+        if summary.strong_matches:
+            lines.extend(
+                _render_job_section(
+                    "Top recommended jobs",
+                    summary.strong_matches,
+                )
+            )
+        if summary.maybe_matches:
+            lines.extend(
+                _render_job_section("Maybe jobs", summary.maybe_matches)
+            )
+        if summary.rejected_jobs:
+            lines.extend(_render_rejected_section(summary.rejected_jobs))
+
     if summary.failed_sources:
         lines.append("")
         lines.append("Source failures")
@@ -534,6 +607,38 @@ def _build_telegram_digest(
     )
 
     return "\n".join(lines)
+
+
+def _digest_profile_names(summary: JobSearchSummary) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for job in (
+        summary.strong_matches + summary.maybe_matches + summary.rejected_jobs
+    ):
+        name = _search_profile_name(job.item)
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def _jobs_for_profile(jobs: list[ScoredJob], profile_name: str) -> list[ScoredJob]:
+    return [job for job in jobs if _search_profile_name(job.item) == profile_name]
+
+
+def _search_profile_name(item: SignalItem) -> str:
+    value = item.metadata.get(_SEARCH_PROFILE_METADATA_KEY)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return _DEFAULT_PROFILE_NAME
+
+
+def _tag_search_profile(item: SignalItem, profile_name: str) -> SignalItem:
+    return replace(
+        item,
+        metadata={**item.metadata, _SEARCH_PROFILE_METADATA_KEY: profile_name},
+    )
 
 
 def _render_job_section(title: str, jobs: list[ScoredJob]) -> list[str]:
@@ -623,8 +728,13 @@ def _resolve_db_path() -> Path:
     return DEFAULT_DB_PATH
 
 
-def _build_job_scorer(*, config, env) -> JobRuleScorer | JobLLMScorer:
-    profile = load_job_search_profile()
+def _build_job_scorer(
+    *,
+    config,
+    env,
+    scorer_profile: str | None = None,
+) -> JobRuleScorer | JobLLMScorer:
+    profile = load_job_search_profile(scorer_profile)
     rule_scorer = JobRuleScorer(profile)
     if not config.scoring.llm_enabled:
         return rule_scorer

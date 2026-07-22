@@ -24,7 +24,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | Milestone | Scope | Status |
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
-| M6 | Hardening / extensions #49–#57 | **In progress** — #56/#54/#50/#53 done; #49 next |
+| M6 | Hardening / extensions #49–#57 | **In progress** — through #53 done; #49 in progress |
 | M7 | LangChain-ready platform evolution #60–#67 | Later — only when asked |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
@@ -207,7 +207,7 @@ points:
 | #54 | `.github/workflows/ci.yml`, `tests/test_ci_workflow.py`, README CI notes — done |
 | #50 | `app/cli.py`, `app/core/db.py`, `app/core/health.py`, tests — done |
 | #53 | `config.yaml` `sources:`, `app/core/config.py`, source `from_config`, tests — done |
-| #49 | `config.yaml`, `app/profiles/`, `app/tasks/job_search.py`, scorers |
+| #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — in this PR |
 | #55 | `app/scorers/`, `app/tasks/job_search.py`, scoring config keys |
 | #51 | `app/core/time_utils.py`, holiday data + tests |
 | #52 | new source/task under `app/sources/` / `app/tasks/`, config + Telegram |

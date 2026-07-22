@@ -11,6 +11,7 @@ from app.sources import (
     TpexSource,
     TwseSource,
     build_job_search_sources,
+    build_job_search_sources_for_profile,
     build_tw_stock_mover_sources,
     fetch_from_sources,
     list_source_names,
@@ -142,6 +143,45 @@ def test_build_job_search_sources_rejects_unknown_sources_by_default() -> None:
         match="Unsupported source: missing_source",
     ):
         build_job_search_sources(config)
+
+
+def test_build_job_search_sources_for_profile_uses_profile_keywords() -> None:
+    config = AppConfig.from_dict(
+        {
+            "agent": {"timezone": "Asia/Taipei", "digest_time": "20:00"},
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "profiles": [
+                        {
+                            "name": "cloud_sdet",
+                            "sources": ["job104"],
+                            "keywords": ["Cloud SDET"],
+                            "locations": ["Taiwan"],
+                        }
+                    ],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 20,
+                    "timezone": "Asia/Taipei",
+                },
+            },
+            "notifiers": {"telegram": {"enabled": True}},
+            "scoring": {
+                "freshness_weight": 0.6,
+                "priority_weight": 0.4,
+            },
+        }
+    )
+    profile = config.tasks.job_search.profiles[0]
+
+    sources = build_job_search_sources_for_profile(config, profile)
+
+    assert len(sources) == 1
+    assert isinstance(sources[0], Job104Source)
+    assert sources[0].keywords == ["Cloud SDET"]
+    assert sources[0].locations == ["Taiwan"]
 
 
 def test_build_tw_stock_mover_sources_builds_twse_and_tpex_sources() -> None:
