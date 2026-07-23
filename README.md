@@ -204,9 +204,9 @@ signal-agent/
 │       ├── pvc.yaml
 │       └── secret.example.yaml
 ├── sql/
-│   ├── schema.sql
-│   └── migrations/
-│       └── 001_initial.sql
+│   └── schema.sql
+├── app/sql/migrations/
+│   └── 001_initial.sql
 └── tests/
 ```
 
@@ -450,11 +450,13 @@ Signals are persisted in SQLite through `app/core/db.py`. Local databases typica
 live under `data/` and are ignored by git.
 
 `init_db()` is the single schema entrypoint used by tasks. It applies numbered
-SQL migrations from `sql/migrations/` in order and records the version with
-SQLite `PRAGMA user_version`. Legacy unversioned databases created with the
-MVP `CREATE TABLE IF NOT EXISTS` bootstrap are upgraded safely because the
-initial migration is idempotent. Do not delete `data/signals.sqlite3` just to
-pick up schema changes.
+SQL migrations from `app/sql/migrations/` (packaged with the wheel) in order and
+records the version with SQLite `PRAGMA user_version`. Legacy unversioned
+databases created with the MVP `CREATE TABLE IF NOT EXISTS` bootstrap are
+upgraded safely: missing tables/indexes are created, older `signals` shapes are
+backfilled (for example a missing `content` column), and only then is the
+version advanced. Do not delete `data/signals.sqlite3` just to pick up schema
+changes.
 
 Run history now has two levels:
 

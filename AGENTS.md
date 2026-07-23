@@ -79,11 +79,12 @@ signal-agent/
 │   │   ├── job_score_pipeline.py  # two-stage rule → LLM orchestration
 │   │   └── job_search.py   # profile loading + score orchestration
 │   ├── profiles/           # packaged job-scoring profiles (*.md)
+│   ├── sql/
+│   │   └── migrations/     # packaged SQLite migrations (NNN_name.sql)
 │   └── notifiers/
 │       └── telegram.py
 ├── sql/
-│   ├── schema.sql          # docs pointer to migrations (no duplicated DDL)
-│   └── migrations/         # numbered SQLite migrations (NNN_name.sql)
+│   └── schema.sql          # docs pointer to app/sql/migrations/
 ├── docs/
 │   └── ubuntu-vm-deployment.md  # Ubuntu VM + Compose + cron/systemd runbook
 ├── deploy/
@@ -115,7 +116,7 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 - Keep secrets out of Git. Use `.env` locally, `.env.example` in Git, and
   `deploy/k3s/secret.example.yaml` for cluster secrets.
 - Use SQLite first. Do not introduce Postgres unless requested.
-- Evolve SQLite via numbered files under `sql/migrations/` and
+- Evolve SQLite via numbered files under `app/sql/migrations/` and
   `app/core/migrations.py` (`PRAGMA user_version`). Keep `init_db()` as the
   single entrypoint; do not introduce Alembic unless explicitly requested.
 - Rule-based scoring is the default path; LLM scoring must remain optional and
@@ -223,7 +224,7 @@ points:
 | #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — done |
 | #51 | `app/core/tw_market_calendar.py`, `app/data/tw_market_holidays.yaml`, `app/core/time_utils.py`, tests — done |
 | #52 | `app/tasks/stock_watchlist.py`, `app/tasks/market_task_support.py`, config + Telegram — done |
-| #57 | `app/core/migrations.py`, `app/core/db.py` `init_db()`, `sql/migrations/`, tests — in this PR |
+| #57 | `app/core/migrations.py`, `app/core/db.py` `init_db()`, `app/sql/migrations/`, tests — in this PR |
 
 ## How to pick up work
 

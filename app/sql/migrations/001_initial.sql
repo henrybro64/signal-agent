@@ -1,7 +1,7 @@
 -- Initial SQLite schema for signal-agent (schema version 1).
 -- Applied by app.core.migrations via PRAGMA user_version.
 -- sql/schema.sql is a docs pointer only; this file is the DDL source of truth
--- for version 1.
+-- for version 1. Packaged as app.sql migrations resources for installed wheels.
 
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

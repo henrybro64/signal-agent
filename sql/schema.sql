@@ -1,9 +1,10 @@
 -- SQLite schema for signal-agent.
 --
--- Runtime evolution is driven by numbered migrations under sql/migrations/
--- and applied by app.core.migrations via PRAGMA user_version.
--- Do not duplicate DDL here; edit/add migration files instead.
+-- Runtime evolution is driven by numbered migrations under
+-- app/sql/migrations/ and applied by app.core.migrations via
+-- PRAGMA user_version. Do not duplicate DDL here; edit/add migration files
+-- instead.
 --
--- Current baseline: sql/migrations/001_initial.sql (schema version 1).
--- Next change: add sql/migrations/002_<description>.sql and keep init_db()
+-- Current baseline: app/sql/migrations/001_initial.sql (schema version 1).
+-- Next change: add app/sql/migrations/002_<description>.sql and keep init_db()
 -- as the only entrypoint used by tasks.
