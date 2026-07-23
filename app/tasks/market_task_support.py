@@ -6,13 +6,25 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from app.core import SignalItem, finish_signal_run, start_signal_run
+from app.core import (
+    SignalItem,
+    finish_signal_run,
+    start_signal_run,
+    tw_market_skip_label,
+    tw_market_skip_reason,
+)
 from app.notifiers import build_telegram_notifier
 
 from .base import BaseTask
 from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
+
+
+class _NamedFetchSource(Protocol):
+    name: str
+
+    def fetch(self) -> list[SignalItem]: ...
 
 
 @dataclass(slots=True, frozen=True)
@@ -23,6 +35,15 @@ class NotificationOutcome:
     notified_count: int = 0
 
 
+@dataclass(slots=True, frozen=True)
+class TwStockSourceFetch:
+    """Successful TWSE/TPEx quote fetch for one source."""
+
+    run_id: int
+    fetched_items: list[SignalItem]
+    stock_items: list[SignalItem]
+
+
 def resolve_task_db_path() -> Path:
     """Resolve the SQLite path for a scheduled task run."""
 
@@ -30,6 +51,36 @@ def resolve_task_db_path() -> Path:
     if raw_path:
         return Path(raw_path).expanduser()
     return DEFAULT_DB_PATH
+
+
+def skip_outside_tw_market_hours(
+    task: BaseTask,
+    *,
+    db_path: Path,
+    task_name: str,
+    skip_log_message: str,
+) -> bool:
+    """Skip the task outside Taiwan market hours / holidays."""
+
+    skip_reason = tw_market_skip_reason()
+    if skip_reason is None:
+        return False
+
+    skip_label = tw_market_skip_label(skip_reason)
+    task.emit_log(
+        "task_skipped",
+        message=skip_log_message,
+        db_path=str(db_path),
+        skip_reason=skip_reason,
+    )
+    print(f"{task_name} task skipped using {task.config_path}: {skip_label}")
+    task.end_task_run(
+        db_path=db_path,
+        status="skipped",
+        notified_count=0,
+        error_message=skip_reason,
+    )
+    return True
 
 
 def begin_source_run(
@@ -78,6 +129,76 @@ def fail_source_run(
         source_name=source_name,
         run_id=run_id,
         error=str(error),
+    )
+
+
+def fetch_tw_stock_mover_source(
+    task: BaseTask,
+    *,
+    source: _NamedFetchSource,
+    db_path: Path,
+    failed_sources: list[tuple[str, str]],
+) -> TwStockSourceFetch | None:
+    """Fetch mover quotes from one source, or record failure and return None."""
+
+    run_id = begin_source_run(
+        task,
+        source_name=source.name,
+        db_path=db_path,
+    )
+    try:
+        fetched_items = source.fetch()
+        stock_items = [
+            item
+            for item in fetched_items
+            if item.item_type == "tw_stock_mover"
+        ]
+    except Exception as exc:
+        fail_source_run(
+            task,
+            source_name=source.name,
+            run_id=run_id,
+            error=exc,
+            db_path=db_path,
+            failed_sources=failed_sources,
+        )
+        return None
+    return TwStockSourceFetch(
+        run_id=run_id,
+        fetched_items=fetched_items,
+        stock_items=stock_items,
+    )
+
+
+def complete_tw_stock_source_run(
+    task: BaseTask,
+    *,
+    source_name: str,
+    fetch: TwStockSourceFetch,
+    db_path: Path,
+    inserted_count: int = 0,
+    updated_count: int = 0,
+    **extra_log_fields: Any,
+) -> None:
+    """Finish a successful quote-source run with the standard completed log."""
+
+    finish_signal_run(
+        fetch.run_id,
+        status="completed",
+        fetched_count=len(fetch.stock_items),
+        inserted_count=inserted_count,
+        updated_count=updated_count,
+        db_path=db_path,
+    )
+    task.emit_log(
+        "source_run_completed",
+        message="Source run completed",
+        db_path=str(db_path),
+        source_name=source_name,
+        run_id=fetch.run_id,
+        fetched_count=len(fetch.fetched_items),
+        accepted_count=len(fetch.stock_items),
+        **extra_log_fields,
     )
 
 

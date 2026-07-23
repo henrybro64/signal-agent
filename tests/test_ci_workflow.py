@@ -72,3 +72,10 @@ def test_readme_documents_make_check_for_local_verification() -> None:
 
     assert "make check" in readme
     assert "github actions" in readme or "ci" in readme
+
+
+def test_sonar_project_properties_excludes_deploy_from_cpd() -> None:
+    sonar_path = ROOT / "sonar-project.properties"
+    assert sonar_path.is_file()
+    text = sonar_path.read_text(encoding="utf-8")
+    assert "sonar.cpd.exclusions=deploy/**" in text

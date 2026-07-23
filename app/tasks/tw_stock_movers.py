@@ -16,9 +16,6 @@ from app.config import (
 )
 from app.core import (
     SignalItem,
-    finish_signal_run,
-    tw_market_skip_label,
-    tw_market_skip_reason,
     upsert_signal,
 )
 from app.sources import build_tw_stock_mover_sources
@@ -26,10 +23,11 @@ from app.sources import build_tw_stock_mover_sources
 from .base import BaseTask
 from .market_task_support import (
     NotificationOutcome,
-    begin_source_run,
-    fail_source_run,
+    complete_tw_stock_source_run,
+    fetch_tw_stock_mover_source,
     resolve_task_db_path,
     send_optional_telegram_digest,
+    skip_outside_tw_market_hours,
     source_warning_label,
 )
 from .market_task_support import (
@@ -103,90 +101,56 @@ class TwStockMoversTask(BaseTask):
                 raise ValueError("Task 'tw_stock_movers' is disabled in config")
 
             env = load_env_settings()
-            skip_reason = tw_market_skip_reason()
-            if skip_reason is not None:
-                skip_label = tw_market_skip_label(skip_reason)
-                self.emit_log(
-                    "task_skipped",
-                    message="Taiwan stock movers task skipped",
-                    db_path=str(db_path),
-                    skip_reason=skip_reason,
-                )
-                print(
-                    "tw_stock_movers task skipped using "
-                    f"{self.config_path}: {skip_label}"
-                )
-                self.end_task_run(
-                    db_path=db_path,
-                    status="skipped",
-                    notified_count=0,
-                    error_message=skip_reason,
-                )
+            if skip_outside_tw_market_hours(
+                self,
+                db_path=db_path,
+                task_name=self.name,
+                skip_log_message="Taiwan stock movers task skipped",
+            ):
                 return
 
             sources = build_tw_stock_mover_sources(config)
             if not sources:
                 raise ValueError("No Taiwan stock-mover sources are configured.")
             for source in sources:
-                run_id = begin_source_run(
+                fetch = fetch_tw_stock_mover_source(
+                    self,
+                    source=source,
+                    db_path=db_path,
+                    failed_sources=summary.failed_sources,
+                )
+                if fetch is None:
+                    continue
+
+                ignored_count = len(fetch.fetched_items) - len(fetch.stock_items)
+                summary.ignored_non_stock_count += ignored_count
+                summary.fetched_count += len(fetch.stock_items)
+
+                source_inserted = 0
+                source_updated = 0
+                for item in fetch.stock_items:
+                    result = upsert_signal(item, db_path=db_path)
+                    if result.action == "inserted":
+                        source_inserted += 1
+                        summary.new_count += 1
+                    else:
+                        source_updated += 1
+                        summary.duplicate_count += 1
+                    summary.stock_items.append(item)
+
+                complete_tw_stock_source_run(
                     self,
                     source_name=source.name,
+                    fetch=fetch,
                     db_path=db_path,
+                    inserted_count=source_inserted,
+                    updated_count=source_updated,
+                    ignored_count=ignored_count,
+                    new_count=source_inserted,
+                    duplicate_count=source_updated,
+                    skipped_count=source_updated + ignored_count,
                 )
-                try:
-                    fetched_items = source.fetch()
-                    stock_items = [
-                        item
-                        for item in fetched_items
-                        if item.item_type == "tw_stock_mover"
-                    ]
-                    ignored_count = len(fetched_items) - len(stock_items)
-                    summary.ignored_non_stock_count += ignored_count
-                    summary.fetched_count += len(stock_items)
-
-                    source_inserted = 0
-                    source_updated = 0
-                    for item in stock_items:
-                        result = upsert_signal(item, db_path=db_path)
-                        if result.action == "inserted":
-                            source_inserted += 1
-                            summary.new_count += 1
-                        else:
-                            source_updated += 1
-                            summary.duplicate_count += 1
-                        summary.stock_items.append(item)
-
-                    finish_signal_run(
-                        run_id,
-                        status="completed",
-                        fetched_count=len(stock_items),
-                        inserted_count=source_inserted,
-                        updated_count=source_updated,
-                        db_path=db_path,
-                    )
-                    self.emit_log(
-                        "source_run_completed",
-                        message="Source run completed",
-                        db_path=str(db_path),
-                        source_name=source.name,
-                        run_id=run_id,
-                        fetched_count=len(fetched_items),
-                        accepted_count=len(stock_items),
-                        ignored_count=ignored_count,
-                        new_count=source_inserted,
-                        duplicate_count=source_updated,
-                        skipped_count=source_updated + ignored_count,
-                    )
-                    summary.successful_sources += 1
-                except Exception as exc:
-                    fail_source_run(
-                        self,
-                        source_name=source.name,
-                        run_id=run_id,
-                        error=exc,
-                        db_path=db_path,
-                        failed_sources=summary.failed_sources,
-                    )
+                summary.successful_sources += 1
 
             market_reports = _build_market_reports(
                 summary.stock_items,

@@ -153,7 +153,7 @@ def test_tw_stock_movers_task_skips_when_market_is_closed(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: "taiwan_market_closed",
     )
@@ -180,7 +180,7 @@ def test_tw_stock_movers_task_skips_on_taiwan_market_holiday(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: "taiwan_market_holiday",
     )
@@ -207,7 +207,7 @@ def test_tw_stock_movers_task_skips_when_calendar_year_unavailable(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: "taiwan_market_calendar_unavailable",
     )
@@ -234,7 +234,7 @@ def test_tw_stock_movers_task_filters_and_persists_stock_items(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -286,7 +286,7 @@ def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -330,7 +330,7 @@ def test_tw_stock_movers_task_raises_when_all_sources_fail(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -384,7 +384,7 @@ def test_tw_stock_movers_task_sends_failure_digest_when_all_sources_fail(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -500,7 +500,7 @@ def test_tw_stock_movers_task_reports_both_markets_separately(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -545,7 +545,7 @@ def test_tw_stock_movers_task_continues_when_one_market_source_fails(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -577,7 +577,7 @@ def test_tw_stock_movers_task_persists_multiple_snapshot_rows(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -610,7 +610,7 @@ def test_tw_stock_movers_task_sends_partial_failure_warning_in_digest(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: None,
     )
@@ -684,7 +684,7 @@ def test_tw_stock_movers_task_does_not_require_openai_key(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: "taiwan_market_closed",
     )

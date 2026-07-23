@@ -10,6 +10,7 @@ import pytest
 from app.core import SignalItem
 from app.sources import BaseSource
 from app.tasks import StockWatchlistTask
+from app.tasks import market_task_support as market_task_support_module
 from app.tasks import stock_watchlist as watchlist_module
 
 SAMPLE_OBSERVED_AT = datetime(2026, 6, 25, 2, 20, tzinfo=UTC)
@@ -183,7 +184,7 @@ def test_stock_watchlist_task_skips_when_market_is_closed(
         lambda: db_path,
     )
     monkeypatch.setattr(
-        watchlist_module,
+        market_task_support_module,
         "tw_market_skip_reason",
         lambda: "taiwan_market_closed",
     )
@@ -214,7 +215,11 @@ def test_stock_watchlist_task_triggers_threshold_alerts_and_sends_digest(
         "resolve_task_db_path",
         lambda: db_path,
     )
-    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: None,
+    )
     monkeypatch.setattr(
         watchlist_module,
         "build_tw_stock_mover_sources_for_names",
@@ -292,7 +297,11 @@ def test_stock_watchlist_task_skips_telegram_when_no_alerts(
         "resolve_task_db_path",
         lambda: db_path,
     )
-    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: None,
+    )
     monkeypatch.setattr(
         watchlist_module,
         "build_tw_stock_mover_sources_for_names",
@@ -356,7 +365,11 @@ def test_stock_watchlist_task_dedupes_same_minute_bucket(
         "resolve_task_db_path",
         lambda: db_path,
     )
-    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: None,
+    )
     monkeypatch.setattr(
         watchlist_module,
         "build_tw_stock_mover_sources_for_names",
@@ -416,7 +429,11 @@ def test_stock_watchlist_task_retries_unsent_alerts_after_telegram_failure(
         "resolve_task_db_path",
         lambda: db_path,
     )
-    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: None,
+    )
     monkeypatch.setattr(
         watchlist_module,
         "build_tw_stock_mover_sources_for_names",
@@ -463,7 +480,11 @@ def test_stock_watchlist_task_includes_failed_sources_in_digest(
         "resolve_task_db_path",
         lambda: db_path,
     )
-    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: None,
+    )
     monkeypatch.setattr(
         watchlist_module,
         "build_tw_stock_mover_sources_for_names",
@@ -510,7 +531,11 @@ def test_stock_watchlist_task_raises_when_all_sources_fail(
         "resolve_task_db_path",
         lambda: db_path,
     )
-    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: None,
+    )
     monkeypatch.setattr(
         watchlist_module,
         "build_tw_stock_mover_sources_for_names",
