@@ -215,7 +215,7 @@ points:
 | #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — done |
 | #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — done |
 | #51 | `app/core/tw_market_calendar.py`, `app/data/tw_market_holidays.yaml`, `app/core/time_utils.py`, tests — done |
-| #52 | `app/tasks/stock_watchlist.py`, `app/core/config.py`, Telegram + tests — in this PR |
+| #52 | `app/tasks/stock_watchlist.py`, `app/tasks/market_task_support.py`, config + Telegram — in this PR |
 | #57 | `app/core/db.py`, `sql/`, migration runner + tests |
 
 ## How to pick up work
