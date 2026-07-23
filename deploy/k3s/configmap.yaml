@@ -27,6 +27,25 @@ data:
         enabled: true
         top_n: 20
         timezone: Asia/Taipei
+      # Optional personal watchlist alerts (disabled until symbols are filled in).
+      stock_watchlist:
+        enabled: false
+        timezone: Asia/Taipei
+        sources:
+          - twse
+          - tpex
+        symbols:
+          - code: "2330"
+            name: 台積電
+            alert_change_percent_abs: 2.0
+          - code: "3081"
+            name: 聯亞
+            alert_change_percent_abs: 3.0
+        themes:
+          AI_infrastructure:
+            symbols: ["2330"]
+          CPO_optical:
+            symbols: ["3081"]
 
     notifiers:
       telegram:

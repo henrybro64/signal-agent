@@ -29,6 +29,7 @@ def test_signal_agent_console_script_lists_tasks() -> None:
         "dummy",
         "fetch",
         "job_search",
+        "stock_watchlist",
         "tw_stock_movers",
     ]
 

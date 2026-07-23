@@ -20,13 +20,18 @@ from app.core.secrets import EnvSettings, has_telegram_credentials, load_env_set
 
 DEFAULT_DB_PATH = Path("data/signals.sqlite3")
 DB_PATH_ENV_VAR = "SIGNAL_AGENT_DB_PATH"
-DEFAULT_HEALTH_TASKS: tuple[str, ...] = ("job_search", "tw_stock_movers")
+DEFAULT_HEALTH_TASKS: tuple[str, ...] = (
+    "job_search",
+    "tw_stock_movers",
+    "stock_watchlist",
+)
 DEFAULT_TIMEZONE = "Asia/Taipei"
 # Align roughly with Ubuntu VM schedules: job_search twice daily; stock movers
-# weekdays only (allow a weekend gap before flagging stale).
+# and watchlist alerts weekdays only (allow a weekend gap before flagging stale).
 DEFAULT_STALE_AFTER_HOURS: dict[str, int] = {
     "job_search": 36,
     "tw_stock_movers": 72,
+    "stock_watchlist": 72,
 }
 DEFAULT_STALE_AFTER_HOURS_FALLBACK = 48
 TERMINAL_TASK_STATUSES = frozenset({"success", "failed", "skipped"})

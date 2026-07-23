@@ -108,10 +108,29 @@ def build_job_search_sources_for_profile(
 def build_tw_stock_mover_sources(config: AppConfig) -> list[BaseSource]:
     """Build the currently supported Taiwan stock-mover sources."""
 
-    return [
-        factory(config)
-        for factory in TW_STOCK_MOVER_SOURCE_FACTORIES.values()
-    ]
+    return build_tw_stock_mover_sources_for_names(
+        config,
+        TW_STOCK_MOVER_SOURCE_FACTORIES.keys(),
+    )
+
+
+def build_tw_stock_mover_sources_for_names(
+    config: AppConfig,
+    names: Iterable[str],
+) -> list[BaseSource]:
+    """Build Taiwan stock quote sources for the given source names."""
+
+    sources: list[BaseSource] = []
+    supported = ", ".join(sorted(TW_STOCK_MOVER_SOURCE_FACTORIES))
+    for name in names:
+        factory = TW_STOCK_MOVER_SOURCE_FACTORIES.get(name)
+        if factory is None:
+            raise ValueError(
+                f"Unsupported Taiwan stock source: {name}. "
+                f"Supported sources: {supported}"
+            )
+        sources.append(factory(config))
+    return sources
 
 
 def list_source_names() -> list[str]:
@@ -125,6 +144,7 @@ __all__ = [
     "build_job_search_sources",
     "build_job_search_sources_for_profile",
     "build_tw_stock_mover_sources",
+    "build_tw_stock_mover_sources_for_names",
     "build_sources",
     "DummySource",
     "GlassdoorSource",

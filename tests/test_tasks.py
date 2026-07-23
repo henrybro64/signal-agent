@@ -16,6 +16,7 @@ from app.tasks import (
     DummyTask,
     FetchTask,
     JobSearchTask,
+    StockWatchlistTask,
     TwStockMoversTask,
     build_task,
     list_tasks,
@@ -38,7 +39,13 @@ LINKEDIN_FIXTURE_PATH = (
 
 
 def test_list_tasks_returns_registered_task_names() -> None:
-    assert list_tasks() == ["dummy", "fetch", "job_search", "tw_stock_movers"]
+    assert list_tasks() == [
+        "dummy",
+        "fetch",
+        "job_search",
+        "stock_watchlist",
+        "tw_stock_movers",
+    ]
 
 
 def test_build_task_returns_task_instance() -> None:
@@ -80,6 +87,13 @@ def test_build_task_supports_job_search_task() -> None:
     assert task.name == "job_search"
 
 
+def test_build_task_supports_stock_watchlist_task() -> None:
+    task = build_task("stock_watchlist", config_path="config.yaml")
+
+    assert isinstance(task, StockWatchlistTask)
+    assert task.name == "stock_watchlist"
+
+
 def test_build_task_supports_tw_stock_movers_task() -> None:
     task = build_task("tw_stock_movers", config_path="config.yaml")
 
@@ -93,7 +107,10 @@ def test_build_task_unknown_name_raises_clear_error() -> None:
 
     with pytest.raises(
         ValueError,
-        match="Available tasks: dummy, fetch, job_search, tw_stock_movers",
+        match=(
+            "Available tasks: dummy, fetch, job_search, "
+            "stock_watchlist, tw_stock_movers"
+        ),
     ):
         build_task("missing-task", config_path="config.yaml")
 

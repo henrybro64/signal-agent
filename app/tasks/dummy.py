@@ -47,6 +47,8 @@ class DummyTask(BaseTask):
                 f"digest_time={config.agent.digest_time}, "
                 f"job_search_enabled={config.tasks.job_search.enabled}, "
                 f"tw_stock_movers_enabled={config.tasks.tw_stock_movers.enabled}, "
+                f"stock_watchlist_enabled="
+                f"{config.tasks.stock_watchlist.enabled}, "
                 f"telegram_ready={telegram_ready}"
             )
 

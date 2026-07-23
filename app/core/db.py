@@ -764,9 +764,12 @@ def _find_existing_signal(
     external_id: str | None,
     content_hash: str | None,
 ) -> tuple[sqlite3.Row | None, DedupMatch | None]:
-    # Stock movers use snapshot external IDs when present; otherwise fall back
-    # to the normal URL/content-hash dedup path for custom sources.
-    if item_type == "tw_stock_mover" and external_id is not None:
+    # Snapshot-backed market signals use external IDs when present; otherwise
+    # fall back to the normal URL/content-hash dedup path for custom sources.
+    if (
+        item_type in {"tw_stock_mover", "stock_watchlist_alert"}
+        and external_id is not None
+    ):
         row = connection.execute(
             """
             SELECT *
@@ -820,7 +823,7 @@ def _build_content_hash(item: SignalItem) -> str:
         "title": item.title.strip(),
         "content": (item.content or "").strip(),
     }
-    if item.item_type == "tw_stock_mover":
+    if item.item_type in {"tw_stock_mover", "stock_watchlist_alert"}:
         payload_data["external_id"] = (item.external_id or "").strip()
 
     payload = json.dumps(
