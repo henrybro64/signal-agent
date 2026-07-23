@@ -10,6 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
+from .migrations import apply_pending_migrations, get_schema_version
 from .models import SignalItem
 
 SignalStatus = Literal[
@@ -34,7 +35,6 @@ VALID_SIGNAL_STATUSES: frozenset[SignalStatus] = frozenset(
 )
 
 _DEFAULT_DB_PATH: Path | None = None
-_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "sql" / "schema.sql"
 
 
 @dataclass(slots=True, frozen=True)
@@ -85,7 +85,7 @@ class TaskRunRecord:
 
 
 def init_db(db_path: str | Path) -> None:
-    """Create the SQLite database and required tables if they do not exist."""
+    """Create or migrate the SQLite database to the latest schema version."""
 
     global _DEFAULT_DB_PATH
 
@@ -93,10 +93,17 @@ def init_db(db_path: str | Path) -> None:
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
     with _connect(resolved_path) as connection:
-        connection.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        apply_pending_migrations(connection)
 
     _DEFAULT_DB_PATH = resolved_path
 
+
+def read_schema_version(db_path: str | Path | None = None) -> int:
+    """Return the persisted schema version for an initialized database."""
+
+    resolved_path = _resolve_db_path(db_path)
+    with _connect(resolved_path) as connection:
+        return get_schema_version(connection)
 
 def upsert_signal(
     item: SignalItem,

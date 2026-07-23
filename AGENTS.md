@@ -24,7 +24,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | Milestone | Scope | Status |
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
-| M6 | Hardening / extensions #49–#57 | **In progress** — through #51 done; #52 in progress |
+| M6 | Hardening / extensions #49–#57 | **In progress** — through #52 done; #57 in progress |
 | M7 | LangChain-ready platform evolution #60–#67 | Later — only when asked |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
@@ -47,6 +47,7 @@ signal-agent/
 │   │   ├── models.py       # SignalItem and shared models
 │   │   ├── config.py       # config.yaml loader
 │   │   ├── db.py           # SQLite storage, dedup, run history
+│   │   ├── migrations.py   # SQLite schema versioning (PRAGMA user_version)
 │   │   ├── secrets.py      # env-based secrets
 │   │   ├── time_utils.py   # Taiwan market-hours helpers
 │   │   ├── tw_market_calendar.py  # static TW holiday calendar
@@ -70,16 +71,20 @@ signal-agent/
 │   │   ├── fetch.py        # multi-source fetch + persist bootstrap
 │   │   ├── job_search.py   # job digest workflow
 │   │   ├── tw_stock_movers.py  # TW stock mover digest workflow
-│   │   └── stock_watchlist.py  # personal watchlist threshold alerts
+│   │   ├── stock_watchlist.py  # personal watchlist threshold alerts
+│   │   └── market_task_support.py  # shared TW market task helpers
 │   ├── scorers/
 │   │   ├── job_rule_scorer.py
 │   │   ├── job_llm_scorer.py   # optional; fail open to rules
 │   │   ├── job_score_pipeline.py  # two-stage rule → LLM orchestration
 │   │   └── job_search.py   # profile loading + score orchestration
 │   ├── profiles/           # packaged job-scoring profiles (*.md)
+│   ├── sql/
+│   │   └── migrations/     # packaged SQLite migrations (NNN_name.sql)
 │   └── notifiers/
 │       └── telegram.py
-├── sql/schema.sql
+├── sql/
+│   └── schema.sql          # docs pointer to app/sql/migrations/
 ├── docs/
 │   └── ubuntu-vm-deployment.md  # Ubuntu VM + Compose + cron/systemd runbook
 ├── deploy/
@@ -111,6 +116,9 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 - Keep secrets out of Git. Use `.env` locally, `.env.example` in Git, and
   `deploy/k3s/secret.example.yaml` for cluster secrets.
 - Use SQLite first. Do not introduce Postgres unless requested.
+- Evolve SQLite via numbered files under `app/sql/migrations/` and
+  `app/core/migrations.py` (`PRAGMA user_version`). Keep `init_db()` as the
+  single entrypoint; do not introduce Alembic unless explicitly requested.
 - Rule-based scoring is the default path; LLM scoring must remain optional and
   fail open to rules.
 - Do not automate applying to jobs or messaging recruiters.
@@ -190,7 +198,7 @@ Work in this order unless a human asks otherwise:
 5. #49  Multiple job-search profiles and per-profile configuration — DONE
 6. #55  Two-stage job scoring with LLM budget and digest limits — DONE
 7. #51  Taiwan market holiday calendar in market-hours guard — DONE
-8. #52  Stock watchlist alert task (separate from top movers)
+8. #52  Stock watchlist alert task (separate from top movers) — DONE
 9. #57  SQLite schema versioning and migration path
 ```
 
@@ -215,8 +223,8 @@ points:
 | #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — done |
 | #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — done |
 | #51 | `app/core/tw_market_calendar.py`, `app/data/tw_market_holidays.yaml`, `app/core/time_utils.py`, tests — done |
-| #52 | `app/tasks/stock_watchlist.py`, `app/tasks/market_task_support.py`, config + Telegram — in this PR |
-| #57 | `app/core/db.py`, `sql/`, migration runner + tests |
+| #52 | `app/tasks/stock_watchlist.py`, `app/tasks/market_task_support.py`, config + Telegram — done |
+| #57 | `app/core/migrations.py`, `app/core/db.py` `init_db()`, `app/sql/migrations/`, tests — in this PR |
 
 ## How to pick up work
 
