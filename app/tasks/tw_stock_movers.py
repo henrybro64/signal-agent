@@ -17,16 +17,29 @@ from app.config import (
 from app.core import (
     SignalItem,
     finish_signal_run,
-    start_signal_run,
     tw_market_skip_label,
     tw_market_skip_reason,
     upsert_signal,
 )
-from app.notifiers import build_telegram_notifier
 from app.sources import build_tw_stock_mover_sources
 
 from .base import BaseTask
-from .market_task_support import NotificationOutcome, resolve_task_db_path
+from .market_task_support import (
+    NotificationOutcome,
+    begin_source_run,
+    fail_source_run,
+    resolve_task_db_path,
+    send_optional_telegram_digest,
+)
+from .market_task_support import (
+    change_percent as item_change_percent,
+)
+from .market_task_support import (
+    company_name as item_company_name,
+)
+from .market_task_support import (
+    stock_code as item_stock_code,
+)
 
 _MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     ("twse", "TWSE listed (上市)"),
@@ -118,13 +131,10 @@ class TwStockMoversTask(BaseTask):
             if not sources:
                 raise ValueError("No Taiwan stock-mover sources are configured.")
             for source in sources:
-                run_id = start_signal_run(source.name, db_path=db_path)
-                self.emit_log(
-                    "source_run_started",
-                    message="Source run started",
-                    db_path=str(db_path),
+                run_id = begin_source_run(
+                    self,
                     source_name=source.name,
-                    run_id=run_id,
+                    db_path=db_path,
                 )
                 try:
                     fetched_items = source.fetch()
@@ -172,22 +182,13 @@ class TwStockMoversTask(BaseTask):
                     )
                     summary.successful_sources += 1
                 except Exception as exc:
-                    finish_signal_run(
-                        run_id,
-                        status="failed",
-                        error=str(exc),
-                        db_path=db_path,
-                    )
-                    summary.failed_sources.append((source.name, str(exc)))
-                    self.emit_log(
-                        "source_run_failed",
-                        message="Source run failed",
-                        level=logging.ERROR,
-                        exc_info=exc,
-                        db_path=str(db_path),
+                    fail_source_run(
+                        self,
                         source_name=source.name,
                         run_id=run_id,
-                        error=str(exc),
+                        error=exc,
+                        db_path=db_path,
+                        failed_sources=summary.failed_sources,
                     )
 
             market_reports = _build_market_reports(
@@ -321,62 +322,16 @@ class TwStockMoversTask(BaseTask):
             ),
             notified_count=reported_count,
         )
-        if not digest:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_no_items",
-                notified_count=0,
-            )
-            print("telegram digest skipped: no stock movers to report")
-            return NotificationOutcome(status="skipped_no_items")
-
-        if not config.notifiers.telegram.enabled:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_notifier_disabled",
-                notified_count=0,
-            )
-            print("telegram digest skipped: notifier disabled in config")
-            return NotificationOutcome(status="skipped_notifier_disabled")
-
-        validate_telegram_notifier_secrets(
-            telegram_enabled=True,
+        return send_optional_telegram_digest(
+            self,
+            digest=digest,
+            config=config,
             env=env,
-        )
-        notifier = build_telegram_notifier(env=env)
-        try:
-            notifier.send_message(digest)
-        except Exception as exc:
-            self.emit_log(
-                "notification_failed",
-                message="Telegram digest failed",
-                level=logging.ERROR,
-                exc_info=exc,
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="failed",
-                attempted_notified_count=reported_count,
-                error=str(exc),
-            )
-            raise
-        self.emit_log(
-            "notification_sent",
-            message="Telegram digest sent",
-            db_path=str(db_path),
-            notifier="telegram",
-            notification_status="sent",
+            db_path=db_path,
             notified_count=reported_count,
-        )
-        print("telegram digest sent")
-        return NotificationOutcome(
-            status="sent",
-            notified_count=reported_count,
+            empty_status="skipped_no_items",
+            empty_message="telegram digest skipped: no stock movers to report",
+            validate_secrets=validate_telegram_notifier_secrets,
         )
 
 
@@ -556,12 +511,12 @@ def _select_top_gainers(
     gainers = [
         item
         for item in items
-        if _change_percent(item) > 0
+        if item_change_percent(item) > 0
         and (market_key is None or _market_key(item) == market_key)
     ]
     return sorted(
         gainers,
-        key=lambda item: (_change_percent(item), item.observed_at),
+        key=lambda item: (item_change_percent(item), item.observed_at),
         reverse=True,
     )[:limit]
 
@@ -577,12 +532,12 @@ def _select_top_losers(
     losers = [
         item
         for item in items
-        if _change_percent(item) < 0
+        if item_change_percent(item) < 0
         and (market_key is None or _market_key(item) == market_key)
     ]
     return sorted(
         losers,
-        key=lambda item: (_change_percent(item), -item.observed_at.timestamp()),
+        key=lambda item: (item_change_percent(item), -item.observed_at.timestamp()),
     )[:limit]
 
 
@@ -606,46 +561,27 @@ def _market_key(item: SignalItem) -> str:
 
 
 def _render_mover_line(item: SignalItem) -> str:
-    stock_code = _stock_code(item)
-    company = _company_name(item)
-    change_percent = _change_percent(item)
+    code = item_stock_code(item)
+    company = item_company_name(item)
+    pct = item_change_percent(item)
     title = item.title.strip()
 
-    prefix_parts = [part for part in (stock_code, company) if part]
+    prefix_parts = [part for part in (code, company) if part]
     prefix = " ".join(prefix_parts)
     if prefix:
         prefix += " "
-    return f"{prefix}{change_percent:+.1f}% | {title}"
+    return f"{prefix}{pct:+.1f}% | {title}"
 
 
 def _render_digest_ranked_line(index: int, item: SignalItem) -> str:
-    stock_code = _stock_code(item)
-    company = _company_name(item)
-    change_percent = _change_percent(item)
+    code = item_stock_code(item)
+    company = item_company_name(item)
+    pct = item_change_percent(item)
 
-    prefix_parts = [part for part in (stock_code, company) if part]
+    prefix_parts = [part for part in (code, company) if part]
     prefix = " ".join(prefix_parts).strip()
     if not prefix:
         prefix = item.title.strip()
-    return f"{index}. {prefix} {change_percent:+.2f}%"
+    return f"{index}. {prefix} {pct:+.2f}%"
 
 
-def _stock_code(item: SignalItem) -> str:
-    stock_code = item.metadata.get("stock_code")
-    if isinstance(stock_code, str):
-        return stock_code.strip()
-    return ""
-
-
-def _company_name(item: SignalItem) -> str:
-    company = item.metadata.get("company")
-    if isinstance(company, str):
-        return company.strip()
-    return ""
-
-
-def _change_percent(item: SignalItem) -> float:
-    change_percent = item.metadata.get("change_percent")
-    if isinstance(change_percent, int | float):
-        return float(change_percent)
-    return 0.0

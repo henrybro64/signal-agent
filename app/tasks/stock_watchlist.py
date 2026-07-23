@@ -22,16 +22,29 @@ from app.config import (
 from app.core import (
     SignalItem,
     finish_signal_run,
-    start_signal_run,
     tw_market_skip_label,
     tw_market_skip_reason,
     upsert_signal,
 )
-from app.notifiers import build_telegram_notifier
 from app.sources import BaseSource, build_tw_stock_mover_sources_for_names
 
 from .base import BaseTask
-from .market_task_support import NotificationOutcome, resolve_task_db_path
+from .market_task_support import (
+    NotificationOutcome,
+    begin_source_run,
+    fail_source_run,
+    resolve_task_db_path,
+    send_optional_telegram_digest,
+)
+from .market_task_support import (
+    change_percent as item_change_percent,
+)
+from .market_task_support import (
+    company_name as item_company_name,
+)
+from .market_task_support import (
+    stock_code as item_stock_code,
+)
 
 _ALERT_SOURCE: Final[str] = "stock_watchlist"
 _ALERT_ITEM_TYPE: Final[str] = "stock_watchlist_alert"
@@ -194,13 +207,10 @@ class StockWatchlistTask(BaseTask):
         summary: WatchlistRunSummary,
         db_path: Path,
     ) -> None:
-        run_id = start_signal_run(source.name, db_path=db_path)
-        self.emit_log(
-            "source_run_started",
-            message="Source run started",
-            db_path=str(db_path),
+        run_id = begin_source_run(
+            self,
             source_name=source.name,
-            run_id=run_id,
+            db_path=db_path,
         )
         try:
             fetched_items = source.fetch()
@@ -236,22 +246,13 @@ class StockWatchlistTask(BaseTask):
             )
             summary.successful_sources += 1
         except Exception as exc:
-            finish_signal_run(
-                run_id,
-                status="failed",
-                error=str(exc),
-                db_path=db_path,
-            )
-            summary.failed_sources.append((source.name, str(exc)))
-            self.emit_log(
-                "source_run_failed",
-                message="Source run failed",
-                level=logging.ERROR,
-                exc_info=exc,
-                db_path=str(db_path),
+            fail_source_run(
+                self,
                 source_name=source.name,
                 run_id=run_id,
-                error=str(exc),
+                error=exc,
+                db_path=db_path,
+                failed_sources=summary.failed_sources,
             )
 
     def _persist_triggered_alerts(
@@ -347,64 +348,20 @@ class StockWatchlistTask(BaseTask):
             themes=watchlist.themes,
             timezone_name=watchlist.timezone,
         )
-        if not digest:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_no_alerts",
-                notified_count=0,
-                triggered_count=summary.triggered_count,
-                duplicate_count=summary.duplicate_alert_count,
-            )
-            print("telegram digest skipped: no new watchlist alerts")
-            return NotificationOutcome(status="skipped_no_alerts")
-
-        if not config.notifiers.telegram.enabled:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_notifier_disabled",
-                notified_count=0,
-            )
-            print("telegram digest skipped: notifier disabled in config")
-            return NotificationOutcome(status="skipped_notifier_disabled")
-
-        validate_telegram_notifier_secrets(
-            telegram_enabled=True,
+        return send_optional_telegram_digest(
+            self,
+            digest=digest,
+            config=config,
             env=env,
-        )
-        notifier = build_telegram_notifier(env=env)
-        try:
-            notifier.send_message(digest)
-        except Exception as exc:
-            self.emit_log(
-                "notification_failed",
-                message="Telegram digest failed",
-                level=logging.ERROR,
-                exc_info=exc,
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="failed",
-                attempted_notified_count=len(summary.new_alerts),
-                error=str(exc),
-            )
-            raise
-        self.emit_log(
-            "notification_sent",
-            message="Telegram digest sent",
-            db_path=str(db_path),
-            notifier="telegram",
-            notification_status="sent",
+            db_path=db_path,
             notified_count=len(summary.new_alerts),
-        )
-        print("telegram digest sent")
-        return NotificationOutcome(
-            status="sent",
-            notified_count=len(summary.new_alerts),
+            empty_status="skipped_no_alerts",
+            empty_message="telegram digest skipped: no new watchlist alerts",
+            validate_secrets=validate_telegram_notifier_secrets,
+            empty_log_fields={
+                "triggered_count": summary.triggered_count,
+                "duplicate_count": summary.duplicate_alert_count,
+            },
         )
 
 
@@ -425,7 +382,7 @@ def _merge_watched_quotes(
 ) -> int:
     matched = 0
     for item in stock_items:
-        code = _stock_code(item)
+        code = item_stock_code(item)
         if code not in symbol_by_code:
             continue
         matched += 1
@@ -446,18 +403,18 @@ def _build_triggered_alerts(
         quote = quotes_by_code.get(code)
         if quote is None:
             continue
-        change_percent = _change_percent(quote)
-        if abs(change_percent) < symbol.alert_change_percent_abs:
+        pct = item_change_percent(quote)
+        if abs(pct) < symbol.alert_change_percent_abs:
             continue
         alerts.append(
             _build_alert_item(
                 quote=quote,
                 symbol=symbol,
-                change_percent=change_percent,
+                change_percent=pct,
                 themes=_theme_names_for_code(code, themes),
             )
         )
-    alerts.sort(key=lambda item: abs(_change_percent(item)), reverse=True)
+    alerts.sort(key=lambda item: abs(item_change_percent(item)), reverse=True)
     return alerts
 
 
@@ -468,7 +425,7 @@ def _build_alert_item(
     change_percent: float,
     themes: list[str],
 ) -> SignalItem:
-    display_name = symbol.name.strip() or _company_name(quote) or symbol.code
+    display_name = symbol.name.strip() or item_company_name(quote) or symbol.code
     trade_date, snapshot_key = _snapshot_parts(quote.observed_at)
     threshold = symbol.alert_change_percent_abs
     metadata = {
@@ -560,7 +517,7 @@ def _render_theme_section(
 ) -> list[str]:
     if not themes:
         return []
-    triggered_codes = {_stock_code(alert) for alert in alerts}
+    triggered_codes = {item_stock_code(alert) for alert in alerts}
     lines: list[str] = []
     for theme_name, theme_config in themes.items():
         hit_count = sum(
@@ -572,19 +529,19 @@ def _render_theme_section(
 
 
 def _render_digest_alert_line(alert: SignalItem) -> str:
-    code = _stock_code(alert)
-    company = _company_name(alert)
-    change_percent = _change_percent(alert)
+    code = item_stock_code(alert)
+    company = item_company_name(alert)
+    pct = item_change_percent(alert)
     threshold = alert.metadata.get("alert_change_percent_abs")
     prefix = " ".join(part for part in (code, company) if part).strip()
     if not prefix:
         prefix = alert.title
     if isinstance(threshold, int | float):
         return (
-            f"{prefix} {change_percent:+.2f}% — "
+            f"{prefix} {pct:+.2f}% — "
             f"超過設定門檻 {float(threshold):.1f}%"
         )
-    return f"{prefix} {change_percent:+.2f}%"
+    return f"{prefix} {pct:+.2f}%"
 
 
 def _theme_names_for_code(
@@ -606,22 +563,3 @@ def _snapshot_parts(observed_at: datetime) -> tuple[str, str]:
     return localized.strftime("%Y%m%d"), localized.strftime("%H%M")
 
 
-def _stock_code(item: SignalItem) -> str:
-    stock_code = item.metadata.get("stock_code")
-    if isinstance(stock_code, str):
-        return stock_code.strip()
-    return ""
-
-
-def _company_name(item: SignalItem) -> str:
-    company = item.metadata.get("company")
-    if isinstance(company, str):
-        return company.strip()
-    return ""
-
-
-def _change_percent(item: SignalItem) -> float:
-    change_percent = item.metadata.get("change_percent")
-    if isinstance(change_percent, int | float):
-        return float(change_percent)
-    return 0.0

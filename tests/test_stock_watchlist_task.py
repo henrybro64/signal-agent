@@ -235,8 +235,7 @@ def test_stock_watchlist_task_triggers_threshold_alerts_and_sends_digest(
         ],
     )
     monkeypatch.setattr(
-        watchlist_module,
-        "build_telegram_notifier",
+        "app.tasks.market_task_support.build_telegram_notifier",
         lambda env=None: FakeNotifier(),
     )
     monkeypatch.setattr(
@@ -308,8 +307,7 @@ def test_stock_watchlist_task_skips_telegram_when_no_alerts(
         ],
     )
     monkeypatch.setattr(
-        watchlist_module,
-        "build_telegram_notifier",
+        "app.tasks.market_task_support.build_telegram_notifier",
         lambda env=None: FakeNotifier(),
     )
 
@@ -358,8 +356,7 @@ def test_stock_watchlist_task_dedupes_same_minute_bucket(
         lambda _config, _names: quotes,
     )
     monkeypatch.setattr(
-        watchlist_module,
-        "build_telegram_notifier",
+        "app.tasks.market_task_support.build_telegram_notifier",
         lambda env=None: FakeNotifier(),
     )
     monkeypatch.setattr(

@@ -8,6 +8,7 @@ from app.core import SignalItem
 from app.sources import BaseSource, DummySource
 from app.sources.dummy import SAMPLE_OBSERVED_AT
 from app.tasks import TwStockMoversTask
+from app.tasks import market_task_support as market_task_support_module
 from app.tasks import tw_stock_movers as tw_stock_movers_task_module
 
 
@@ -295,7 +296,7 @@ def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
         lambda _config: [StaticStockSource()],
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "build_telegram_notifier",
         lambda *, env: FakeNotifier(),
     )
@@ -393,7 +394,7 @@ def test_tw_stock_movers_task_sends_failure_digest_when_all_sources_fail(
         lambda _config: [FailingStockSource()],
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "build_telegram_notifier",
         lambda *, env: FakeNotifier(),
     )
@@ -509,7 +510,7 @@ def test_tw_stock_movers_task_reports_both_markets_separately(
         lambda _config: [TwseStockSource(), TpexStockSource()],
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "build_telegram_notifier",
         lambda *, env: FakeNotifier(),
     )
@@ -619,7 +620,7 @@ def test_tw_stock_movers_task_sends_partial_failure_warning_in_digest(
         lambda _config: [TwseStockSource(), FailingTpexSource()],
     )
     monkeypatch.setattr(
-        tw_stock_movers_task_module,
+        market_task_support_module,
         "build_telegram_notifier",
         lambda *, env: FakeNotifier(),
     )
