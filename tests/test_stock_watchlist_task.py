@@ -171,6 +171,47 @@ def _emit_logs(capsys: pytest.CaptureFixture[str]) -> list[dict]:
     return logs
 
 
+def _prepare_watchlist_run(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    db_path: Path,
+    sources: list[BaseSource] | None = None,
+    skip_reason: str | None = None,
+    notifier: object | None = None,
+) -> None:
+    monkeypatch.setattr(
+        market_task_support_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: skip_reason,
+    )
+    if sources is not None:
+        monkeypatch.setattr(
+            watchlist_module,
+            "build_tw_stock_mover_sources_for_names",
+            lambda _config, _names: sources,
+        )
+    if notifier is not None:
+        monkeypatch.setattr(
+            "app.tasks.market_task_support.build_telegram_notifier",
+            lambda env=None: notifier,
+        )
+        monkeypatch.setattr(
+            watchlist_module,
+            "validate_telegram_notifier_secrets",
+            lambda **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            watchlist_module,
+            "load_env_settings",
+            lambda: object(),
+        )
+
+
 def test_stock_watchlist_task_skips_when_market_is_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -178,15 +219,10 @@ def test_stock_watchlist_task_skips_when_market_is_closed(
 ) -> None:
     config_path = _write_config(tmp_path)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(
-        watchlist_module,
-        "resolve_task_db_path",
-        lambda: db_path,
-    )
-    monkeypatch.setattr(
-        market_task_support_module,
-        "tw_market_skip_reason",
-        lambda: "taiwan_market_closed",
+    _prepare_watchlist_run(
+        monkeypatch,
+        db_path=db_path,
+        skip_reason="taiwan_market_closed",
     )
 
     StockWatchlistTask(str(config_path)).run()
@@ -210,20 +246,11 @@ def test_stock_watchlist_task_triggers_threshold_alerts_and_sends_digest(
         def send_message(self, text: str) -> None:
             sent.append(text)
 
-    monkeypatch.setattr(
-        watchlist_module,
-        "resolve_task_db_path",
-        lambda: db_path,
-    )
-    monkeypatch.setattr(
-        market_task_support_module,
-        "tw_market_skip_reason",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: [
+    _prepare_watchlist_run(
+        monkeypatch,
+        db_path=db_path,
+        notifier=FakeNotifier(),
+        sources=[
             TwseWatchlistSource(
                 [
                     _quote_item(
@@ -245,20 +272,6 @@ def test_stock_watchlist_task_triggers_threshold_alerts_and_sends_digest(
             ),
             TpexWatchlistSource(),
         ],
-    )
-    monkeypatch.setattr(
-        "app.tasks.market_task_support.build_telegram_notifier",
-        lambda env=None: FakeNotifier(),
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "validate_telegram_notifier_secrets",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "load_env_settings",
-        lambda: object(),
     )
 
     StockWatchlistTask(str(config_path)).run()
@@ -292,20 +305,11 @@ def test_stock_watchlist_task_skips_telegram_when_no_alerts(
         def send_message(self, text: str) -> None:
             sent.append(text)
 
-    monkeypatch.setattr(
-        watchlist_module,
-        "resolve_task_db_path",
-        lambda: db_path,
-    )
-    monkeypatch.setattr(
-        market_task_support_module,
-        "tw_market_skip_reason",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: [
+    _prepare_watchlist_run(
+        monkeypatch,
+        db_path=db_path,
+        notifier=FakeNotifier(),
+        sources=[
             TwseWatchlistSource(
                 [
                     _quote_item(
@@ -321,10 +325,6 @@ def test_stock_watchlist_task_skips_telegram_when_no_alerts(
                 ]
             )
         ],
-    )
-    monkeypatch.setattr(
-        "app.tasks.market_task_support.build_telegram_notifier",
-        lambda env=None: FakeNotifier(),
     )
 
     StockWatchlistTask(str(config_path)).run()
@@ -349,42 +349,22 @@ def test_stock_watchlist_task_dedupes_same_minute_bucket(
         def send_message(self, text: str) -> None:
             sent.append(text)
 
-    quotes = [
-        TwseWatchlistSource(
-            [
-                _quote_item(
-                    stock_code="3081",
-                    company="聯亞",
-                    change_percent=4.12,
-                )
-            ]
-        )
-    ]
-    monkeypatch.setattr(
-        watchlist_module,
-        "resolve_task_db_path",
-        lambda: db_path,
+    _prepare_watchlist_run(
+        monkeypatch,
+        db_path=db_path,
+        notifier=FakeNotifier(),
+        sources=[
+            TwseWatchlistSource(
+                [
+                    _quote_item(
+                        stock_code="3081",
+                        company="聯亞",
+                        change_percent=4.12,
+                    )
+                ]
+            )
+        ],
     )
-    monkeypatch.setattr(
-        market_task_support_module,
-        "tw_market_skip_reason",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: quotes,
-    )
-    monkeypatch.setattr(
-        "app.tasks.market_task_support.build_telegram_notifier",
-        lambda env=None: FakeNotifier(),
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "validate_telegram_notifier_secrets",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(watchlist_module, "load_env_settings", lambda: object())
 
     StockWatchlistTask(str(config_path)).run()
     StockWatchlistTask(str(config_path)).run()
@@ -413,42 +393,22 @@ def test_stock_watchlist_task_retries_unsent_alerts_after_telegram_failure(
                 raise RuntimeError("telegram unavailable")
             sent.append(text)
 
-    quotes = [
-        TwseWatchlistSource(
-            [
-                _quote_item(
-                    stock_code="3081",
-                    company="聯亞",
-                    change_percent=4.12,
-                )
-            ]
-        )
-    ]
-    monkeypatch.setattr(
-        watchlist_module,
-        "resolve_task_db_path",
-        lambda: db_path,
+    _prepare_watchlist_run(
+        monkeypatch,
+        db_path=db_path,
+        notifier=FlakyThenOkNotifier(),
+        sources=[
+            TwseWatchlistSource(
+                [
+                    _quote_item(
+                        stock_code="3081",
+                        company="聯亞",
+                        change_percent=4.12,
+                    )
+                ]
+            )
+        ],
     )
-    monkeypatch.setattr(
-        market_task_support_module,
-        "tw_market_skip_reason",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: quotes,
-    )
-    monkeypatch.setattr(
-        "app.tasks.market_task_support.build_telegram_notifier",
-        lambda env=None: FlakyThenOkNotifier(),
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "validate_telegram_notifier_secrets",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(watchlist_module, "load_env_settings", lambda: object())
 
     with pytest.raises(RuntimeError, match="telegram unavailable"):
         StockWatchlistTask(str(config_path)).run()
@@ -475,20 +435,11 @@ def test_stock_watchlist_task_includes_failed_sources_in_digest(
         def send_message(self, text: str) -> None:
             sent.append(text)
 
-    monkeypatch.setattr(
-        watchlist_module,
-        "resolve_task_db_path",
-        lambda: db_path,
-    )
-    monkeypatch.setattr(
-        market_task_support_module,
-        "tw_market_skip_reason",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: [
+    _prepare_watchlist_run(
+        monkeypatch,
+        db_path=db_path,
+        notifier=FakeNotifier(),
+        sources=[
             TwseWatchlistSource(
                 [
                     _quote_item(
@@ -501,16 +452,6 @@ def test_stock_watchlist_task_includes_failed_sources_in_digest(
             FailingTpexSource(),
         ],
     )
-    monkeypatch.setattr(
-        "app.tasks.market_task_support.build_telegram_notifier",
-        lambda env=None: FakeNotifier(),
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "validate_telegram_notifier_secrets",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(watchlist_module, "load_env_settings", lambda: object())
 
     StockWatchlistTask(str(config_path)).run()
 
@@ -526,20 +467,10 @@ def test_stock_watchlist_task_raises_when_all_sources_fail(
 ) -> None:
     config_path = _write_config(tmp_path)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(
-        watchlist_module,
-        "resolve_task_db_path",
-        lambda: db_path,
-    )
-    monkeypatch.setattr(
-        market_task_support_module,
-        "tw_market_skip_reason",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        watchlist_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: [FailingTwseSource()],
+    _prepare_watchlist_run(
+        monkeypatch,
+        db_path=db_path,
+        sources=[FailingTwseSource()],
     )
 
     task = StockWatchlistTask(str(config_path))

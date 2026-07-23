@@ -27,25 +27,8 @@ from app.core import (
 )
 from app.sources import BaseSource, build_tw_stock_mover_sources_for_names
 
+from . import market_task_support as market_support
 from .base import BaseTask
-from .market_task_support import (
-    NotificationOutcome,
-    complete_tw_stock_source_run,
-    fetch_tw_stock_mover_source,
-    resolve_task_db_path,
-    send_optional_telegram_digest,
-    skip_outside_tw_market_hours,
-    source_warning_label,
-)
-from .market_task_support import (
-    change_percent as item_change_percent,
-)
-from .market_task_support import (
-    company_name as item_company_name,
-)
-from .market_task_support import (
-    stock_code as item_stock_code,
-)
 
 _ALERT_SOURCE: Final[str] = "stock_watchlist"
 _ALERT_ITEM_TYPE: Final[str] = "stock_watchlist_alert"
@@ -75,9 +58,9 @@ class StockWatchlistTask(BaseTask):
     name: ClassVar[str] = "stock_watchlist"
 
     def run(self) -> None:
-        db_path = resolve_task_db_path()
+        db_path = market_support.resolve_task_db_path()
         summary = WatchlistRunSummary()
-        notification = NotificationOutcome(status="not_applicable")
+        notification = market_support.NotificationOutcome(status="not_applicable")
 
         self.begin_task_run(db_path=db_path)
         self.emit_log(
@@ -90,7 +73,7 @@ class StockWatchlistTask(BaseTask):
             config = load_config(self.config_path)
             watchlist = _require_enabled_watchlist(config)
             env = load_env_settings()
-            if skip_outside_tw_market_hours(
+            if market_support.skip_outside_tw_market_hours(
                 self,
                 db_path=db_path,
                 task_name=self.name,
@@ -192,7 +175,7 @@ class StockWatchlistTask(BaseTask):
         summary: WatchlistRunSummary,
         db_path: Path,
     ) -> None:
-        fetch = fetch_tw_stock_mover_source(
+        fetch = market_support.fetch_tw_stock_mover_source(
             self,
             source=source,
             db_path=db_path,
@@ -208,7 +191,7 @@ class StockWatchlistTask(BaseTask):
         )
         summary.fetched_quote_count += len(fetch.stock_items)
         summary.watched_quote_count += matched
-        complete_tw_stock_source_run(
+        market_support.complete_tw_stock_source_run(
             self,
             source_name=source.name,
             fetch=fetch,
@@ -252,7 +235,7 @@ class StockWatchlistTask(BaseTask):
         self,
         *,
         summary: WatchlistRunSummary,
-        notification: NotificationOutcome,
+        notification: market_support.NotificationOutcome,
         db_path: Path,
     ) -> None:
         if summary.successful_sources == 0:
@@ -310,7 +293,7 @@ class StockWatchlistTask(BaseTask):
         watchlist: StockWatchlistTaskConfig,
         summary: WatchlistRunSummary,
         db_path: Path,
-    ) -> NotificationOutcome:
+    ) -> market_support.NotificationOutcome:
         # Digests include pending (unreported) alerts so Telegram failures retry.
         digest = _build_telegram_digest(
             alerts=summary.pending_alerts,
@@ -318,7 +301,7 @@ class StockWatchlistTask(BaseTask):
             timezone_name=watchlist.timezone,
             failed_sources=summary.failed_sources,
         )
-        notification = send_optional_telegram_digest(
+        notification = market_support.send_optional_telegram_digest(
             self,
             digest=digest,
             config=config,
@@ -362,7 +345,7 @@ def _merge_watched_quotes(
 ) -> int:
     matched = 0
     for item in stock_items:
-        code = item_stock_code(item)
+        code = market_support.stock_code(item)
         if code not in symbol_by_code:
             continue
         matched += 1
@@ -383,7 +366,7 @@ def _build_triggered_alerts(
         quote = quotes_by_code.get(code)
         if quote is None:
             continue
-        pct = item_change_percent(quote)
+        pct = market_support.change_percent(quote)
         if abs(pct) < symbol.alert_change_percent_abs:
             continue
         alerts.append(
@@ -394,7 +377,7 @@ def _build_triggered_alerts(
                 themes=_theme_names_for_code(code, themes),
             )
         )
-    alerts.sort(key=lambda item: abs(item_change_percent(item)), reverse=True)
+    alerts.sort(key=lambda item: abs(market_support.change_percent(item)), reverse=True)
     return alerts
 
 
@@ -405,7 +388,11 @@ def _build_alert_item(
     change_percent: float,
     themes: list[str],
 ) -> SignalItem:
-    display_name = symbol.name.strip() or item_company_name(quote) or symbol.code
+    display_name = (
+        symbol.name.strip()
+        or market_support.company_name(quote)
+        or symbol.code
+    )
     trade_date, snapshot_key = _snapshot_parts(quote.observed_at)
     threshold = symbol.alert_change_percent_abs
     metadata = {
@@ -492,7 +479,8 @@ def _build_telegram_digest(
         lines.append("")
         lines.append("資料來源異常")
         for source_name, message in failed_sources:
-            lines.append(f"- {source_warning_label(source_name)}：{message}")
+            label = market_support.source_warning_label(source_name)
+            lines.append(f"- {label}：{message}")
     return "\n".join(lines)
 
 
@@ -508,7 +496,7 @@ def _render_theme_section(
 ) -> list[str]:
     if not themes:
         return []
-    triggered_codes = {item_stock_code(alert) for alert in alerts}
+    triggered_codes = {market_support.stock_code(alert) for alert in alerts}
     lines: list[str] = []
     for theme_name, theme_config in themes.items():
         hit_count = sum(
@@ -520,9 +508,9 @@ def _render_theme_section(
 
 
 def _render_digest_alert_line(alert: SignalItem) -> str:
-    code = item_stock_code(alert)
-    company = item_company_name(alert)
-    pct = item_change_percent(alert)
+    code = market_support.stock_code(alert)
+    company = market_support.company_name(alert)
+    pct = market_support.change_percent(alert)
     threshold = alert.metadata.get("alert_change_percent_abs")
     prefix = " ".join(part for part in (code, company) if part).strip()
     if not prefix:

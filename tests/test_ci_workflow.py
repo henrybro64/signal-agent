@@ -78,6 +78,7 @@ def test_sonar_project_properties_excludes_deploy_from_cpd() -> None:
     sonar_path = ROOT / "sonar-project.properties"
     assert sonar_path.is_file()
     text = sonar_path.read_text(encoding="utf-8")
+    assert "sonar.exclusions=" in text
     assert "sonar.cpd.exclusions=" in text
-    assert "**/deploy/**" in text
     assert "**/tests/**" in text
+    assert "**/deploy/**" in text
