@@ -11,6 +11,8 @@ from typing import ClassVar, Final
 from zoneinfo import ZoneInfo
 
 from app.config import (
+    AppConfig,
+    EnvSettings,
     StockWatchlistSymbolConfig,
     StockWatchlistTaskConfig,
     StockWatchlistThemeConfig,
@@ -19,15 +21,15 @@ from app.config import (
     validate_telegram_notifier_secrets,
 )
 from app.core import (
-    TW_MARKET_SKIP_HOLIDAY,
     SignalItem,
     finish_signal_run,
     start_signal_run,
+    tw_market_skip_label,
     tw_market_skip_reason,
     upsert_signal,
 )
 from app.notifiers import build_telegram_notifier
-from app.sources import build_tw_stock_mover_sources_for_names
+from app.sources import BaseSource, build_tw_stock_mover_sources_for_names
 
 from .base import BaseTask
 from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
@@ -79,135 +81,28 @@ class StockWatchlistTask(BaseTask):
 
         try:
             config = load_config(self.config_path)
-            watchlist = config.tasks.stock_watchlist
-            if not watchlist.enabled:
-                raise ValueError("Task 'stock_watchlist' is disabled in config")
-            if not watchlist.symbols:
-                raise ValueError(
-                    "Task 'stock_watchlist' has no symbols configured"
-                )
-
+            watchlist = _require_enabled_watchlist(config)
             env = load_env_settings()
-            skip_reason = tw_market_skip_reason()
-            if skip_reason is not None:
-                skip_label = (
-                    "Taiwan market holiday"
-                    if skip_reason == TW_MARKET_SKIP_HOLIDAY
-                    else "Taiwan market is closed"
-                )
-                self.emit_log(
-                    "task_skipped",
-                    message="Stock watchlist task skipped",
-                    db_path=str(db_path),
-                    skip_reason=skip_reason,
-                )
-                print(
-                    "stock_watchlist task skipped using "
-                    f"{self.config_path}: {skip_label}"
-                )
-                self.end_task_run(
-                    db_path=db_path,
-                    status="skipped",
-                    notified_count=0,
-                    error_message=skip_reason,
-                )
+            if self._skip_outside_market_hours(db_path=db_path):
                 return
-
-            sources = build_tw_stock_mover_sources_for_names(
-                config,
-                watchlist.sources,
-            )
-            if not sources:
-                raise ValueError("No Taiwan stock sources are configured.")
 
             symbol_by_code = {
                 symbol.code: symbol for symbol in watchlist.symbols
             }
-            quotes_by_code: dict[str, SignalItem] = {}
-
-            for source in sources:
-                run_id = start_signal_run(source.name, db_path=db_path)
-                self.emit_log(
-                    "source_run_started",
-                    message="Source run started",
-                    db_path=str(db_path),
-                    source_name=source.name,
-                    run_id=run_id,
-                )
-                try:
-                    fetched_items = source.fetch()
-                    stock_items = [
-                        item
-                        for item in fetched_items
-                        if item.item_type == "tw_stock_mover"
-                    ]
-                    summary.fetched_quote_count += len(stock_items)
-                    matched = 0
-                    for item in stock_items:
-                        code = _stock_code(item)
-                        if code not in symbol_by_code:
-                            continue
-                        matched += 1
-                        existing = quotes_by_code.get(code)
-                        if existing is None or (
-                            item.observed_at > existing.observed_at
-                        ):
-                            quotes_by_code[code] = item
-                    summary.watched_quote_count += matched
-                    finish_signal_run(
-                        run_id,
-                        status="completed",
-                        fetched_count=len(stock_items),
-                        inserted_count=0,
-                        updated_count=0,
-                        db_path=db_path,
-                    )
-                    self.emit_log(
-                        "source_run_completed",
-                        message="Source run completed",
-                        db_path=str(db_path),
-                        source_name=source.name,
-                        run_id=run_id,
-                        fetched_count=len(fetched_items),
-                        accepted_count=len(stock_items),
-                        watched_count=matched,
-                    )
-                    summary.successful_sources += 1
-                except Exception as exc:
-                    finish_signal_run(
-                        run_id,
-                        status="failed",
-                        error=str(exc),
-                        db_path=db_path,
-                    )
-                    summary.failed_sources.append((source.name, str(exc)))
-                    self.emit_log(
-                        "source_run_failed",
-                        message="Source run failed",
-                        level=logging.ERROR,
-                        exc_info=exc,
-                        db_path=str(db_path),
-                        source_name=source.name,
-                        run_id=run_id,
-                        error=str(exc),
-                    )
-
-            alert_items = _build_triggered_alerts(
+            quotes_by_code = self._collect_watched_quotes(
+                config=config,
+                watchlist=watchlist,
+                symbol_by_code=symbol_by_code,
+                summary=summary,
+                db_path=db_path,
+            )
+            self._persist_triggered_alerts(
                 quotes_by_code=quotes_by_code,
                 symbol_by_code=symbol_by_code,
-                themes=watchlist.themes,
+                watchlist=watchlist,
+                summary=summary,
+                db_path=db_path,
             )
-            summary.triggered_count = len(alert_items)
-            summary.triggered_alerts = alert_items
-
-            for alert in alert_items:
-                result = upsert_signal(alert, db_path=db_path)
-                if result.action == "inserted":
-                    summary.new_alert_count += 1
-                    summary.new_alerts.append(alert)
-                else:
-                    summary.duplicate_alert_count += 1
-
             print(
                 "\n".join(
                     _build_console_summary(
@@ -217,7 +112,6 @@ class StockWatchlistTask(BaseTask):
                     )
                 )
             )
-
             notification = self._maybe_send_telegram_digest(
                 config=config,
                 env=env,
@@ -225,52 +119,10 @@ class StockWatchlistTask(BaseTask):
                 summary=summary,
                 db_path=db_path,
             )
-
-            if summary.successful_sources == 0:
-                failure_summary = "; ".join(
-                    f"{source_name}: {message}"
-                    for source_name, message in summary.failed_sources
-                )
-                self.emit_log(
-                    "task_summary",
-                    message="Stock watchlist task summary",
-                    db_path=str(db_path),
-                    task_status="failed",
-                    fetched_count=summary.fetched_quote_count,
-                    new_count=summary.new_alert_count,
-                    duplicate_count=summary.duplicate_alert_count,
-                    notified_count=notification.notified_count,
-                    notification_status=notification.status,
-                    successful_source_count=summary.successful_sources,
-                    failed_source_count=len(summary.failed_sources),
-                    triggered_count=summary.triggered_count,
-                )
-                raise ValueError(
-                    "All configured stock watchlist sources failed: "
-                    f"{failure_summary}"
-                )
-
-            self.emit_log(
-                "task_completed",
-                message="Stock watchlist task completed",
-                db_path=str(db_path),
-                fetched_count=summary.fetched_quote_count,
-                new_count=summary.new_alert_count,
-                duplicate_count=summary.duplicate_alert_count,
-                notified_count=notification.notified_count,
-                notification_status=notification.status,
-                successful_source_count=summary.successful_sources,
-                failed_source_count=len(summary.failed_sources),
-                triggered_count=summary.triggered_count,
-                watched_count=summary.watched_quote_count,
-            )
-            self.end_task_run(
+            self._finalize_success(
+                summary=summary,
+                notification=notification,
                 db_path=db_path,
-                status="success",
-                fetched_count=summary.fetched_quote_count,
-                new_count=summary.new_alert_count,
-                skipped_count=summary.duplicate_alert_count,
-                notified_count=notification.notified_count,
             )
         except Exception as exc:
             self.end_task_run(
@@ -292,16 +144,213 @@ class StockWatchlistTask(BaseTask):
             )
             raise
 
+    def _skip_outside_market_hours(self, *, db_path: Path) -> bool:
+        skip_reason = tw_market_skip_reason()
+        if skip_reason is None:
+            return False
+        skip_label = tw_market_skip_label(skip_reason)
+        self.emit_log(
+            "task_skipped",
+            message="Stock watchlist task skipped",
+            db_path=str(db_path),
+            skip_reason=skip_reason,
+        )
+        print(
+            "stock_watchlist task skipped using "
+            f"{self.config_path}: {skip_label}"
+        )
+        self.end_task_run(
+            db_path=db_path,
+            status="skipped",
+            notified_count=0,
+            error_message=skip_reason,
+        )
+        return True
+
+    def _collect_watched_quotes(
+        self,
+        *,
+        config: AppConfig,
+        watchlist: StockWatchlistTaskConfig,
+        symbol_by_code: dict[str, StockWatchlistSymbolConfig],
+        summary: WatchlistRunSummary,
+        db_path: Path,
+    ) -> dict[str, SignalItem]:
+        sources = build_tw_stock_mover_sources_for_names(
+            config,
+            watchlist.sources,
+        )
+        if not sources:
+            raise ValueError("No Taiwan stock sources are configured.")
+
+        quotes_by_code: dict[str, SignalItem] = {}
+        for source in sources:
+            self._fetch_one_source(
+                source=source,
+                symbol_by_code=symbol_by_code,
+                quotes_by_code=quotes_by_code,
+                summary=summary,
+                db_path=db_path,
+            )
+        return quotes_by_code
+
+    def _fetch_one_source(
+        self,
+        *,
+        source: BaseSource,
+        symbol_by_code: dict[str, StockWatchlistSymbolConfig],
+        quotes_by_code: dict[str, SignalItem],
+        summary: WatchlistRunSummary,
+        db_path: Path,
+    ) -> None:
+        run_id = start_signal_run(source.name, db_path=db_path)
+        self.emit_log(
+            "source_run_started",
+            message="Source run started",
+            db_path=str(db_path),
+            source_name=source.name,
+            run_id=run_id,
+        )
+        try:
+            fetched_items = source.fetch()
+            stock_items = [
+                item
+                for item in fetched_items
+                if item.item_type == "tw_stock_mover"
+            ]
+            matched = _merge_watched_quotes(
+                stock_items,
+                symbol_by_code=symbol_by_code,
+                quotes_by_code=quotes_by_code,
+            )
+            summary.fetched_quote_count += len(stock_items)
+            summary.watched_quote_count += matched
+            finish_signal_run(
+                run_id,
+                status="completed",
+                fetched_count=len(stock_items),
+                inserted_count=0,
+                updated_count=0,
+                db_path=db_path,
+            )
+            self.emit_log(
+                "source_run_completed",
+                message="Source run completed",
+                db_path=str(db_path),
+                source_name=source.name,
+                run_id=run_id,
+                fetched_count=len(fetched_items),
+                accepted_count=len(stock_items),
+                watched_count=matched,
+            )
+            summary.successful_sources += 1
+        except Exception as exc:
+            finish_signal_run(
+                run_id,
+                status="failed",
+                error=str(exc),
+                db_path=db_path,
+            )
+            summary.failed_sources.append((source.name, str(exc)))
+            self.emit_log(
+                "source_run_failed",
+                message="Source run failed",
+                level=logging.ERROR,
+                exc_info=exc,
+                db_path=str(db_path),
+                source_name=source.name,
+                run_id=run_id,
+                error=str(exc),
+            )
+
+    def _persist_triggered_alerts(
+        self,
+        *,
+        quotes_by_code: dict[str, SignalItem],
+        symbol_by_code: dict[str, StockWatchlistSymbolConfig],
+        watchlist: StockWatchlistTaskConfig,
+        summary: WatchlistRunSummary,
+        db_path: Path,
+    ) -> None:
+        alert_items = _build_triggered_alerts(
+            quotes_by_code=quotes_by_code,
+            symbol_by_code=symbol_by_code,
+            themes=watchlist.themes,
+        )
+        summary.triggered_count = len(alert_items)
+        summary.triggered_alerts = alert_items
+        for alert in alert_items:
+            result = upsert_signal(alert, db_path=db_path)
+            if result.action == "inserted":
+                summary.new_alert_count += 1
+                summary.new_alerts.append(alert)
+            else:
+                summary.duplicate_alert_count += 1
+
+    def _finalize_success(
+        self,
+        *,
+        summary: WatchlistRunSummary,
+        notification: NotificationOutcome,
+        db_path: Path,
+    ) -> None:
+        if summary.successful_sources == 0:
+            failure_summary = "; ".join(
+                f"{source_name}: {message}"
+                for source_name, message in summary.failed_sources
+            )
+            self.emit_log(
+                "task_summary",
+                message="Stock watchlist task summary",
+                db_path=str(db_path),
+                task_status="failed",
+                fetched_count=summary.fetched_quote_count,
+                new_count=summary.new_alert_count,
+                duplicate_count=summary.duplicate_alert_count,
+                notified_count=notification.notified_count,
+                notification_status=notification.status,
+                successful_source_count=summary.successful_sources,
+                failed_source_count=len(summary.failed_sources),
+                triggered_count=summary.triggered_count,
+            )
+            raise ValueError(
+                "All configured stock watchlist sources failed: "
+                f"{failure_summary}"
+            )
+
+        self.emit_log(
+            "task_completed",
+            message="Stock watchlist task completed",
+            db_path=str(db_path),
+            fetched_count=summary.fetched_quote_count,
+            new_count=summary.new_alert_count,
+            duplicate_count=summary.duplicate_alert_count,
+            notified_count=notification.notified_count,
+            notification_status=notification.status,
+            successful_source_count=summary.successful_sources,
+            failed_source_count=len(summary.failed_sources),
+            triggered_count=summary.triggered_count,
+            watched_count=summary.watched_quote_count,
+        )
+        self.end_task_run(
+            db_path=db_path,
+            status="success",
+            fetched_count=summary.fetched_quote_count,
+            new_count=summary.new_alert_count,
+            skipped_count=summary.duplicate_alert_count,
+            notified_count=notification.notified_count,
+        )
+
     def _maybe_send_telegram_digest(
         self,
         *,
-        config,
-        env,
+        config: AppConfig,
+        env: EnvSettings,
         watchlist: StockWatchlistTaskConfig,
         summary: WatchlistRunSummary,
         db_path: Path,
     ) -> NotificationOutcome:
-        # Only notify for newly inserted alerts so same-minute re-runs stay quiet.
+        # Notify only for newly inserted alerts so same-minute re-runs stay quiet.
         digest = _build_telegram_digest(
             alerts=summary.new_alerts,
             themes=watchlist.themes,
@@ -368,6 +417,33 @@ class StockWatchlistTask(BaseTask):
         )
 
 
+def _require_enabled_watchlist(config: AppConfig) -> StockWatchlistTaskConfig:
+    watchlist = config.tasks.stock_watchlist
+    if not watchlist.enabled:
+        raise ValueError("Task 'stock_watchlist' is disabled in config")
+    if not watchlist.symbols:
+        raise ValueError("Task 'stock_watchlist' has no symbols configured")
+    return watchlist
+
+
+def _merge_watched_quotes(
+    stock_items: list[SignalItem],
+    *,
+    symbol_by_code: dict[str, StockWatchlistSymbolConfig],
+    quotes_by_code: dict[str, SignalItem],
+) -> int:
+    matched = 0
+    for item in stock_items:
+        code = _stock_code(item)
+        if code not in symbol_by_code:
+            continue
+        matched += 1
+        existing = quotes_by_code.get(code)
+        if existing is None or item.observed_at > existing.observed_at:
+            quotes_by_code[code] = item
+    return matched
+
+
 def _build_triggered_alerts(
     *,
     quotes_by_code: dict[str, SignalItem],
@@ -390,10 +466,7 @@ def _build_triggered_alerts(
                 themes=_theme_names_for_code(code, themes),
             )
         )
-    alerts.sort(
-        key=lambda item: abs(_change_percent(item)),
-        reverse=True,
-    )
+    alerts.sort(key=lambda item: abs(_change_percent(item)), reverse=True)
     return alerts
 
 
@@ -459,7 +532,7 @@ def _build_console_summary(
     for source_name, message in summary.failed_sources:
         lines.append(f"source failed: {source_name}: {message}")
     for alert in summary.new_alerts:
-        lines.append(f"- {_render_alert_line(alert)}")
+        lines.append(f"- {_render_digest_alert_line(alert)}")
     return lines
 
 
@@ -481,7 +554,6 @@ def _build_telegram_digest(
         lines.append("")
         lines.append("主題觀察")
         lines.extend(theme_lines)
-
     return "\n".join(lines)
 
 
@@ -503,14 +575,9 @@ def _render_theme_section(
         hit_count = sum(
             1 for code in theme_config.symbols if code in triggered_codes
         )
-        if hit_count <= 0:
-            continue
-        lines.append(f"{theme_name}: {hit_count} 檔觸發異動")
+        if hit_count > 0:
+            lines.append(f"{theme_name}: {hit_count} 檔觸發異動")
     return lines
-
-
-def _render_alert_line(alert: SignalItem) -> str:
-    return _render_digest_alert_line(alert)
 
 
 def _render_digest_alert_line(alert: SignalItem) -> str:
@@ -518,7 +585,9 @@ def _render_digest_alert_line(alert: SignalItem) -> str:
     company = _company_name(alert)
     change_percent = _change_percent(alert)
     threshold = alert.metadata.get("alert_change_percent_abs")
-    prefix = " ".join(part for part in (code, company) if part).strip() or alert.title
+    prefix = " ".join(part for part in (code, company) if part).strip()
+    if not prefix:
+        prefix = alert.title
     if isinstance(threshold, int | float):
         return (
             f"{prefix} {change_percent:+.2f}% — "

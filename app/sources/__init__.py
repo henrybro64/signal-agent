@@ -110,7 +110,7 @@ def build_tw_stock_mover_sources(config: AppConfig) -> list[BaseSource]:
 
     return build_tw_stock_mover_sources_for_names(
         config,
-        TW_STOCK_MOVER_SOURCE_FACTORIES.keys(),
+        list(TW_STOCK_MOVER_SOURCE_FACTORIES),
     )
 
 

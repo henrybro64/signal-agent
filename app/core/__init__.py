@@ -50,7 +50,7 @@ from .secrets import (
     validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
-from .time_utils import is_tw_market_open, tw_market_skip_reason
+from .time_utils import is_tw_market_open, tw_market_skip_label, tw_market_skip_reason
 from .tw_market_calendar import (
     TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
     TW_MARKET_SKIP_CLOSED,
@@ -110,6 +110,7 @@ __all__ = [
     "start_signal_run",
     "summarize_run_health",
     "tw_market_calendar_years",
+    "tw_market_skip_label",
     "tw_market_skip_reason",
     "update_signal_evaluation",
     "update_signal_status",

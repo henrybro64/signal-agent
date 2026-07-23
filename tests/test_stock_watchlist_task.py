@@ -378,8 +378,9 @@ def test_stock_watchlist_task_raises_when_all_sources_fail(
         lambda _config, _names: [FailingTwseSource()],
     )
 
+    task = StockWatchlistTask(str(config_path))
     with pytest.raises(ValueError, match="All configured stock watchlist sources"):
-        StockWatchlistTask(str(config_path)).run()
+        task.run()
 
     assert _task_run_statuses(db_path) == ["failed"]
 

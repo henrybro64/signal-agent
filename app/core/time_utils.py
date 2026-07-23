@@ -56,6 +56,16 @@ def tw_market_skip_reason(now: datetime | None = None) -> str | None:
     return None
 
 
+def tw_market_skip_label(skip_reason: str) -> str:
+    """Return a human-readable label for a Taiwan market skip reason."""
+
+    if skip_reason == TW_MARKET_SKIP_HOLIDAY:
+        return "Taiwan market holiday"
+    if skip_reason == TW_MARKET_SKIP_CALENDAR_UNAVAILABLE:
+        return "Taiwan market calendar unavailable"
+    return "Taiwan market is closed"
+
+
 def is_tw_market_open(now: datetime | None = None) -> bool:
     """Return whether the Taiwan market is open at the given time.
 

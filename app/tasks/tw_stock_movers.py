@@ -16,11 +16,10 @@ from app.config import (
     validate_telegram_notifier_secrets,
 )
 from app.core import (
-    TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
-    TW_MARKET_SKIP_HOLIDAY,
     SignalItem,
     finish_signal_run,
     start_signal_run,
+    tw_market_skip_label,
     tw_market_skip_reason,
     upsert_signal,
 )
@@ -105,12 +104,7 @@ class TwStockMoversTask(BaseTask):
             env = load_env_settings()
             skip_reason = tw_market_skip_reason()
             if skip_reason is not None:
-                if skip_reason == TW_MARKET_SKIP_HOLIDAY:
-                    skip_label = "Taiwan market holiday"
-                elif skip_reason == TW_MARKET_SKIP_CALENDAR_UNAVAILABLE:
-                    skip_label = "Taiwan market calendar unavailable"
-                else:
-                    skip_label = "Taiwan market is closed"
+                skip_label = tw_market_skip_label(skip_reason)
                 self.emit_log(
                     "task_skipped",
                     message="Taiwan stock movers task skipped",
