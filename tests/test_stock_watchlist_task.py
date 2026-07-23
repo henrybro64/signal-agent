@@ -170,7 +170,11 @@ def test_stock_watchlist_task_skips_when_market_is_closed(
 ) -> None:
     config_path = _write_config(tmp_path)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(watchlist_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        watchlist_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         watchlist_module,
         "tw_market_skip_reason",
@@ -198,7 +202,11 @@ def test_stock_watchlist_task_triggers_threshold_alerts_and_sends_digest(
         def send_message(self, text: str) -> None:
             sent.append(text)
 
-    monkeypatch.setattr(watchlist_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        watchlist_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
     monkeypatch.setattr(
         watchlist_module,
@@ -273,7 +281,11 @@ def test_stock_watchlist_task_skips_telegram_when_no_alerts(
         def send_message(self, text: str) -> None:
             sent.append(text)
 
-    monkeypatch.setattr(watchlist_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        watchlist_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
     monkeypatch.setattr(
         watchlist_module,
@@ -334,7 +346,11 @@ def test_stock_watchlist_task_dedupes_same_minute_bucket(
             ]
         )
     ]
-    monkeypatch.setattr(watchlist_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        watchlist_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
     monkeypatch.setattr(
         watchlist_module,
@@ -370,7 +386,11 @@ def test_stock_watchlist_task_raises_when_all_sources_fail(
 ) -> None:
     config_path = _write_config(tmp_path)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(watchlist_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        watchlist_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
     monkeypatch.setattr(
         watchlist_module,

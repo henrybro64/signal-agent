@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -32,7 +31,7 @@ from app.notifiers import build_telegram_notifier
 from app.sources import BaseSource, build_tw_stock_mover_sources_for_names
 
 from .base import BaseTask
-from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
+from .market_task_support import NotificationOutcome, resolve_task_db_path
 
 _ALERT_SOURCE: Final[str] = "stock_watchlist"
 _ALERT_ITEM_TYPE: Final[str] = "stock_watchlist_alert"
@@ -54,21 +53,13 @@ class WatchlistRunSummary:
     failed_sources: list[tuple[str, str]] = field(default_factory=list)
 
 
-@dataclass(slots=True, frozen=True)
-class NotificationOutcome:
-    """Summarize the Telegram notification phase for structured logs."""
-
-    status: str
-    notified_count: int = 0
-
-
 class StockWatchlistTask(BaseTask):
     """Fetch quotes and alert when watchlist symbols breach thresholds."""
 
     name: ClassVar[str] = "stock_watchlist"
 
     def run(self) -> None:
-        db_path = _resolve_db_path()
+        db_path = resolve_task_db_path()
         summary = WatchlistRunSummary()
         notification = NotificationOutcome(status="not_applicable")
 
@@ -634,10 +625,3 @@ def _change_percent(item: SignalItem) -> float:
     if isinstance(change_percent, int | float):
         return float(change_percent)
     return 0.0
-
-
-def _resolve_db_path() -> Path:
-    raw_path = os.getenv(DB_PATH_ENV_VAR)
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return DEFAULT_DB_PATH

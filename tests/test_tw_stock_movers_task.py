@@ -146,7 +146,11 @@ def test_tw_stock_movers_task_skips_when_market_is_closed(
 ) -> None:
     config_path = _write_config(tmp_path, telegram_enabled=False)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -169,7 +173,11 @@ def test_tw_stock_movers_task_skips_on_taiwan_market_holiday(
 ) -> None:
     config_path = _write_config(tmp_path, telegram_enabled=False)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -192,7 +200,11 @@ def test_tw_stock_movers_task_skips_when_calendar_year_unavailable(
 ) -> None:
     config_path = _write_config(tmp_path, telegram_enabled=False)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -215,7 +227,11 @@ def test_tw_stock_movers_task_filters_and_persists_stock_items(
 ) -> None:
     config_path = _write_config(tmp_path, telegram_enabled=False)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -263,7 +279,11 @@ def test_tw_stock_movers_task_sends_digest_with_top_n_limit(
         def send_message(self, message: str) -> None:
             sent_messages.append(message)
 
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -303,7 +323,11 @@ def test_tw_stock_movers_task_raises_when_all_sources_fail(
 ) -> None:
     config_path = _write_config(tmp_path, telegram_enabled=False)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -353,7 +377,11 @@ def test_tw_stock_movers_task_sends_failure_digest_when_all_sources_fail(
         def send_message(self, message: str) -> None:
             sent_messages.append(message)
 
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -465,7 +493,11 @@ def test_tw_stock_movers_task_reports_both_markets_separately(
         def send_message(self, message: str) -> None:
             sent_messages.append(message)
 
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -506,7 +538,11 @@ def test_tw_stock_movers_task_continues_when_one_market_source_fails(
 ) -> None:
     config_path = _write_config(tmp_path, telegram_enabled=False)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -534,7 +570,11 @@ def test_tw_stock_movers_task_persists_multiple_snapshot_rows(
 ) -> None:
     config_path = _write_config(tmp_path, telegram_enabled=False)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -563,7 +603,11 @@ def test_tw_stock_movers_task_sends_partial_failure_warning_in_digest(
         def send_message(self, message: str) -> None:
             sent_messages.append(message)
 
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",
@@ -633,7 +677,11 @@ def test_tw_stock_movers_task_does_not_require_openai_key(
         llm_enabled=True,
     )
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_stock_movers_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.setattr(
+        tw_stock_movers_task_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
     monkeypatch.setattr(
         tw_stock_movers_task_module,
         "tw_market_skip_reason",

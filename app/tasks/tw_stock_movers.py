@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +26,7 @@ from app.notifiers import build_telegram_notifier
 from app.sources import build_tw_stock_mover_sources
 
 from .base import BaseTask
-from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
+from .market_task_support import NotificationOutcome, resolve_task_db_path
 
 _MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     ("twse", "TWSE listed (上市)"),
@@ -70,21 +69,13 @@ class TwStockMarketReport:
         return len(self.gainers) + len(self.losers)
 
 
-@dataclass(slots=True, frozen=True)
-class NotificationOutcome:
-    """Summarize the Telegram notification phase for structured logs."""
-
-    status: str
-    notified_count: int = 0
-
-
 class TwStockMoversTask(BaseTask):
     """Fetch, persist, and optionally report Taiwan stock movers."""
 
     name: ClassVar[str] = "tw_stock_movers"
 
     def run(self) -> None:
-        db_path = _resolve_db_path()
+        db_path = resolve_task_db_path()
         summary = TwStockMoversSummary()
         notification = NotificationOutcome(status="not_applicable")
         market_reports: list[TwStockMarketReport] = []
@@ -658,10 +649,3 @@ def _change_percent(item: SignalItem) -> float:
     if isinstance(change_percent, int | float):
         return float(change_percent)
     return 0.0
-
-
-def _resolve_db_path() -> Path:
-    raw_path = os.getenv(DB_PATH_ENV_VAR)
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return DEFAULT_DB_PATH
