@@ -11,7 +11,6 @@ def test_k3s_required_manifest_files_exist() -> None:
         "configmap.yaml",
         "cronjob-job-search.yaml",
         "cronjob-tw-stock-movers.yaml",
-        "cronjob-stock-watchlist.yaml",
         "namespace.yaml",
         "pvc.yaml",
         "secret.example.yaml",
@@ -127,6 +126,7 @@ def test_job_search_cronjob_manifest_runs_expected_cli_command() -> None:
 def test_tw_stock_movers_cronjob_manifest_runs_expected_cli_command() -> None:
     manifest = _load_yaml("cronjob-tw-stock-movers.yaml")
     container = _cronjob_container(manifest)
+    command = container["command"]
 
     assert manifest["kind"] == "CronJob"
     assert manifest["metadata"]["name"] == "tw-stock-movers-every-10-min"
@@ -134,42 +134,10 @@ def test_tw_stock_movers_cronjob_manifest_runs_expected_cli_command() -> None:
     assert manifest["spec"]["timeZone"] == "Asia/Taipei"
     assert manifest["spec"]["schedule"] == "*/10 * * * 1-5"
     assert container["image"] == "signal-agent:local"
-    assert container["command"] == [
-        "python",
-        "main.py",
-        "--task",
-        "tw_stock_movers",
-        "--config",
-        "/app/config.yaml",
-    ]
-    assert container["envFrom"] == [
-        {
-            "secretRef": {
-                "name": "signal-agent-secrets",
-            }
-        }
-    ]
-    assert _cronjob_volume_names(manifest) == ["config", "data"]
-
-
-def test_stock_watchlist_cronjob_manifest_runs_expected_cli_command() -> None:
-    manifest = _load_yaml("cronjob-stock-watchlist.yaml")
-    container = _cronjob_container(manifest)
-
-    assert manifest["kind"] == "CronJob"
-    assert manifest["metadata"]["name"] == "stock-watchlist-every-10-min"
-    assert manifest["metadata"]["namespace"] == "signal-agent"
-    assert manifest["spec"]["timeZone"] == "Asia/Taipei"
-    assert manifest["spec"]["schedule"] == "*/10 * * * 1-5"
-    assert container["image"] == "signal-agent:local"
-    assert container["command"] == [
-        "python",
-        "main.py",
-        "--task",
-        "stock_watchlist",
-        "--config",
-        "/app/config.yaml",
-    ]
+    assert command[:2] == ["/bin/sh", "-lc"]
+    script = command[2]
+    assert "--task tw_stock_movers" in script
+    assert "--task stock_watchlist" in script
     assert container["envFrom"] == [
         {
             "secretRef": {
@@ -187,17 +155,12 @@ def test_cronjob_manifest_comments_explain_schedule_assumptions() -> None:
     tw_stock_text = (K3S_DIR / "cronjob-tw-stock-movers.yaml").read_text(
         encoding="utf-8"
     )
-    watchlist_text = (K3S_DIR / "cronjob-stock-watchlist.yaml").read_text(
-        encoding="utf-8"
-    )
 
     assert "Asia/Taipei" in job_search_text
     assert "Asia/Taipei" in tw_stock_text
-    assert "Asia/Taipei" in watchlist_text
     assert "Taiwan market hours" in tw_stock_text
-    assert "Taiwan market hours" in watchlist_text
+    assert "stock_watchlist" in tw_stock_text
     assert "off-hours runs no-op" in tw_stock_text
-    assert "off-hours runs no-op" in watchlist_text
     assert ":05 offset" in job_search_text
 
 

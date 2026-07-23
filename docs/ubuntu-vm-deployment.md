@@ -154,7 +154,9 @@ Intended schedules (Asia/Taipei):
 `tw_stock_movers` and `stock_watchlist` still apply their own Taiwan
 market-hours guard, so off-hours weekday runs exit cleanly without sending
 digests. `stock_watchlist` stays disabled in the default config until you
-configure symbols and set `tasks.stock_watchlist.enabled: true`.
+configure symbols and set `tasks.stock_watchlist.enabled: true`. Prefer the
+cron wrappers for `stock_watchlist`; the optional systemd installer only
+enables `job_search` and `tw_stock_movers` timers.
 
 The wrappers use `flock` so a slow `job_search` (for example LinkedIn IMAP)
 does not stack concurrent Compose runs on the shared SQLite file.

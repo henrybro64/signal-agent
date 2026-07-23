@@ -108,12 +108,10 @@ k3s deployment behavior:
   `Asia/Taipei`.
 - `cronjob-tw-stock-movers.yaml` runs `tw_stock_movers` every 10 minutes on
   weekdays in `Asia/Taipei`, while the task still guards Taiwan market hours
-  internally.
-- `cronjob-stock-watchlist.yaml` runs `stock_watchlist` on the same weekday
-  10-minute cadence; enable `tasks.stock_watchlist` and configure symbols
-  before expecting alerts.
+  internally. The same CronJob also runs `stock_watchlist` (no-op while that
+  task remains disabled in config).
 - Job search is offset to `:05` so it does not start at the same minute as the
-  stock CronJobs on the shared SQLite volume.
+  stock CronJob on the shared SQLite volume.
 - `cronjob-job-search.yaml` sets `activeDeadlineSeconds: 1800` so a hung source
   (for example `linkedin_email` IMAP) cannot block later schedules forever
   under `concurrencyPolicy: Forbid`.

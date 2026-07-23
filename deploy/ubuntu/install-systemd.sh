@@ -50,5 +50,4 @@ done
 systemctl daemon-reload
 systemctl enable --now signal-agent-job-search.timer
 systemctl enable --now signal-agent-tw-stock-movers.timer
-systemctl enable --now signal-agent-stock-watchlist.timer
 systemctl list-timers 'signal-agent-*' --no-pager

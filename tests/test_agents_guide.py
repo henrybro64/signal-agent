@@ -96,7 +96,6 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "docs/ubuntu-vm-deployment.md",
         "deploy/ubuntu/crontab.example",
         "deploy/k3s/cronjob-job-search.yaml",
-        "deploy/k3s/cronjob-stock-watchlist.yaml",
         ".github/workflows/ci.yml",
     ]
     missing = [path for path in required_paths if not (ROOT / path).exists()]
