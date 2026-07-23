@@ -59,22 +59,15 @@ CREATE TABLE signal_runs (
 """
 
 
-def _sql_body(text: str) -> str:
-    """Strip comment-only header lines for schema equality checks."""
-
-    lines = [
-        line.rstrip()
-        for line in text.splitlines()
-        if line.strip() and not line.lstrip().startswith("--")
-    ]
-    return "\n".join(lines).strip() + "\n"
-
-
-def test_schema_sql_matches_initial_migration() -> None:
-    assert SCHEMA_PATH.is_file()
+def test_schema_sql_points_at_migrations() -> None:
+    text = SCHEMA_PATH.read_text(encoding="utf-8")
+    assert "sql/migrations/" in text
+    assert "001_initial.sql" in text
+    assert "PRAGMA user_version" in text
+    assert "CREATE TABLE" not in text
     assert INITIAL_MIGRATION_PATH.is_file()
-    assert _sql_body(SCHEMA_PATH.read_text(encoding="utf-8")) == _sql_body(
-        INITIAL_MIGRATION_PATH.read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS signals" in INITIAL_MIGRATION_PATH.read_text(
+        encoding="utf-8"
     )
 
 

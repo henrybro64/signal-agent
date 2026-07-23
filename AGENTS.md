@@ -82,7 +82,7 @@ signal-agent/
 │   └── notifiers/
 │       └── telegram.py
 ├── sql/
-│   ├── schema.sql          # current schema docs (mirrors migration 001)
+│   ├── schema.sql          # docs pointer to migrations (no duplicated DDL)
 │   └── migrations/         # numbered SQLite migrations (NNN_name.sql)
 ├── docs/
 │   └── ubuntu-vm-deployment.md  # Ubuntu VM + Compose + cron/systemd runbook

@@ -82,3 +82,4 @@ def test_sonar_project_properties_excludes_deploy_from_cpd() -> None:
     assert "sonar.cpd.exclusions=" in text
     assert "**/tests/**" in text
     assert "**/deploy/**" in text
+    assert "**/sql/**" in text
