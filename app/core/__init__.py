@@ -23,6 +23,7 @@ from .db import (
     init_db,
     list_pending_digest_jobs,
     mark_signals_digest_reported,
+    read_schema_version,
     start_signal_run,
     start_task_run,
     update_signal_evaluation,
@@ -39,6 +40,7 @@ from .health import (
     resolve_db_path,
     summarize_run_health,
 )
+from .migrations import MigrationError
 from .models import SignalItem
 from .secrets import (
     EnvSettings,
@@ -70,6 +72,7 @@ __all__ = [
     "EnvSettings",
     "HealthError",
     "HealthSummary",
+    "MigrationError",
     "PendingDigestJob",
     "SecretError",
     "SignalItem",
@@ -106,6 +109,7 @@ __all__ = [
     "load_tw_market_holiday_dates",
     "mark_signals_digest_reported",
     "load_env_settings",
+    "read_schema_version",
     "require_readable_db",
     "resolve_db_path",
     "start_task_run",

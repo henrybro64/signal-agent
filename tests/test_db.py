@@ -34,8 +34,10 @@ def test_init_db_creates_required_tables(tmp_path: Path) -> None:
             ORDER BY name
             """
         ).fetchall()
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
 
     assert {row[0] for row in rows} >= {"signal_runs", "signals", "task_runs"}
+    assert version >= 1
 
 
 def test_init_db_matches_schema_contract(tmp_path: Path) -> None:

@@ -1,3 +1,8 @@
+-- Canonical current schema documentation for signal-agent.
+-- Runtime schema evolution is driven by sql/migrations/ via PRAGMA user_version.
+-- Keep this file identical to sql/migrations/001_initial.sql until a later
+-- migration lands; contract tests enforce that pairing for version 1.
+
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
