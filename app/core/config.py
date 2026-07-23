@@ -62,9 +62,31 @@ class TwStockMoversTaskConfig:
 
 
 @dataclass(slots=True)
+class StockWatchlistSymbolConfig:
+    code: str
+    name: str = ""
+    alert_change_percent_abs: float = 3.0
+
+
+@dataclass(slots=True)
+class StockWatchlistThemeConfig:
+    symbols: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class StockWatchlistTaskConfig:
+    enabled: bool
+    timezone: str
+    sources: list[str] = field(default_factory=list)
+    symbols: list[StockWatchlistSymbolConfig] = field(default_factory=list)
+    themes: dict[str, StockWatchlistThemeConfig] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class TasksConfig:
     job_search: JobSearchTaskConfig
     tw_stock_movers: TwStockMoversTaskConfig
+    stock_watchlist: StockWatchlistTaskConfig
 
 
 @dataclass(slots=True)
@@ -156,6 +178,12 @@ class AppConfig:
             parent_path="tasks",
             source_name=source_name,
         )
+        stock_watchlist = _optional_mapping(
+            tasks,
+            "stock_watchlist",
+            parent_path="tasks",
+            source_name=source_name,
+        )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
         telegram = _require_mapping(
             notifiers,
@@ -215,6 +243,10 @@ class AppConfig:
                         parent_path="tasks.tw_stock_movers",
                         source_name=source_name,
                     ),
+                ),
+                stock_watchlist=_parse_stock_watchlist_task_config(
+                    stock_watchlist,
+                    source_name=source_name,
                 ),
             ),
             notifiers=NotifiersConfig(
@@ -288,6 +320,227 @@ class AppConfig:
             ),
             sources=_parse_sources_config(sources, source_name=source_name),
         )
+
+
+_DEFAULT_STOCK_WATCHLIST_SOURCES: tuple[str, ...] = ("twse", "tpex")
+_SUPPORTED_STOCK_WATCHLIST_SOURCES = frozenset(_DEFAULT_STOCK_WATCHLIST_SOURCES)
+
+
+def _parse_stock_watchlist_task_config(
+    data: dict[str, Any],
+    *,
+    source_name: str,
+) -> StockWatchlistTaskConfig:
+    """Parse ``tasks.stock_watchlist`` (optional; defaults keep fixtures working)."""
+
+    parent_path = "tasks.stock_watchlist"
+    if not data:
+        return StockWatchlistTaskConfig(
+            enabled=False,
+            timezone="Asia/Taipei",
+            sources=list(_DEFAULT_STOCK_WATCHLIST_SOURCES),
+            symbols=[],
+            themes={},
+        )
+
+    enabled = _require_bool(
+        data,
+        "enabled",
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    # Disabled optional task: timezone/sources/symbols are optional.
+    if enabled:
+        timezone = _require_str(
+            data,
+            "timezone",
+            parent_path=parent_path,
+            source_name=source_name,
+        )
+    else:
+        timezone = _optional_str(
+            data,
+            "timezone",
+            default="Asia/Taipei",
+            parent_path=parent_path,
+            source_name=source_name,
+        )
+
+    sources = _parse_stock_watchlist_sources(
+        data,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    symbols = _parse_stock_watchlist_symbols(
+        data.get("symbols"),
+        parent_path=f"{parent_path}.symbols",
+        source_name=source_name,
+    )
+    themes = _parse_stock_watchlist_themes(
+        data.get("themes"),
+        parent_path=f"{parent_path}.themes",
+        source_name=source_name,
+    )
+    return StockWatchlistTaskConfig(
+        enabled=enabled,
+        timezone=timezone,
+        sources=sources,
+        symbols=symbols,
+        themes=themes,
+    )
+
+
+def _parse_stock_watchlist_sources(
+    data: dict[str, Any],
+    *,
+    parent_path: str,
+    source_name: str,
+) -> list[str]:
+    if "sources" in data:
+        sources = _require_str_list(
+            data,
+            "sources",
+            parent_path=parent_path,
+            source_name=source_name,
+        )
+        if not sources:
+            raise ConfigError(
+                f"Config value '{parent_path}.sources' must not be empty "
+                f"in {source_name}"
+            )
+    else:
+        sources = list(_DEFAULT_STOCK_WATCHLIST_SOURCES)
+
+    unsupported = sorted(
+        {
+            name
+            for name in sources
+            if name not in _SUPPORTED_STOCK_WATCHLIST_SOURCES
+        }
+    )
+    if unsupported:
+        supported = ", ".join(sorted(_SUPPORTED_STOCK_WATCHLIST_SOURCES))
+        raise ConfigError(
+            f"Unsupported stock_watchlist source(s) {unsupported} in "
+            f"{source_name}. Supported sources: {supported}"
+        )
+    return sources
+
+
+def _parse_stock_watchlist_symbols(
+    raw_symbols: Any,
+    *,
+    parent_path: str,
+    source_name: str,
+) -> list[StockWatchlistSymbolConfig]:
+    if raw_symbols is None:
+        return []
+    if not isinstance(raw_symbols, list):
+        raise ConfigError(
+            f"Config value '{parent_path}' must be a list in {source_name}"
+        )
+
+    symbols: list[StockWatchlistSymbolConfig] = []
+    seen_codes: set[str] = set()
+    for index, entry in enumerate(raw_symbols):
+        entry_path = f"{parent_path}[{index}]"
+        if not isinstance(entry, dict):
+            raise ConfigError(
+                f"Config value '{entry_path}' must be a mapping in {source_name}"
+            )
+        code = _require_str(
+            entry,
+            "code",
+            parent_path=entry_path,
+            source_name=source_name,
+        ).strip()
+        if not code:
+            raise ConfigError(
+                f"Config value '{entry_path}.code' must not be blank "
+                f"in {source_name}"
+            )
+        if code in seen_codes:
+            raise ConfigError(
+                f"Duplicate stock_watchlist symbol code '{code}' in "
+                f"{source_name}"
+            )
+        seen_codes.add(code)
+
+        name = ""
+        if "name" in entry:
+            name = _require_str(
+                entry,
+                "name",
+                parent_path=entry_path,
+                source_name=source_name,
+            ).strip()
+
+        threshold = _require_float(
+            entry,
+            "alert_change_percent_abs",
+            parent_path=entry_path,
+            source_name=source_name,
+        )
+        _require_positive_number(
+            threshold,
+            config_path=f"{entry_path}.alert_change_percent_abs",
+            source_name=source_name,
+        )
+        symbols.append(
+            StockWatchlistSymbolConfig(
+                code=code,
+                name=name,
+                alert_change_percent_abs=threshold,
+            )
+        )
+    return symbols
+
+
+def _parse_stock_watchlist_themes(
+    raw_themes: Any,
+    *,
+    parent_path: str,
+    source_name: str,
+) -> dict[str, StockWatchlistThemeConfig]:
+    if raw_themes is None:
+        return {}
+    if not isinstance(raw_themes, dict):
+        raise ConfigError(
+            f"Config value '{parent_path}' must be a mapping in {source_name}"
+        )
+
+    themes: dict[str, StockWatchlistThemeConfig] = {}
+    for theme_name, theme_value in raw_themes.items():
+        if not isinstance(theme_name, str) or not theme_name.strip():
+            raise ConfigError(
+                f"Theme names under '{parent_path}' must be non-empty "
+                f"strings in {source_name}"
+            )
+        theme_path = f"{parent_path}.{theme_name.strip()}"
+        if not isinstance(theme_value, dict):
+            raise ConfigError(
+                f"Config value '{theme_path}' must be a mapping in {source_name}"
+            )
+        theme_symbols = _require_str_list(
+            theme_value,
+            "symbols",
+            parent_path=theme_path,
+            source_name=source_name,
+        )
+        if not theme_symbols:
+            raise ConfigError(
+                f"Config value '{theme_path}.symbols' must not be empty "
+                f"in {source_name}"
+            )
+        themes[theme_name.strip()] = StockWatchlistThemeConfig(
+            symbols=[code.strip() for code in theme_symbols if code.strip()]
+        )
+        if not themes[theme_name.strip()].symbols:
+            raise ConfigError(
+                f"Config value '{theme_path}.symbols' must not be empty "
+                f"in {source_name}"
+            )
+    return themes
 
 
 def _parse_scoring_llm_min_rule_score(

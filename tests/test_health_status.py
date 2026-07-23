@@ -83,6 +83,7 @@ def test_summarize_run_health_empty_db_is_ok(
     assert f"DB: {db_path}" in report
     assert "Latest job_search run: none" in report
     assert "Latest tw_stock_movers run: none" in report
+    assert "Latest stock_watchlist run: none" in report
     assert "Recent failed sources: 0 in last 24h" in report
     assert "Telegram: configured" in report
     assert "Overall: OK" in report

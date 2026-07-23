@@ -48,6 +48,7 @@ def test_main_list_tasks_command() -> None:
         "dummy",
         "fetch",
         "job_search",
+        "stock_watchlist",
         "tw_stock_movers",
     ]
 
@@ -59,6 +60,7 @@ def test_main_dummy_task_command() -> None:
     assert "dummy task executed using config.yaml" in result.stdout
     assert "timezone=Asia/Taipei" in result.stdout
     assert "job_search_enabled=True" in result.stdout
+    assert "stock_watchlist_enabled=False" in result.stdout
     assert "telegram_ready=False" in result.stdout
 
 
@@ -241,7 +243,10 @@ def test_main_invalid_task_returns_error() -> None:
 
     assert result.returncode == 1
     assert "Unknown task: missing-task" in result.stderr
-    assert "Available tasks: dummy, fetch, job_search, tw_stock_movers" in result.stderr
+    assert (
+        "Available tasks: dummy, fetch, job_search, "
+        "stock_watchlist, tw_stock_movers"
+    ) in result.stderr
 
 
 def test_main_tw_stock_movers_disabled_task_returns_error(

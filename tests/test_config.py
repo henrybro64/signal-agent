@@ -26,6 +26,18 @@ def test_load_config_reads_sample_file() -> None:
     assert config.tasks.tw_stock_movers.enabled is True
     assert config.tasks.tw_stock_movers.top_n == 20
     assert config.tasks.tw_stock_movers.timezone == "Asia/Taipei"
+    assert config.tasks.stock_watchlist.enabled is False
+    assert config.tasks.stock_watchlist.timezone == "Asia/Taipei"
+    assert config.tasks.stock_watchlist.sources == ["twse", "tpex"]
+    assert [symbol.code for symbol in config.tasks.stock_watchlist.symbols] == [
+        "2330",
+        "3081",
+    ]
+    assert config.tasks.stock_watchlist.symbols[0].alert_change_percent_abs == 2.0
+    assert set(config.tasks.stock_watchlist.themes) == {
+        "AI_infrastructure",
+        "CPO_optical",
+    }
     assert config.notifiers.telegram.enabled is True
     assert config.notifiers.telegram.failure_alerts_enabled is True
     assert config.scoring.freshness_weight == 0.6
@@ -454,6 +466,127 @@ def test_app_config_from_dict_rejects_invalid_sources_settings(
     match: str,
 ) -> None:
     payload = {**_base_config_dict(), "sources": sources}
+    with pytest.raises(ConfigError, match=match):
+        AppConfig.from_dict(payload)
+
+
+def test_app_config_from_dict_defaults_stock_watchlist_when_omitted() -> None:
+    config = AppConfig.from_dict(_base_config_dict())
+
+    assert config.tasks.stock_watchlist.enabled is False
+    assert config.tasks.stock_watchlist.timezone == "Asia/Taipei"
+    assert config.tasks.stock_watchlist.sources == ["twse", "tpex"]
+    assert config.tasks.stock_watchlist.symbols == []
+    assert config.tasks.stock_watchlist.themes == {}
+
+
+def test_app_config_from_dict_accepts_disabled_stock_watchlist_without_fields() -> (
+    None
+):
+    payload = _base_config_dict()
+    tasks = payload["tasks"]
+    assert isinstance(tasks, dict)
+    tasks["stock_watchlist"] = {"enabled": False}
+
+    config = AppConfig.from_dict(payload)
+
+    assert config.tasks.stock_watchlist.enabled is False
+    assert config.tasks.stock_watchlist.timezone == "Asia/Taipei"
+    assert config.tasks.stock_watchlist.sources == ["twse", "tpex"]
+    assert config.tasks.stock_watchlist.symbols == []
+    assert config.tasks.stock_watchlist.themes == {}
+
+
+def test_app_config_from_dict_reads_stock_watchlist() -> None:
+    payload = _base_config_dict()
+    tasks = payload["tasks"]
+    assert isinstance(tasks, dict)
+    tasks["stock_watchlist"] = {
+        "enabled": True,
+        "timezone": "Asia/Taipei",
+        "sources": ["twse"],
+        "symbols": [
+            {
+                "code": "2330",
+                "name": "台積電",
+                "alert_change_percent_abs": 2.5,
+            }
+        ],
+        "themes": {"AI_infrastructure": {"symbols": ["2330", "2382"]}},
+    }
+
+    config = AppConfig.from_dict(payload)
+
+    watchlist = config.tasks.stock_watchlist
+    assert watchlist.enabled is True
+    assert watchlist.sources == ["twse"]
+    assert len(watchlist.symbols) == 1
+    assert watchlist.symbols[0].code == "2330"
+    assert watchlist.symbols[0].name == "台積電"
+    assert_close(watchlist.symbols[0].alert_change_percent_abs, 2.5)
+    assert watchlist.themes["AI_infrastructure"].symbols == ["2330", "2382"]
+
+
+@pytest.mark.parametrize(
+    ("watchlist", "match"),
+    [
+        (
+            {
+                "enabled": True,
+                "timezone": "Asia/Taipei",
+                "symbols": [
+                    {
+                        "code": "2330",
+                        "alert_change_percent_abs": 0,
+                    }
+                ],
+            },
+            "alert_change_percent_abs",
+        ),
+        (
+            {
+                "enabled": True,
+                "timezone": "Asia/Taipei",
+                "symbols": [
+                    {
+                        "code": "2330",
+                        "alert_change_percent_abs": 2.0,
+                    },
+                    {
+                        "code": "2330",
+                        "alert_change_percent_abs": 3.0,
+                    },
+                ],
+            },
+            "Duplicate stock_watchlist symbol code",
+        ),
+        (
+            {
+                "enabled": True,
+                "timezone": "Asia/Taipei",
+                "sources": ["yahoo"],
+                "symbols": [],
+            },
+            "Unsupported stock_watchlist source",
+        ),
+        (
+            {
+                "enabled": True,
+                "timezone": "Asia/Taipei",
+                "themes": {"AI": {"symbols": []}},
+            },
+            "themes.AI.symbols",
+        ),
+    ],
+)
+def test_app_config_from_dict_rejects_invalid_stock_watchlist(
+    watchlist: dict[str, object],
+    match: str,
+) -> None:
+    payload = _base_config_dict()
+    tasks = payload["tasks"]
+    assert isinstance(tasks, dict)
+    tasks["stock_watchlist"] = watchlist
     with pytest.raises(ConfigError, match=match):
         AppConfig.from_dict(payload)
 

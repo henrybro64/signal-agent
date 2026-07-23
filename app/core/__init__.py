@@ -19,6 +19,7 @@ from .db import (
     get_recent_signal_runs,
     get_signal_evaluation,
     get_signal_evaluation_state,
+    get_signal_status,
     init_db,
     list_pending_digest_jobs,
     mark_signals_digest_reported,
@@ -50,7 +51,7 @@ from .secrets import (
     validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
-from .time_utils import is_tw_market_open, tw_market_skip_reason
+from .time_utils import is_tw_market_open, tw_market_skip_label, tw_market_skip_reason
 from .tw_market_calendar import (
     TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
     TW_MARKET_SKIP_CLOSED,
@@ -91,6 +92,7 @@ __all__ = [
     "get_recent_signal_runs",
     "get_signal_evaluation",
     "get_signal_evaluation_state",
+    "get_signal_status",
     "has_linkedin_email_source_config",
     "has_openai_api_key",
     "has_telegram_credentials",
@@ -110,6 +112,7 @@ __all__ = [
     "start_signal_run",
     "summarize_run_health",
     "tw_market_calendar_years",
+    "tw_market_skip_label",
     "tw_market_skip_reason",
     "update_signal_evaluation",
     "update_signal_status",

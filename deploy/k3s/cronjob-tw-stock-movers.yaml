@@ -8,8 +8,9 @@ metadata:
     app.kubernetes.io/component: tw-stock-movers
 spec:
   timeZone: Asia/Taipei
-  # Run every 10 minutes on weekdays. The task still checks Taiwan market hours
-  # internally, so off-hours runs no-op.
+  # Run every 10 minutes on weekdays. Each task still checks Taiwan market hours
+  # internally, so off-hours runs no-op. stock_watchlist also stays quiet while
+  # tasks.stock_watchlist.enabled is false in config.
   schedule: "*/10 * * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
@@ -29,12 +30,14 @@ spec:
               image: signal-agent:local
               imagePullPolicy: IfNotPresent
               command:
-                - python
-                - main.py
-                - --task
-                - tw_stock_movers
-                - --config
-                - /app/config.yaml
+                - /bin/sh
+                - -lc
+                - |
+                  set -eu
+                  status=0
+                  python main.py --task tw_stock_movers --config /app/config.yaml || status=$?
+                  python main.py --task stock_watchlist --config /app/config.yaml || status=$?
+                  exit "$status"
               env:
                 - name: SIGNAL_AGENT_ENV
                   value: production

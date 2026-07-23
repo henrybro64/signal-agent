@@ -326,6 +326,62 @@ def test_upsert_stock_mover_snapshots_preserve_history_rows(tmp_path: Path) -> N
     assert _count_signals(db_path) == 2
 
 
+def test_upsert_stock_watchlist_alerts_dedupe_same_minute_bucket(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "signals.sqlite3"
+    first = SignalItem(
+        source="stock_watchlist",
+        item_type="stock_watchlist_alert",
+        title="3081 聯亞 +4.12%",
+        observed_at=OBSERVED_AT,
+        external_id="watchlist-20260615-2000-3081",
+        content="threshold alert",
+        metadata={
+            "stock_code": "3081",
+            "change_percent": 4.12,
+            "alert_change_percent_abs": 3.0,
+        },
+    )
+    same_bucket = SignalItem(
+        source="stock_watchlist",
+        item_type="stock_watchlist_alert",
+        title="3081 聯亞 +4.50%",
+        observed_at=datetime(2026, 6, 15, 12, 0, 30, tzinfo=UTC),
+        external_id="watchlist-20260615-2000-3081",
+        content="same minute bucket",
+        metadata={
+            "stock_code": "3081",
+            "change_percent": 4.5,
+            "alert_change_percent_abs": 3.0,
+        },
+    )
+    next_bucket = SignalItem(
+        source="stock_watchlist",
+        item_type="stock_watchlist_alert",
+        title="3081 聯亞 +4.80%",
+        observed_at=datetime(2026, 6, 15, 12, 10, tzinfo=UTC),
+        external_id="watchlist-20260615-2010-3081",
+        content="next minute bucket",
+        metadata={
+            "stock_code": "3081",
+            "change_percent": 4.8,
+            "alert_change_percent_abs": 3.0,
+        },
+    )
+
+    init_db(db_path)
+    first_result = upsert_signal(first, db_path=db_path)
+    same_result = upsert_signal(same_bucket, db_path=db_path)
+    next_result = upsert_signal(next_bucket, db_path=db_path)
+
+    assert first_result.action == "inserted"
+    assert same_result.action == "updated"
+    assert same_result.matched_on == "source_external_id"
+    assert next_result.action == "inserted"
+    assert _count_signals(db_path) == 2
+
+
 def test_upsert_stock_mover_without_external_id_falls_back_to_url_dedup(
     tmp_path: Path,
 ) -> None:

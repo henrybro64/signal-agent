@@ -103,18 +103,19 @@ k3s deployment behavior:
 - Copy `secret.example.yaml` to `secret.yaml`, replace the `replace-me` values,
   and apply `secret.yaml` only. The example file is not meant for production use.
 - `configmap.yaml` mounts the same `config.yaml` content at `/app/config.yaml`.
-- `pvc.yaml` persists SQLite data at `/app/data` for both CronJobs.
+- `pvc.yaml` persists SQLite data at `/app/data` for the CronJobs.
 - `cronjob-job-search.yaml` runs `job_search` at 08:05 and 18:05 in
   `Asia/Taipei`.
 - `cronjob-tw-stock-movers.yaml` runs `tw_stock_movers` every 10 minutes on
   weekdays in `Asia/Taipei`, while the task still guards Taiwan market hours
-  internally.
+  internally. The same CronJob also runs `stock_watchlist` (no-op while that
+  task remains disabled in config).
 - Job search is offset to `:05` so it does not start at the same minute as the
-  stock-mover CronJob on the shared SQLite volume.
+  stock CronJob on the shared SQLite volume.
 - `cronjob-job-search.yaml` sets `activeDeadlineSeconds: 1800` so a hung source
   (for example `linkedin_email` IMAP) cannot block later schedules forever
   under `concurrencyPolicy: Forbid`.
-- Both CronJobs set `spec.timeZone: Asia/Taipei` so schedules do not depend on
+- CronJobs set `spec.timeZone: Asia/Taipei` so schedules do not depend on
   the controller manager timezone.
 - The CronJobs use `signal-agent:local` with `imagePullPolicy: IfNotPresent`;
   change the image reference if your k3s nodes pull from a registry instead.
@@ -229,14 +230,18 @@ signal-agent/
 - `python main.py --task tw_stock_movers` runs the Taiwan stock-mover task
   during market hours, persists `tw_stock_mover` signals, and reports separate
   top gainers and losers for TWSE listed (上市) and TPEx OTC (上櫃) stocks.
+- `python main.py --task stock_watchlist` runs personal watchlist threshold
+  alerts during market hours, persists `stock_watchlist_alert` signals, and
+  sends Telegram only when newly triggered alerts exist.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
 ## Structured logging
 
-`fetch`, `job_search`, and `tw_stock_movers` emit JSON log lines to stdout so
-Docker and k3s can collect task, source, and notification events from container
-logs. Human-readable summaries are still printed for local CLI use.
+`fetch`, `job_search`, `tw_stock_movers`, and `stock_watchlist` emit JSON log
+lines to stdout so Docker and k3s can collect task, source, and notification
+events from container logs. Human-readable summaries are still printed for local
+CLI use.
 
 Typical fields:
 
@@ -365,6 +370,28 @@ Telegram output is in Traditional Chinese:
 
 If one market source fails, the digest still includes the successful market and
 adds a short warning under `資料來源異常`.
+
+`python main.py --task stock_watchlist` uses the same Taiwan market-hours /
+holiday guard. It reuses TWSE/TPEx quote sources, filters to configured
+`symbols`, and creates `stock_watchlist_alert` rows when
+`abs(change_percent) >= alert_change_percent_abs`. Alerts dedupe by minute
+bucket (`watchlist-{YYYYMMDD}-{HHMM}-{code}`). Telegram is sent only for newly
+inserted alerts (same-minute re-runs stay quiet). Optional `themes` group
+triggered symbols in the digest.
+
+Example Telegram output:
+
+```text
+自選股異動快報 2026-06-25 10:20
+
+價格異動
+1. 3081 聯亞 +4.12% — 超過設定門檻 3.0%
+2. 2330 台積電 -2.20% — 超過設定門檻 2.0%
+
+主題觀察
+CPO_optical: 1 檔觸發異動
+AI_infrastructure: 1 檔觸發異動
+```
 
 ## Taiwan market hours
 
@@ -529,6 +556,24 @@ tasks:
     enabled: true
     top_n: 20
     timezone: Asia/Taipei
+  stock_watchlist:
+    enabled: false
+    timezone: Asia/Taipei
+    sources:
+      - twse
+      - tpex
+    symbols:
+      - code: "2330"
+        name: 台積電
+        alert_change_percent_abs: 2.0
+      - code: "3081"
+        name: 聯亞
+        alert_change_percent_abs: 3.0
+    themes:
+      AI_infrastructure:
+        symbols: ["2330"]
+      CPO_optical:
+        symbols: ["3081"]
 
 notifiers:
   telegram:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -16,19 +15,30 @@ from app.config import (
     validate_telegram_notifier_secrets,
 )
 from app.core import (
-    TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
-    TW_MARKET_SKIP_HOLIDAY,
     SignalItem,
-    finish_signal_run,
-    start_signal_run,
-    tw_market_skip_reason,
     upsert_signal,
 )
-from app.notifiers import build_telegram_notifier
 from app.sources import build_tw_stock_mover_sources
 
 from .base import BaseTask
-from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
+from .market_task_support import (
+    NotificationOutcome,
+    complete_tw_stock_source_run,
+    fetch_tw_stock_mover_source,
+    resolve_task_db_path,
+    send_optional_telegram_digest,
+    skip_outside_tw_market_hours,
+    source_warning_label,
+)
+from .market_task_support import (
+    change_percent as item_change_percent,
+)
+from .market_task_support import (
+    company_name as item_company_name,
+)
+from .market_task_support import (
+    stock_code as item_stock_code,
+)
 
 _MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     ("twse", "TWSE listed (上市)"),
@@ -37,10 +47,6 @@ _MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
 _MARKET_TELEGRAM_LABELS: Final[dict[str, str]] = {
     "twse": "上市",
     "tpex": "上櫃",
-}
-_SOURCE_WARNING_LABELS: Final[dict[str, str]] = {
-    "twse": "上市資料",
-    "tpex": "上櫃資料",
 }
 
 
@@ -71,21 +77,13 @@ class TwStockMarketReport:
         return len(self.gainers) + len(self.losers)
 
 
-@dataclass(slots=True, frozen=True)
-class NotificationOutcome:
-    """Summarize the Telegram notification phase for structured logs."""
-
-    status: str
-    notified_count: int = 0
-
-
 class TwStockMoversTask(BaseTask):
     """Fetch, persist, and optionally report Taiwan stock movers."""
 
     name: ClassVar[str] = "tw_stock_movers"
 
     def run(self) -> None:
-        db_path = _resolve_db_path()
+        db_path = resolve_task_db_path()
         summary = TwStockMoversSummary()
         notification = NotificationOutcome(status="not_applicable")
         market_reports: list[TwStockMarketReport] = []
@@ -103,107 +101,56 @@ class TwStockMoversTask(BaseTask):
                 raise ValueError("Task 'tw_stock_movers' is disabled in config")
 
             env = load_env_settings()
-            skip_reason = tw_market_skip_reason()
-            if skip_reason is not None:
-                if skip_reason == TW_MARKET_SKIP_HOLIDAY:
-                    skip_label = "Taiwan market holiday"
-                elif skip_reason == TW_MARKET_SKIP_CALENDAR_UNAVAILABLE:
-                    skip_label = "Taiwan market calendar unavailable"
-                else:
-                    skip_label = "Taiwan market is closed"
-                self.emit_log(
-                    "task_skipped",
-                    message="Taiwan stock movers task skipped",
-                    db_path=str(db_path),
-                    skip_reason=skip_reason,
-                )
-                print(
-                    "tw_stock_movers task skipped using "
-                    f"{self.config_path}: {skip_label}"
-                )
-                self.end_task_run(
-                    db_path=db_path,
-                    status="skipped",
-                    notified_count=0,
-                    error_message=skip_reason,
-                )
+            if skip_outside_tw_market_hours(
+                self,
+                db_path=db_path,
+                task_name=self.name,
+                skip_log_message="Taiwan stock movers task skipped",
+            ):
                 return
 
             sources = build_tw_stock_mover_sources(config)
             if not sources:
                 raise ValueError("No Taiwan stock-mover sources are configured.")
             for source in sources:
-                run_id = start_signal_run(source.name, db_path=db_path)
-                self.emit_log(
-                    "source_run_started",
-                    message="Source run started",
-                    db_path=str(db_path),
-                    source_name=source.name,
-                    run_id=run_id,
+                fetch = fetch_tw_stock_mover_source(
+                    self,
+                    source=source,
+                    db_path=db_path,
+                    failed_sources=summary.failed_sources,
                 )
-                try:
-                    fetched_items = source.fetch()
-                    stock_items = [
-                        item
-                        for item in fetched_items
-                        if item.item_type == "tw_stock_mover"
-                    ]
-                    ignored_count = len(fetched_items) - len(stock_items)
-                    summary.ignored_non_stock_count += ignored_count
-                    summary.fetched_count += len(stock_items)
+                if fetch is None:
+                    continue
 
-                    source_inserted = 0
-                    source_updated = 0
-                    for item in stock_items:
-                        result = upsert_signal(item, db_path=db_path)
-                        if result.action == "inserted":
-                            source_inserted += 1
-                            summary.new_count += 1
-                        else:
-                            source_updated += 1
-                            summary.duplicate_count += 1
-                        summary.stock_items.append(item)
+                ignored_count = len(fetch.fetched_items) - len(fetch.stock_items)
+                summary.ignored_non_stock_count += ignored_count
+                summary.fetched_count += len(fetch.stock_items)
 
-                    finish_signal_run(
-                        run_id,
-                        status="completed",
-                        fetched_count=len(stock_items),
-                        inserted_count=source_inserted,
-                        updated_count=source_updated,
-                        db_path=db_path,
-                    )
-                    self.emit_log(
-                        "source_run_completed",
-                        message="Source run completed",
-                        db_path=str(db_path),
-                        source_name=source.name,
-                        run_id=run_id,
-                        fetched_count=len(fetched_items),
-                        accepted_count=len(stock_items),
-                        ignored_count=ignored_count,
-                        new_count=source_inserted,
-                        duplicate_count=source_updated,
-                        skipped_count=source_updated + ignored_count,
-                    )
-                    summary.successful_sources += 1
-                except Exception as exc:
-                    finish_signal_run(
-                        run_id,
-                        status="failed",
-                        error=str(exc),
-                        db_path=db_path,
-                    )
-                    summary.failed_sources.append((source.name, str(exc)))
-                    self.emit_log(
-                        "source_run_failed",
-                        message="Source run failed",
-                        level=logging.ERROR,
-                        exc_info=exc,
-                        db_path=str(db_path),
-                        source_name=source.name,
-                        run_id=run_id,
-                        error=str(exc),
-                    )
+                source_inserted = 0
+                source_updated = 0
+                for item in fetch.stock_items:
+                    result = upsert_signal(item, db_path=db_path)
+                    if result.action == "inserted":
+                        source_inserted += 1
+                        summary.new_count += 1
+                    else:
+                        source_updated += 1
+                        summary.duplicate_count += 1
+                    summary.stock_items.append(item)
+
+                complete_tw_stock_source_run(
+                    self,
+                    source_name=source.name,
+                    fetch=fetch,
+                    db_path=db_path,
+                    inserted_count=source_inserted,
+                    updated_count=source_updated,
+                    ignored_count=ignored_count,
+                    new_count=source_inserted,
+                    duplicate_count=source_updated,
+                    skipped_count=source_updated + ignored_count,
+                )
+                summary.successful_sources += 1
 
             market_reports = _build_market_reports(
                 summary.stock_items,
@@ -336,62 +283,16 @@ class TwStockMoversTask(BaseTask):
             ),
             notified_count=reported_count,
         )
-        if not digest:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_no_items",
-                notified_count=0,
-            )
-            print("telegram digest skipped: no stock movers to report")
-            return NotificationOutcome(status="skipped_no_items")
-
-        if not config.notifiers.telegram.enabled:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_notifier_disabled",
-                notified_count=0,
-            )
-            print("telegram digest skipped: notifier disabled in config")
-            return NotificationOutcome(status="skipped_notifier_disabled")
-
-        validate_telegram_notifier_secrets(
-            telegram_enabled=True,
+        return send_optional_telegram_digest(
+            self,
+            digest=digest,
+            config=config,
             env=env,
-        )
-        notifier = build_telegram_notifier(env=env)
-        try:
-            notifier.send_message(digest)
-        except Exception as exc:
-            self.emit_log(
-                "notification_failed",
-                message="Telegram digest failed",
-                level=logging.ERROR,
-                exc_info=exc,
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="failed",
-                attempted_notified_count=reported_count,
-                error=str(exc),
-            )
-            raise
-        self.emit_log(
-            "notification_sent",
-            message="Telegram digest sent",
-            db_path=str(db_path),
-            notifier="telegram",
-            notification_status="sent",
+            db_path=db_path,
             notified_count=reported_count,
-        )
-        print("telegram digest sent")
-        return NotificationOutcome(
-            status="sent",
-            notified_count=reported_count,
+            empty_status="skipped_no_items",
+            empty_message="telegram digest skipped: no stock movers to report",
+            validate_secrets=validate_telegram_notifier_secrets,
         )
 
 
@@ -493,7 +394,7 @@ def _build_telegram_digest(
         lines.append("")
         lines.append("資料來源異常")
         for source_name, message in summary.failed_sources:
-            lines.append(f"- {_source_warning_label(source_name)}：{message}")
+            lines.append(f"- {source_warning_label(source_name)}：{message}")
 
     lines.append("")
     lines.append(
@@ -526,10 +427,6 @@ def _build_telegram_section_title(
     market_label = _MARKET_TELEGRAM_LABELS.get(market_key, market_key.upper())
     direction_label = "漲幅" if direction == "gainers" else "跌幅"
     return f"{market_label}前{top_n}{direction_label}"
-
-
-def _source_warning_label(source_name: str) -> str:
-    return _SOURCE_WARNING_LABELS.get(source_name, source_name)
 
 
 def _build_market_reports(
@@ -571,12 +468,12 @@ def _select_top_gainers(
     gainers = [
         item
         for item in items
-        if _change_percent(item) > 0
+        if item_change_percent(item) > 0
         and (market_key is None or _market_key(item) == market_key)
     ]
     return sorted(
         gainers,
-        key=lambda item: (_change_percent(item), item.observed_at),
+        key=lambda item: (item_change_percent(item), item.observed_at),
         reverse=True,
     )[:limit]
 
@@ -592,12 +489,12 @@ def _select_top_losers(
     losers = [
         item
         for item in items
-        if _change_percent(item) < 0
+        if item_change_percent(item) < 0
         and (market_key is None or _market_key(item) == market_key)
     ]
     return sorted(
         losers,
-        key=lambda item: (_change_percent(item), -item.observed_at.timestamp()),
+        key=lambda item: (item_change_percent(item), -item.observed_at.timestamp()),
     )[:limit]
 
 
@@ -621,53 +518,27 @@ def _market_key(item: SignalItem) -> str:
 
 
 def _render_mover_line(item: SignalItem) -> str:
-    stock_code = _stock_code(item)
-    company = _company_name(item)
-    change_percent = _change_percent(item)
+    code = item_stock_code(item)
+    company = item_company_name(item)
+    pct = item_change_percent(item)
     title = item.title.strip()
 
-    prefix_parts = [part for part in (stock_code, company) if part]
+    prefix_parts = [part for part in (code, company) if part]
     prefix = " ".join(prefix_parts)
     if prefix:
         prefix += " "
-    return f"{prefix}{change_percent:+.1f}% | {title}"
+    return f"{prefix}{pct:+.1f}% | {title}"
 
 
 def _render_digest_ranked_line(index: int, item: SignalItem) -> str:
-    stock_code = _stock_code(item)
-    company = _company_name(item)
-    change_percent = _change_percent(item)
+    code = item_stock_code(item)
+    company = item_company_name(item)
+    pct = item_change_percent(item)
 
-    prefix_parts = [part for part in (stock_code, company) if part]
+    prefix_parts = [part for part in (code, company) if part]
     prefix = " ".join(prefix_parts).strip()
     if not prefix:
         prefix = item.title.strip()
-    return f"{index}. {prefix} {change_percent:+.2f}%"
+    return f"{index}. {prefix} {pct:+.2f}%"
 
 
-def _stock_code(item: SignalItem) -> str:
-    stock_code = item.metadata.get("stock_code")
-    if isinstance(stock_code, str):
-        return stock_code.strip()
-    return ""
-
-
-def _company_name(item: SignalItem) -> str:
-    company = item.metadata.get("company")
-    if isinstance(company, str):
-        return company.strip()
-    return ""
-
-
-def _change_percent(item: SignalItem) -> float:
-    change_percent = item.metadata.get("change_percent")
-    if isinstance(change_percent, int | float):
-        return float(change_percent)
-    return 0.0
-
-
-def _resolve_db_path() -> Path:
-    raw_path = os.getenv(DB_PATH_ENV_VAR)
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return DEFAULT_DB_PATH

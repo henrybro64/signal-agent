@@ -6,12 +6,14 @@ from .base import BaseTask
 from .dummy import DummyTask
 from .fetch import FetchTask
 from .job_search import JobSearchTask
+from .stock_watchlist import StockWatchlistTask
 from .tw_stock_movers import TwStockMoversTask
 
 TASKS: dict[str, type[BaseTask]] = {
     DummyTask.name: DummyTask,
     FetchTask.name: FetchTask,
     JobSearchTask.name: JobSearchTask,
+    StockWatchlistTask.name: StockWatchlistTask,
     TwStockMoversTask.name: TwStockMoversTask,
 }
 
@@ -47,6 +49,7 @@ __all__ = [
     "DummyTask",
     "FetchTask",
     "JobSearchTask",
+    "StockWatchlistTask",
     "TASKS",
     "TwStockMoversTask",
     "build_task",

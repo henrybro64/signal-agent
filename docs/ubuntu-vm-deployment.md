@@ -116,6 +116,7 @@ docker compose run --rm -T signal-agent python main.py --telegram-test
 # Manual task runs (may fail clearly if secrets/sources are missing)
 docker compose run --rm -T signal-agent python main.py --task job_search
 docker compose run --rm -T signal-agent python main.py --task tw_stock_movers
+docker compose run --rm -T signal-agent python main.py --task stock_watchlist
 ```
 
 Or use the wrappers (same commands; skip cleanly if another run is in progress):
@@ -123,6 +124,7 @@ Or use the wrappers (same commands; skip cleanly if another run is in progress):
 ```bash
 ./deploy/ubuntu/run-job-search.sh
 ./deploy/ubuntu/run-tw-stock-movers.sh
+./deploy/ubuntu/run-stock-watchlist.sh
 ```
 
 ## 6. Install schedules (cron — preferred)
@@ -147,9 +149,14 @@ Intended schedules (Asia/Taipei):
 |------|----------|
 | `job_search` | 08:05 and 18:05 daily |
 | `tw_stock_movers` | every 10 minutes, weekdays (`1-5`) |
+| `stock_watchlist` | every 10 minutes, weekdays (`1-5`) |
 
-`tw_stock_movers` still applies its own Taiwan market-hours guard, so
-off-hours weekday runs exit cleanly without sending digests.
+`tw_stock_movers` and `stock_watchlist` still apply their own Taiwan
+market-hours guard, so off-hours weekday runs exit cleanly without sending
+digests. `stock_watchlist` stays disabled in the default config until you
+configure symbols and set `tasks.stock_watchlist.enabled: true`. Prefer the
+cron wrappers for `stock_watchlist`; the optional systemd installer only
+enables `job_search` and `tw_stock_movers` timers.
 
 The wrappers use `flock` so a slow `job_search` (for example LinkedIn IMAP)
 does not stack concurrent Compose runs on the shared SQLite file.
@@ -183,6 +190,7 @@ include `Asia/Taipei` so schedules do not depend on the host timezone.
 cd /opt/signal-agent
 tail -n 100 logs/job_search.log
 tail -n 100 logs/tw_stock_movers.log
+tail -n 100 logs/stock_watchlist.log
 
 # Follow live
 tail -f logs/tw_stock_movers.log
@@ -199,10 +207,12 @@ cd /opt/signal-agent
 # One-off task
 ./deploy/ubuntu/run-job-search.sh
 ./deploy/ubuntu/run-tw-stock-movers.sh
+./deploy/ubuntu/run-stock-watchlist.sh
 
 # Or without wrappers
 docker compose run --rm -T signal-agent python main.py --task job_search
 docker compose run --rm -T signal-agent python main.py --task tw_stock_movers
+docker compose run --rm -T signal-agent python main.py --task stock_watchlist
 
 # After code changes
 git pull

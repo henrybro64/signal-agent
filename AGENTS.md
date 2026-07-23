@@ -24,7 +24,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | Milestone | Scope | Status |
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
-| M6 | Hardening / extensions #49–#57 | **In progress** — through #55 done; #51 in progress |
+| M6 | Hardening / extensions #49–#57 | **In progress** — through #51 done; #52 in progress |
 | M7 | LangChain-ready platform evolution #60–#67 | Later — only when asked |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
@@ -69,7 +69,8 @@ signal-agent/
 │   │   ├── dummy.py        # CLI wiring smoke task
 │   │   ├── fetch.py        # multi-source fetch + persist bootstrap
 │   │   ├── job_search.py   # job digest workflow
-│   │   └── tw_stock_movers.py  # TW stock mover digest workflow
+│   │   ├── tw_stock_movers.py  # TW stock mover digest workflow
+│   │   └── stock_watchlist.py  # personal watchlist threshold alerts
 │   ├── scorers/
 │   │   ├── job_rule_scorer.py
 │   │   ├── job_llm_scorer.py   # optional; fail open to rules
@@ -188,7 +189,7 @@ Work in this order unless a human asks otherwise:
 4. #53  Configurable source timeouts, retries, and fetch limits — DONE
 5. #49  Multiple job-search profiles and per-profile configuration — DONE
 6. #55  Two-stage job scoring with LLM budget and digest limits — DONE
-7. #51  Taiwan market holiday calendar in market-hours guard
+7. #51  Taiwan market holiday calendar in market-hours guard — DONE
 8. #52  Stock watchlist alert task (separate from top movers)
 9. #57  SQLite schema versioning and migration path
 ```
@@ -213,8 +214,8 @@ points:
 | #53 | `config.yaml` `sources:`, `app/core/config.py`, source `from_config`, tests — done |
 | #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — done |
 | #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — done |
-| #51 | `app/core/tw_market_calendar.py`, `app/data/tw_market_holidays.yaml`, `app/core/time_utils.py`, tests — in this PR |
-| #52 | new source/task under `app/sources/` / `app/tasks/`, config + Telegram |
+| #51 | `app/core/tw_market_calendar.py`, `app/data/tw_market_holidays.yaml`, `app/core/time_utils.py`, tests — done |
+| #52 | `app/tasks/stock_watchlist.py`, `app/tasks/market_task_support.py`, config + Telegram — in this PR |
 | #57 | `app/core/db.py`, `sql/`, migration runner + tests |
 
 ## How to pick up work

@@ -126,6 +126,7 @@ def test_job_search_cronjob_manifest_runs_expected_cli_command() -> None:
 def test_tw_stock_movers_cronjob_manifest_runs_expected_cli_command() -> None:
     manifest = _load_yaml("cronjob-tw-stock-movers.yaml")
     container = _cronjob_container(manifest)
+    command = container["command"]
 
     assert manifest["kind"] == "CronJob"
     assert manifest["metadata"]["name"] == "tw-stock-movers-every-10-min"
@@ -133,14 +134,10 @@ def test_tw_stock_movers_cronjob_manifest_runs_expected_cli_command() -> None:
     assert manifest["spec"]["timeZone"] == "Asia/Taipei"
     assert manifest["spec"]["schedule"] == "*/10 * * * 1-5"
     assert container["image"] == "signal-agent:local"
-    assert container["command"] == [
-        "python",
-        "main.py",
-        "--task",
-        "tw_stock_movers",
-        "--config",
-        "/app/config.yaml",
-    ]
+    assert command[:2] == ["/bin/sh", "-lc"]
+    script = command[2]
+    assert "--task tw_stock_movers" in script
+    assert "--task stock_watchlist" in script
     assert container["envFrom"] == [
         {
             "secretRef": {
@@ -162,6 +159,7 @@ def test_cronjob_manifest_comments_explain_schedule_assumptions() -> None:
     assert "Asia/Taipei" in job_search_text
     assert "Asia/Taipei" in tw_stock_text
     assert "Taiwan market hours" in tw_stock_text
+    assert "stock_watchlist" in tw_stock_text
     assert "off-hours runs no-op" in tw_stock_text
     assert ":05 offset" in job_search_text
 

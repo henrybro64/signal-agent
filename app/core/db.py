@@ -212,6 +212,32 @@ def upsert_signal(
         )
 
 
+def get_signal_status(
+    signal_id: int,
+    *,
+    db_path: str | Path | None = None,
+) -> SignalStatus:
+    """Return the stored status for one signal."""
+
+    resolved_path = _resolve_db_path(db_path)
+
+    with _connect(resolved_path) as connection:
+        row = connection.execute(
+            "SELECT status FROM signals WHERE id = ?",
+            (signal_id,),
+        ).fetchone()
+
+    if row is None:
+        raise ValueError(f"Unknown signal id: {signal_id}")
+
+    status = str(row["status"])
+    if status not in VALID_SIGNAL_STATUSES:
+        raise ValueError(
+            f"Unknown signal status stored for id {signal_id}: {status}"
+        )
+    return status  # type: ignore[return-value]
+
+
 def update_signal_status(
     signal_id: int,
     status: SignalStatus,
@@ -764,9 +790,12 @@ def _find_existing_signal(
     external_id: str | None,
     content_hash: str | None,
 ) -> tuple[sqlite3.Row | None, DedupMatch | None]:
-    # Stock movers use snapshot external IDs when present; otherwise fall back
-    # to the normal URL/content-hash dedup path for custom sources.
-    if item_type == "tw_stock_mover" and external_id is not None:
+    # Snapshot-backed market signals use external IDs when present; otherwise
+    # fall back to the normal URL/content-hash dedup path for custom sources.
+    if (
+        item_type in {"tw_stock_mover", "stock_watchlist_alert"}
+        and external_id is not None
+    ):
         row = connection.execute(
             """
             SELECT *
@@ -820,7 +849,7 @@ def _build_content_hash(item: SignalItem) -> str:
         "title": item.title.strip(),
         "content": (item.content or "").strip(),
     }
-    if item.item_type == "tw_stock_mover":
+    if item.item_type in {"tw_stock_mover", "stock_watchlist_alert"}:
         payload_data["external_id"] = (item.external_id or "").strip()
 
     payload = json.dumps(

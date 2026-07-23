@@ -33,6 +33,7 @@ def test_ubuntu_deploy_helpers_exist_and_are_executable() -> None:
         UBUNTU_DEPLOY / "run-task.sh",
         UBUNTU_DEPLOY / "run-job-search.sh",
         UBUNTU_DEPLOY / "run-tw-stock-movers.sh",
+        UBUNTU_DEPLOY / "run-stock-watchlist.sh",
         UBUNTU_DEPLOY / "install-systemd.sh",
         UBUNTU_DEPLOY / "crontab.example",
         UBUNTU_DEPLOY / "systemd" / "signal-agent-job-search.service",
@@ -47,6 +48,7 @@ def test_ubuntu_deploy_helpers_exist_and_are_executable() -> None:
         UBUNTU_DEPLOY / "run-task.sh",
         UBUNTU_DEPLOY / "run-job-search.sh",
         UBUNTU_DEPLOY / "run-tw-stock-movers.sh",
+        UBUNTU_DEPLOY / "run-stock-watchlist.sh",
         UBUNTU_DEPLOY / "install-systemd.sh",
     ):
         assert script.stat().st_mode & 0o111, f"{script} must be executable"
@@ -69,6 +71,7 @@ def test_systemd_units_use_install_placeholders() -> None:
     installer = (UBUNTU_DEPLOY / "install-systemd.sh").read_text(encoding="utf-8")
     assert "__DEPLOY_USER__" in installer
     assert "systemctl enable --now signal-agent-job-search.timer" in installer
+    assert "signal-agent-stock-watchlist.timer" not in installer
 
 
 def test_crontab_example_matches_intended_schedules() -> None:
@@ -80,6 +83,7 @@ def test_crontab_example_matches_intended_schedules() -> None:
     assert "*/10 * * * 1-5" in crontab
     assert "run-job-search.sh" in crontab
     assert "run-tw-stock-movers.sh" in crontab
+    assert "run-stock-watchlist.sh" in crontab
     assert "flock" in crontab
 
 
