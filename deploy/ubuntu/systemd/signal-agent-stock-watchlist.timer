@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer for signal-agent stock_watchlist (every 10m weekdays Asia/Taipei)
+
+[Timer]
+OnCalendar=Asia/Taipei Mon..Fri *-*-* *:00/10:00
+Persistent=true
+Unit=signal-agent-stock-watchlist.service
+
+[Install]
+WantedBy=timers.target

@@ -42,6 +42,13 @@ class FailingTwseSource(BaseSource):
         raise RuntimeError("twse quote provider timeout")
 
 
+class FailingTpexSource(BaseSource):
+    name = "tpex"
+
+    def fetch(self) -> list[SignalItem]:
+        raise RuntimeError("tpex quote provider timeout")
+
+
 def _quote_item(
     *,
     stock_code: str,
@@ -315,7 +322,7 @@ def test_stock_watchlist_task_skips_telegram_when_no_alerts(
 
     captured = capsys.readouterr()
     assert "triggered 0 alert(s)" in captured.out
-    assert "telegram digest skipped: no new watchlist alerts" in captured.out
+    assert "telegram digest skipped: no pending watchlist alerts" in captured.out
     assert sent == []
     assert _count_alerts(db_path) == 0
 
@@ -374,7 +381,122 @@ def test_stock_watchlist_task_dedupes_same_minute_bucket(
     assert len(sent) == 1
     assert "1 new / 0 duplicate" in captured.out
     assert "0 new / 1 duplicate" in captured.out
-    assert "telegram digest skipped: no new watchlist alerts" in captured.out
+    assert "telegram digest skipped: no pending watchlist alerts" in captured.out
+
+
+def test_stock_watchlist_task_retries_unsent_alerts_after_telegram_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, telegram_enabled=True)
+    db_path = tmp_path / "signals.sqlite3"
+    sent: list[str] = []
+    attempts = {"count": 0}
+
+    class FlakyThenOkNotifier:
+        def send_message(self, text: str) -> None:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("telegram unavailable")
+            sent.append(text)
+
+    quotes = [
+        TwseWatchlistSource(
+            [
+                _quote_item(
+                    stock_code="3081",
+                    company="聯亞",
+                    change_percent=4.12,
+                )
+            ]
+        )
+    ]
+    monkeypatch.setattr(
+        watchlist_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
+    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        watchlist_module,
+        "build_tw_stock_mover_sources_for_names",
+        lambda _config, _names: quotes,
+    )
+    monkeypatch.setattr(
+        "app.tasks.market_task_support.build_telegram_notifier",
+        lambda env=None: FlakyThenOkNotifier(),
+    )
+    monkeypatch.setattr(
+        watchlist_module,
+        "validate_telegram_notifier_secrets",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(watchlist_module, "load_env_settings", lambda: object())
+
+    with pytest.raises(RuntimeError, match="telegram unavailable"):
+        StockWatchlistTask(str(config_path)).run()
+
+    assert _count_alerts(db_path) == 1
+    assert sent == []
+
+    StockWatchlistTask(str(config_path)).run()
+
+    assert len(sent) == 1
+    assert "3081 聯亞 +4.12%" in sent[0]
+    assert _task_run_statuses(db_path) == ["failed", "success"]
+
+
+def test_stock_watchlist_task_includes_failed_sources_in_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, telegram_enabled=True)
+    db_path = tmp_path / "signals.sqlite3"
+    sent: list[str] = []
+
+    class FakeNotifier:
+        def send_message(self, text: str) -> None:
+            sent.append(text)
+
+    monkeypatch.setattr(
+        watchlist_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
+    monkeypatch.setattr(watchlist_module, "tw_market_skip_reason", lambda: None)
+    monkeypatch.setattr(
+        watchlist_module,
+        "build_tw_stock_mover_sources_for_names",
+        lambda _config, _names: [
+            TwseWatchlistSource(
+                [
+                    _quote_item(
+                        stock_code="2330",
+                        company="台積電",
+                        change_percent=-2.2,
+                    ),
+                ]
+            ),
+            FailingTpexSource(),
+        ],
+    )
+    monkeypatch.setattr(
+        "app.tasks.market_task_support.build_telegram_notifier",
+        lambda env=None: FakeNotifier(),
+    )
+    monkeypatch.setattr(
+        watchlist_module,
+        "validate_telegram_notifier_secrets",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(watchlist_module, "load_env_settings", lambda: object())
+
+    StockWatchlistTask(str(config_path)).run()
+
+    assert len(sent) == 1
+    assert "2330 台積電 -2.20%" in sent[0]
+    assert "資料來源異常" in sent[0]
+    assert "上櫃資料：tpex quote provider timeout" in sent[0]
 
 
 def test_stock_watchlist_task_raises_when_all_sources_fail(
@@ -430,3 +552,18 @@ def test_build_telegram_digest_formats_theme_section() -> None:
     assert "1. 3081 聯亞 +4.12% — 超過設定門檻 3.0%" in digest
     assert "CPO_optical: 1 檔觸發異動" in digest
     assert "AI_infrastructure" not in digest.split("主題觀察", 1)[-1]
+
+
+def test_build_telegram_digest_includes_failed_sources_without_alerts() -> None:
+    from app.config import StockWatchlistThemeConfig
+
+    digest = watchlist_module._build_telegram_digest(
+        alerts=[],
+        themes={"CPO_optical": StockWatchlistThemeConfig(symbols=["3081"])},
+        timezone_name="Asia/Taipei",
+        failed_sources=[("twse", "timeout")],
+    )
+    assert digest.startswith("自選股異動快報 ")
+    assert "價格異動" not in digest
+    assert "資料來源異常" in digest
+    assert "上市資料：timeout" in digest

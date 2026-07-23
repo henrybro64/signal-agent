@@ -22,6 +22,8 @@ from app.config import (
 from app.core import (
     SignalItem,
     finish_signal_run,
+    get_signal_status,
+    mark_signals_digest_reported,
     tw_market_skip_label,
     tw_market_skip_reason,
     upsert_signal,
@@ -35,6 +37,7 @@ from .market_task_support import (
     fail_source_run,
     resolve_task_db_path,
     send_optional_telegram_digest,
+    source_warning_label,
 )
 from .market_task_support import (
     change_percent as item_change_percent,
@@ -63,6 +66,8 @@ class WatchlistRunSummary:
     duplicate_alert_count: int = 0
     triggered_alerts: list[SignalItem] = field(default_factory=list)
     new_alerts: list[SignalItem] = field(default_factory=list)
+    pending_alerts: list[SignalItem] = field(default_factory=list)
+    pending_signal_ids: list[int] = field(default_factory=list)
     failed_sources: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -276,8 +281,15 @@ class StockWatchlistTask(BaseTask):
             if result.action == "inserted":
                 summary.new_alert_count += 1
                 summary.new_alerts.append(alert)
-            else:
-                summary.duplicate_alert_count += 1
+                summary.pending_alerts.append(alert)
+                summary.pending_signal_ids.append(result.signal_id)
+                continue
+
+            summary.duplicate_alert_count += 1
+            # Keep unsent alerts pending so a Telegram failure can be retried.
+            if get_signal_status(result.signal_id, db_path=db_path) == "new":
+                summary.pending_alerts.append(alert)
+                summary.pending_signal_ids.append(result.signal_id)
 
     def _finalize_success(
         self,
@@ -342,27 +354,38 @@ class StockWatchlistTask(BaseTask):
         summary: WatchlistRunSummary,
         db_path: Path,
     ) -> NotificationOutcome:
-        # Notify only for newly inserted alerts so same-minute re-runs stay quiet.
+        # Digests include pending (unreported) alerts so Telegram failures retry.
         digest = _build_telegram_digest(
-            alerts=summary.new_alerts,
+            alerts=summary.pending_alerts,
             themes=watchlist.themes,
             timezone_name=watchlist.timezone,
+            failed_sources=summary.failed_sources,
         )
-        return send_optional_telegram_digest(
+        notification = send_optional_telegram_digest(
             self,
             digest=digest,
             config=config,
             env=env,
             db_path=db_path,
-            notified_count=len(summary.new_alerts),
+            notified_count=len(summary.pending_alerts),
             empty_status="skipped_no_alerts",
-            empty_message="telegram digest skipped: no new watchlist alerts",
+            empty_message=(
+                "telegram digest skipped: no pending watchlist alerts"
+            ),
             validate_secrets=validate_telegram_notifier_secrets,
             empty_log_fields={
                 "triggered_count": summary.triggered_count,
                 "duplicate_count": summary.duplicate_alert_count,
+                "pending_count": len(summary.pending_alerts),
+                "failed_source_count": len(summary.failed_sources),
             },
         )
+        if notification.status == "sent" and summary.pending_signal_ids:
+            mark_signals_digest_reported(
+                summary.pending_signal_ids,
+                db_path=db_path,
+            )
+        return notification
 
 
 def _require_enabled_watchlist(config: AppConfig) -> StockWatchlistTaskConfig:
@@ -479,7 +502,7 @@ def _build_console_summary(
     ]
     for source_name, message in summary.failed_sources:
         lines.append(f"source failed: {source_name}: {message}")
-    for alert in summary.new_alerts:
+    for alert in summary.pending_alerts:
         lines.append(f"- {_render_digest_alert_line(alert)}")
     return lines
 
@@ -489,19 +512,30 @@ def _build_telegram_digest(
     alerts: list[SignalItem],
     themes: dict[str, StockWatchlistThemeConfig],
     timezone_name: str,
+    failed_sources: list[tuple[str, str]] | None = None,
 ) -> str:
-    if not alerts:
+    failed_sources = failed_sources or []
+    if not alerts and not failed_sources:
         return ""
 
-    lines = [_build_telegram_heading(timezone_name), "", "價格異動"]
-    for index, alert in enumerate(alerts, start=1):
-        lines.append(f"{index}. {_render_digest_alert_line(alert)}")
-
-    theme_lines = _render_theme_section(alerts=alerts, themes=themes)
-    if theme_lines:
+    lines = [_build_telegram_heading(timezone_name)]
+    if alerts:
         lines.append("")
-        lines.append("主題觀察")
-        lines.extend(theme_lines)
+        lines.append("價格異動")
+        for index, alert in enumerate(alerts, start=1):
+            lines.append(f"{index}. {_render_digest_alert_line(alert)}")
+
+        theme_lines = _render_theme_section(alerts=alerts, themes=themes)
+        if theme_lines:
+            lines.append("")
+            lines.append("主題觀察")
+            lines.extend(theme_lines)
+
+    if failed_sources:
+        lines.append("")
+        lines.append("資料來源異常")
+        for source_name, message in failed_sources:
+            lines.append(f"- {source_warning_label(source_name)}：{message}")
     return "\n".join(lines)
 
 

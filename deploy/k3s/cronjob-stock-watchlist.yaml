@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: stock-watchlist-every-10-min
+  namespace: signal-agent
+  labels:
+    app.kubernetes.io/name: signal-agent
+    app.kubernetes.io/component: stock-watchlist
+spec:
+  timeZone: Asia/Taipei
+  # Run every 10 minutes on weekdays. The task still checks Taiwan market hours
+  # internally, so off-hours runs no-op. Enable tasks.stock_watchlist in config.
+  schedule: "*/10 * * * 1-5"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: signal-agent
+            app.kubernetes.io/component: stock-watchlist
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: signal-agent
+              image: signal-agent:local
+              imagePullPolicy: IfNotPresent
+              command:
+                - python
+                - main.py
+                - --task
+                - stock_watchlist
+                - --config
+                - /app/config.yaml
+              env:
+                - name: SIGNAL_AGENT_ENV
+                  value: production
+              envFrom:
+                - secretRef:
+                    name: signal-agent-secrets
+              volumeMounts:
+                - name: config
+                  mountPath: /app/config.yaml
+                  subPath: config.yaml
+                  readOnly: true
+                - name: data
+                  mountPath: /app/data
+          volumes:
+            - name: config
+              configMap:
+                name: signal-agent-config
+                items:
+                  - key: config.yaml
+                    path: config.yaml
+            - name: data
+              persistentVolumeClaim:
+                claimName: signal-agent-data

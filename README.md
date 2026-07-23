@@ -103,18 +103,21 @@ k3s deployment behavior:
 - Copy `secret.example.yaml` to `secret.yaml`, replace the `replace-me` values,
   and apply `secret.yaml` only. The example file is not meant for production use.
 - `configmap.yaml` mounts the same `config.yaml` content at `/app/config.yaml`.
-- `pvc.yaml` persists SQLite data at `/app/data` for both CronJobs.
+- `pvc.yaml` persists SQLite data at `/app/data` for the CronJobs.
 - `cronjob-job-search.yaml` runs `job_search` at 08:05 and 18:05 in
   `Asia/Taipei`.
 - `cronjob-tw-stock-movers.yaml` runs `tw_stock_movers` every 10 minutes on
   weekdays in `Asia/Taipei`, while the task still guards Taiwan market hours
   internally.
+- `cronjob-stock-watchlist.yaml` runs `stock_watchlist` on the same weekday
+  10-minute cadence; enable `tasks.stock_watchlist` and configure symbols
+  before expecting alerts.
 - Job search is offset to `:05` so it does not start at the same minute as the
-  stock-mover CronJob on the shared SQLite volume.
+  stock CronJobs on the shared SQLite volume.
 - `cronjob-job-search.yaml` sets `activeDeadlineSeconds: 1800` so a hung source
   (for example `linkedin_email` IMAP) cannot block later schedules forever
   under `concurrencyPolicy: Forbid`.
-- Both CronJobs set `spec.timeZone: Asia/Taipei` so schedules do not depend on
+- CronJobs set `spec.timeZone: Asia/Taipei` so schedules do not depend on
   the controller manager timezone.
 - The CronJobs use `signal-agent:local` with `imagePullPolicy: IfNotPresent`;
   change the image reference if your k3s nodes pull from a registry instead.

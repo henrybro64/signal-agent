@@ -212,6 +212,32 @@ def upsert_signal(
         )
 
 
+def get_signal_status(
+    signal_id: int,
+    *,
+    db_path: str | Path | None = None,
+) -> SignalStatus:
+    """Return the stored status for one signal."""
+
+    resolved_path = _resolve_db_path(db_path)
+
+    with _connect(resolved_path) as connection:
+        row = connection.execute(
+            "SELECT status FROM signals WHERE id = ?",
+            (signal_id,),
+        ).fetchone()
+
+    if row is None:
+        raise ValueError(f"Unknown signal id: {signal_id}")
+
+    status = str(row["status"])
+    if status not in VALID_SIGNAL_STATUSES:
+        raise ValueError(
+            f"Unknown signal status stored for id {signal_id}: {status}"
+        )
+    return status  # type: ignore[return-value]
+
+
 def update_signal_status(
     signal_id: int,
     status: SignalStatus,

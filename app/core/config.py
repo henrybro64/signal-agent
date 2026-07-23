@@ -349,12 +349,53 @@ def _parse_stock_watchlist_task_config(
         parent_path=parent_path,
         source_name=source_name,
     )
-    timezone = _require_str(
+    # Disabled optional task: timezone/sources/symbols are optional.
+    if enabled:
+        timezone = _require_str(
+            data,
+            "timezone",
+            parent_path=parent_path,
+            source_name=source_name,
+        )
+    else:
+        timezone = _optional_str(
+            data,
+            "timezone",
+            default="Asia/Taipei",
+            parent_path=parent_path,
+            source_name=source_name,
+        )
+
+    sources = _parse_stock_watchlist_sources(
         data,
-        "timezone",
         parent_path=parent_path,
         source_name=source_name,
     )
+    symbols = _parse_stock_watchlist_symbols(
+        data.get("symbols"),
+        parent_path=f"{parent_path}.symbols",
+        source_name=source_name,
+    )
+    themes = _parse_stock_watchlist_themes(
+        data.get("themes"),
+        parent_path=f"{parent_path}.themes",
+        source_name=source_name,
+    )
+    return StockWatchlistTaskConfig(
+        enabled=enabled,
+        timezone=timezone,
+        sources=sources,
+        symbols=symbols,
+        themes=themes,
+    )
+
+
+def _parse_stock_watchlist_sources(
+    data: dict[str, Any],
+    *,
+    parent_path: str,
+    source_name: str,
+) -> list[str]:
     if "sources" in data:
         sources = _require_str_list(
             data,
@@ -383,24 +424,7 @@ def _parse_stock_watchlist_task_config(
             f"Unsupported stock_watchlist source(s) {unsupported} in "
             f"{source_name}. Supported sources: {supported}"
         )
-
-    symbols = _parse_stock_watchlist_symbols(
-        data.get("symbols"),
-        parent_path=f"{parent_path}.symbols",
-        source_name=source_name,
-    )
-    themes = _parse_stock_watchlist_themes(
-        data.get("themes"),
-        parent_path=f"{parent_path}.themes",
-        source_name=source_name,
-    )
-    return StockWatchlistTaskConfig(
-        enabled=enabled,
-        timezone=timezone,
-        sources=sources,
-        symbols=symbols,
-        themes=themes,
-    )
+    return sources
 
 
 def _parse_stock_watchlist_symbols(

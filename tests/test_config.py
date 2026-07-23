@@ -480,6 +480,23 @@ def test_app_config_from_dict_defaults_stock_watchlist_when_omitted() -> None:
     assert config.tasks.stock_watchlist.themes == {}
 
 
+def test_app_config_from_dict_accepts_disabled_stock_watchlist_without_fields() -> (
+    None
+):
+    payload = _base_config_dict()
+    tasks = payload["tasks"]
+    assert isinstance(tasks, dict)
+    tasks["stock_watchlist"] = {"enabled": False}
+
+    config = AppConfig.from_dict(payload)
+
+    assert config.tasks.stock_watchlist.enabled is False
+    assert config.tasks.stock_watchlist.timezone == "Asia/Taipei"
+    assert config.tasks.stock_watchlist.sources == ["twse", "tpex"]
+    assert config.tasks.stock_watchlist.symbols == []
+    assert config.tasks.stock_watchlist.themes == {}
+
+
 def test_app_config_from_dict_reads_stock_watchlist() -> None:
     payload = _base_config_dict()
     tasks = payload["tasks"]

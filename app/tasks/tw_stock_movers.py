@@ -30,6 +30,7 @@ from .market_task_support import (
     fail_source_run,
     resolve_task_db_path,
     send_optional_telegram_digest,
+    source_warning_label,
 )
 from .market_task_support import (
     change_percent as item_change_percent,
@@ -48,10 +49,6 @@ _MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
 _MARKET_TELEGRAM_LABELS: Final[dict[str, str]] = {
     "twse": "上市",
     "tpex": "上櫃",
-}
-_SOURCE_WARNING_LABELS: Final[dict[str, str]] = {
-    "twse": "上市資料",
-    "tpex": "上櫃資料",
 }
 
 
@@ -433,7 +430,7 @@ def _build_telegram_digest(
         lines.append("")
         lines.append("資料來源異常")
         for source_name, message in summary.failed_sources:
-            lines.append(f"- {_source_warning_label(source_name)}：{message}")
+            lines.append(f"- {source_warning_label(source_name)}：{message}")
 
     lines.append("")
     lines.append(
@@ -466,10 +463,6 @@ def _build_telegram_section_title(
     market_label = _MARKET_TELEGRAM_LABELS.get(market_key, market_key.upper())
     direction_label = "漲幅" if direction == "gainers" else "跌幅"
     return f"{market_label}前{top_n}{direction_label}"
-
-
-def _source_warning_label(source_name: str) -> str:
-    return _SOURCE_WARNING_LABELS.get(source_name, source_name)
 
 
 def _build_market_reports(

@@ -102,6 +102,18 @@ def change_percent(item: SignalItem) -> float:
     return 0.0
 
 
+_SOURCE_WARNING_LABELS: dict[str, str] = {
+    "twse": "上市資料",
+    "tpex": "上櫃資料",
+}
+
+
+def source_warning_label(source_name: str) -> str:
+    """Traditional Chinese label for a quote-source outage in digests."""
+
+    return _SOURCE_WARNING_LABELS.get(source_name, source_name)
+
+
 def send_optional_telegram_digest(
     task: BaseTask,
     *,

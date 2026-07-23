@@ -33,12 +33,15 @@ def test_ubuntu_deploy_helpers_exist_and_are_executable() -> None:
         UBUNTU_DEPLOY / "run-task.sh",
         UBUNTU_DEPLOY / "run-job-search.sh",
         UBUNTU_DEPLOY / "run-tw-stock-movers.sh",
+        UBUNTU_DEPLOY / "run-stock-watchlist.sh",
         UBUNTU_DEPLOY / "install-systemd.sh",
         UBUNTU_DEPLOY / "crontab.example",
         UBUNTU_DEPLOY / "systemd" / "signal-agent-job-search.service",
         UBUNTU_DEPLOY / "systemd" / "signal-agent-job-search.timer",
         UBUNTU_DEPLOY / "systemd" / "signal-agent-tw-stock-movers.service",
         UBUNTU_DEPLOY / "systemd" / "signal-agent-tw-stock-movers.timer",
+        UBUNTU_DEPLOY / "systemd" / "signal-agent-stock-watchlist.service",
+        UBUNTU_DEPLOY / "systemd" / "signal-agent-stock-watchlist.timer",
     ]
     missing = [str(path) for path in required if not path.is_file()]
     assert not missing, f"missing ubuntu deploy files: {missing}"
@@ -47,6 +50,7 @@ def test_ubuntu_deploy_helpers_exist_and_are_executable() -> None:
         UBUNTU_DEPLOY / "run-task.sh",
         UBUNTU_DEPLOY / "run-job-search.sh",
         UBUNTU_DEPLOY / "run-tw-stock-movers.sh",
+        UBUNTU_DEPLOY / "run-stock-watchlist.sh",
         UBUNTU_DEPLOY / "install-systemd.sh",
     ):
         assert script.stat().st_mode & 0o111, f"{script} must be executable"
@@ -59,6 +63,7 @@ def test_systemd_units_use_install_placeholders() -> None:
     for name in (
         "signal-agent-job-search.service",
         "signal-agent-tw-stock-movers.service",
+        "signal-agent-stock-watchlist.service",
     ):
         text = (UBUNTU_DEPLOY / "systemd" / name).read_text(encoding="utf-8")
         assert "User=__DEPLOY_USER__" in text
@@ -69,6 +74,7 @@ def test_systemd_units_use_install_placeholders() -> None:
     installer = (UBUNTU_DEPLOY / "install-systemd.sh").read_text(encoding="utf-8")
     assert "__DEPLOY_USER__" in installer
     assert "systemctl enable --now signal-agent-job-search.timer" in installer
+    assert "systemctl enable --now signal-agent-stock-watchlist.timer" in installer
 
 
 def test_crontab_example_matches_intended_schedules() -> None:
@@ -80,6 +86,7 @@ def test_crontab_example_matches_intended_schedules() -> None:
     assert "*/10 * * * 1-5" in crontab
     assert "run-job-search.sh" in crontab
     assert "run-tw-stock-movers.sh" in crontab
+    assert "run-stock-watchlist.sh" in crontab
     assert "flock" in crontab
 
 
@@ -90,11 +97,16 @@ def test_systemd_timers_embed_taipei_in_oncalendar() -> None:
     stock_timer = (
         UBUNTU_DEPLOY / "systemd" / "signal-agent-tw-stock-movers.timer"
     ).read_text(encoding="utf-8")
+    watchlist_timer = (
+        UBUNTU_DEPLOY / "systemd" / "signal-agent-stock-watchlist.timer"
+    ).read_text(encoding="utf-8")
     assert "Timezone=" not in job_timer
     assert "Timezone=" not in stock_timer
+    assert "Timezone=" not in watchlist_timer
     assert "OnCalendar=Asia/Taipei *-*-* 08:05:00" in job_timer
     assert "OnCalendar=Asia/Taipei *-*-* 18:05:00" in job_timer
     assert "OnCalendar=Asia/Taipei Mon..Fri *-*-* *:00/10:00" in stock_timer
+    assert "OnCalendar=Asia/Taipei Mon..Fri *-*-* *:00/10:00" in watchlist_timer
 
 
 def test_run_task_wrapper_guards_env_and_overlap() -> None:

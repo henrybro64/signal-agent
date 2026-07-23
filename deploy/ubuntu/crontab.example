@@ -21,3 +21,6 @@ SIGNAL_AGENT_HOME=/opt/signal-agent
 
 # Taiwan stock movers every 10 minutes on weekdays (task still guards market hours)
 */10 * * * 1-5 cd "$SIGNAL_AGENT_HOME" && ./deploy/ubuntu/run-tw-stock-movers.sh >> logs/tw_stock_movers.log 2>&1
+
+# Personal stock watchlist every 10 minutes on weekdays (disabled in config by default)
+*/10 * * * 1-5 cd "$SIGNAL_AGENT_HOME" && ./deploy/ubuntu/run-stock-watchlist.sh >> logs/stock_watchlist.log 2>&1
