@@ -8,6 +8,7 @@ from app.core import (
     TW_MARKET_SKIP_HOLIDAY,
     is_tw_market_holiday,
     is_tw_market_open,
+    tw_market_skip_label,
     tw_market_skip_reason,
 )
 
@@ -106,3 +107,13 @@ def test_is_tw_market_open_fails_closed_when_year_not_in_calendar() -> None:
 def test_is_tw_market_holiday_accepts_datetime() -> None:
     assert is_tw_market_holiday(datetime(2026, 5, 1, 12, 0)) is True
     assert is_tw_market_holiday(datetime(2026, 6, 22, 12, 0)) is False
+
+
+def test_tw_market_skip_label_maps_known_reasons() -> None:
+    assert tw_market_skip_label(TW_MARKET_SKIP_HOLIDAY) == "Taiwan market holiday"
+    assert (
+        tw_market_skip_label(TW_MARKET_SKIP_CALENDAR_UNAVAILABLE)
+        == "Taiwan market calendar unavailable"
+    )
+    assert tw_market_skip_label(TW_MARKET_SKIP_CLOSED) == "Taiwan market is closed"
+    assert tw_market_skip_label("other") == "Taiwan market is closed"
