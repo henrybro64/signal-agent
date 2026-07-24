@@ -20,14 +20,17 @@ from app.scorers.tw_signal_classifier import (
 )
 from app.tasks.tw_stock_movers import TwStockMoversSummary
 
-_MARKET_SECTION_LABELS: Final[dict[str, tuple[str, str]]] = {
-    "twse": ("上市前20漲幅", "上市前20跌幅"),
-    "tpex": ("上櫃前20漲幅", "上櫃前20跌幅"),
-}
 _SOURCE_WARNING_LABELS: Final[dict[str, str]] = {
     "twse": "上市資料",
     "tpex": "上櫃資料",
 }
+
+
+def _market_section_labels(top_n: int) -> dict[str, tuple[str, str]]:
+    return {
+        "twse": (f"上市前{top_n}漲幅", f"上市前{top_n}跌幅"),
+        "tpex": (f"上櫃前{top_n}漲幅", f"上櫃前{top_n}跌幅"),
+    }
 
 
 def build_tw_market_assistant_digest(
@@ -60,9 +63,10 @@ def build_tw_market_assistant_digest(
         ]
         lines.append(f"- 自選股異動：{', '.join(watchlist_labels)}")
 
+    section_labels = _market_section_labels(top_n)
     section_number = 2
     for report in market_reports:
-        gainers_title, losers_title = _MARKET_SECTION_LABELS.get(
+        gainers_title, losers_title = section_labels.get(
             report.market_key,
             (f"{report.title}前{top_n}漲幅", f"{report.title}前{top_n}跌幅"),
         )

@@ -38,7 +38,7 @@ def test_load_config_reads_sample_file() -> None:
         "AI_infrastructure",
         "CPO_optical",
     }
-    assert config.tasks.tw_market_assistant.enabled is True
+    assert config.tasks.tw_market_assistant.enabled is False
     assert config.tasks.tw_market_assistant.top_n == 20
     assert config.investment.watchlist == ["2330", "2454"]
     assert config.investment.theme_mappings["cpo_optical"].label == "CPO / 光通訊"

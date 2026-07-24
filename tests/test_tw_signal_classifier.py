@@ -140,3 +140,78 @@ def test_summarize_theme_activity_reports_active_themes() -> None:
 def test_assert_research_safe_text_rejects_direct_trading_advice() -> None:
     with pytest.raises(ValueError, match="應該買進"):
         assert_research_safe_text("這檔股票應該買進")
+
+
+def test_classify_item_themes_does_not_match_short_keyword_inside_words() -> None:
+    item = _item(
+        stock_code="9999",
+        company="Price Systems",
+        change_percent=4.0,
+        content="price momentum only",
+    )
+    themes = classify_item_themes(
+        item,
+        {
+            "semiconductor": ThemeMappingConfig(
+                label="半導體",
+                keywords=["IC"],
+            )
+        },
+    )
+
+    assert themes == []
+
+
+def test_build_research_candidates_omits_volume_reason_without_volume_data() -> None:
+    reports = [
+        TwStockMarketReport(
+            market_key="twse",
+            title="TWSE listed (上市)",
+            gainers=[
+                _item(
+                    stock_code="8888",
+                    company="無量能標的",
+                    change_percent=4.5,
+                )
+            ],
+            losers=[],
+        )
+    ]
+
+    candidates = build_research_candidates(
+        market_reports=reports,
+        watchlist_hits=[],
+        theme_mappings={},
+        max_candidates=3,
+    )
+
+    assert len(candidates) == 1
+    assert "成交量相對放大" not in candidates[0].reasons
+
+
+def test_build_research_candidates_includes_volume_reason_with_volume_data() -> None:
+    reports = [
+        TwStockMarketReport(
+            market_key="twse",
+            title="TWSE listed (上市)",
+            gainers=[
+                _item(
+                    stock_code="8888",
+                    company="有量能標的",
+                    change_percent=4.5,
+                    volume=5000,
+                )
+            ],
+            losers=[],
+        )
+    ]
+
+    candidates = build_research_candidates(
+        market_reports=reports,
+        watchlist_hits=[],
+        theme_mappings={},
+        max_candidates=3,
+    )
+
+    assert len(candidates) == 1
+    assert "成交量相對放大" in candidates[0].reasons

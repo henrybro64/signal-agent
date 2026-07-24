@@ -46,6 +46,49 @@ data:
             symbols: ["2330"]
           CPO_optical:
             symbols: ["3081"]
+      # Research-oriented market assistant (reuses TWSE/TPEx movers).
+      # Disabled by default; enable locally or schedule a CronJob when ready.
+      tw_market_assistant:
+        enabled: false
+        timezone: Asia/Taipei
+        market_hours_only: true
+        top_n: 20
+        notify_language: zh-TW
+        sources:
+          - twse
+          - tpex
+
+    investment:
+      watchlist:
+        - "2330"
+        - "2454"
+      theme_mappings:
+        ai_server:
+          label: AI伺服器
+          keywords:
+            - 伺服器
+            - AI
+            - GPU
+            - 散熱
+            - 機殼
+            - 電源
+        cpo_optical:
+          label: CPO / 光通訊
+          keywords:
+            - 光通訊
+            - CPO
+            - 光纖
+            - 矽光子
+            - transceiver
+        semiconductor:
+          label: 半導體
+          keywords:
+            - 晶圓
+            - 封測
+            - IC
+            - ASIC
+            - CoWoS
+            - HBM
 
     notifiers:
       telegram:

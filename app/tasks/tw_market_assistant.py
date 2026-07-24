@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,30 +14,23 @@ from app.config import (
     load_env_settings,
     validate_telegram_notifier_secrets,
 )
-from app.core import (
-    SignalItem,
-    finish_signal_run,
-    is_tw_market_open,
-    start_signal_run,
-    upsert_signal,
-)
+from app.core import SignalItem, upsert_signal
 from app.core.tw_stock_utils import (
     TwStockMarketReport,
     build_market_reports,
     count_reported_movers,
 )
 from app.formatters import build_tw_market_assistant_digest
-from app.notifiers import build_telegram_notifier
 from app.scorers.tw_signal_classifier import (
     build_research_candidates,
     find_watchlist_hits,
     summarize_theme_activity,
 )
 from app.sources import build_tw_stock_mover_sources_for_names
-from app.tasks.tw_stock_movers import NotificationOutcome, TwStockMoversSummary
+from app.tasks.tw_stock_movers import TwStockMoversSummary
 
+from . import market_task_support as market_support
 from .base import BaseTask
-from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
 
 
 @dataclass(slots=True)
@@ -57,9 +49,9 @@ class TwMarketAssistantTask(BaseTask):
     name: ClassVar[str] = "tw_market_assistant"
 
     def run(self) -> None:
-        db_path = _resolve_db_path()
+        db_path = market_support.resolve_task_db_path()
         stock_summary = TwStockMoversSummary()
-        notification = NotificationOutcome(status="not_applicable")
+        notification = market_support.NotificationOutcome(status="not_applicable")
         market_reports: list[TwStockMarketReport] = []
         watchlist_hits: list[SignalItem] = []
         research_candidate_count = 0
@@ -79,22 +71,15 @@ class TwMarketAssistantTask(BaseTask):
                 raise ValueError("Task 'tw_market_assistant' is disabled in config")
 
             env = load_env_settings()
-            if task_config.market_hours_only and not is_tw_market_open():
-                self.emit_log(
-                    "task_skipped",
-                    message="Taiwan market assistant task skipped",
-                    db_path=str(db_path),
-                    skip_reason="taiwan_market_closed",
-                )
-                print(
-                    "tw_market_assistant task skipped using "
-                    f"{self.config_path}: Taiwan market is closed"
-                )
-                self.end_task_run(
+            if (
+                task_config.market_hours_only
+                and market_support.skip_outside_tw_market_hours(
+                    self,
                     db_path=db_path,
-                    status="success",
-                    notified_count=0,
+                    task_name=self.name,
+                    skip_log_message="Taiwan market assistant task skipped",
                 )
+            ):
                 return
 
             sources = build_tw_stock_mover_sources_for_names(
@@ -104,11 +89,22 @@ class TwMarketAssistantTask(BaseTask):
             if not sources:
                 raise ValueError("No Taiwan stock-mover sources are configured.")
 
-            stock_summary = _fetch_and_persist_sources(
+            stock_summary = self._fetch_and_persist_sources(
                 sources=sources,
                 db_path=db_path,
-                emit_log=self.emit_log,
             )
+            # Fail before Telegram so missing secrets / send errors cannot mask
+            # an all-sources-failed outcome.
+            if stock_summary.successful_sources == 0:
+                failure_summary = "; ".join(
+                    f"{source_name}: {message}"
+                    for source_name, message in stock_summary.failed_sources
+                )
+                raise ValueError(
+                    "All configured Taiwan stock-mover sources failed: "
+                    f"{failure_summary}"
+                )
+
             market_reports = build_market_reports(
                 stock_summary.stock_items,
                 limit=task_config.top_n,
@@ -128,21 +124,22 @@ class TwMarketAssistantTask(BaseTask):
             )
             research_candidate_count = len(research_candidates)
 
+            digest = build_tw_market_assistant_digest(
+                summary=stock_summary,
+                market_reports=market_reports,
+                summary_bullets=summary_bullets,
+                watchlist_hits=watchlist_hits,
+                research_candidates=research_candidates,
+                top_n=task_config.top_n,
+                timezone_name=task_config.timezone,
+            )
             snapshot_saved = _persist_assistant_outputs(
                 db_path=db_path,
                 task_config=task_config,
                 market_reports=market_reports,
                 watchlist_hits=watchlist_hits,
                 research_candidates=research_candidates,
-                digest=build_tw_market_assistant_digest(
-                    summary=stock_summary,
-                    market_reports=market_reports,
-                    summary_bullets=summary_bullets,
-                    watchlist_hits=watchlist_hits,
-                    research_candidates=research_candidates,
-                    top_n=task_config.top_n,
-                    timezone_name=task_config.timezone,
-                ),
+                digest=digest,
             )
 
             print(
@@ -160,28 +157,17 @@ class TwMarketAssistantTask(BaseTask):
                 )
             )
 
-            notification = self._maybe_send_telegram_digest(
+            notification = market_support.send_optional_telegram_digest(
+                self,
+                digest=digest,
                 config=config,
                 env=env,
-                stock_summary=stock_summary,
-                market_reports=market_reports,
-                summary_bullets=summary_bullets,
-                watchlist_hits=watchlist_hits,
-                research_candidates=research_candidates,
-                top_n=task_config.top_n,
-                timezone_name=task_config.timezone,
                 db_path=db_path,
+                notified_count=research_candidate_count,
+                empty_status="skipped_no_items",
+                empty_message="telegram digest skipped: no market data to report",
+                validate_secrets=validate_telegram_notifier_secrets,
             )
-
-            if stock_summary.successful_sources == 0:
-                failure_summary = "; ".join(
-                    f"{source_name}: {message}"
-                    for source_name, message in stock_summary.failed_sources
-                )
-                raise ValueError(
-                    "All configured Taiwan stock-mover sources failed: "
-                    f"{failure_summary}"
-                )
 
             self.emit_log(
                 "task_completed",
@@ -237,118 +223,31 @@ class TwMarketAssistantTask(BaseTask):
             )
             raise
 
-    def _maybe_send_telegram_digest(
+    def _fetch_and_persist_sources(
         self,
         *,
-        config,
-        env,
-        stock_summary: TwStockMoversSummary,
-        market_reports: list[TwStockMarketReport],
-        summary_bullets: list[str],
-        watchlist_hits: list[SignalItem],
-        research_candidates,
-        top_n: int,
-        timezone_name: str,
+        sources,
         db_path: Path,
-    ) -> NotificationOutcome:
-        digest = build_tw_market_assistant_digest(
-            summary=stock_summary,
-            market_reports=market_reports,
-            summary_bullets=summary_bullets,
-            watchlist_hits=watchlist_hits,
-            research_candidates=research_candidates,
-            top_n=top_n,
-            timezone_name=timezone_name,
-        )
-        if not digest:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_no_items",
-                notified_count=0,
+    ) -> TwStockMoversSummary:
+        summary = TwStockMoversSummary()
+
+        for source in sources:
+            fetch = market_support.fetch_tw_stock_mover_source(
+                self,
+                source=source,
+                db_path=db_path,
+                failed_sources=summary.failed_sources,
             )
-            print("telegram digest skipped: no market data to report")
-            return NotificationOutcome(status="skipped_no_items")
+            if fetch is None:
+                continue
 
-        if not config.notifiers.telegram.enabled:
-            self.emit_log(
-                "notification_skipped",
-                message="Telegram digest skipped",
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="skipped_notifier_disabled",
-                notified_count=0,
-            )
-            print("telegram digest skipped: notifier disabled in config")
-            return NotificationOutcome(status="skipped_notifier_disabled")
-
-        validate_telegram_notifier_secrets(
-            telegram_enabled=True,
-            env=env,
-        )
-        notifier = build_telegram_notifier(env=env)
-        try:
-            notifier.send_message(digest)
-        except Exception as exc:
-            self.emit_log(
-                "notification_failed",
-                message="Telegram digest failed",
-                level=logging.ERROR,
-                exc_info=exc,
-                db_path=str(db_path),
-                notifier="telegram",
-                notification_status="failed",
-                attempted_notified_count=len(research_candidates),
-                error=str(exc),
-            )
-            raise
-
-        self.emit_log(
-            "notification_sent",
-            message="Telegram digest sent",
-            db_path=str(db_path),
-            notifier="telegram",
-            notification_status="sent",
-            notified_count=len(research_candidates),
-        )
-        print("telegram digest sent")
-        return NotificationOutcome(
-            status="sent",
-            notified_count=len(research_candidates),
-        )
-
-
-def _fetch_and_persist_sources(
-    *,
-    sources,
-    db_path: Path,
-    emit_log,
-) -> TwStockMoversSummary:
-    summary = TwStockMoversSummary()
-
-    for source in sources:
-        run_id = start_signal_run(source.name, db_path=db_path)
-        emit_log(
-            "source_run_started",
-            message="Source run started",
-            db_path=str(db_path),
-            source_name=source.name,
-            run_id=run_id,
-        )
-        try:
-            fetched_items = source.fetch()
-            stock_items = [
-                item for item in fetched_items if item.item_type == "tw_stock_mover"
-            ]
-            ignored_count = len(fetched_items) - len(stock_items)
+            ignored_count = len(fetch.fetched_items) - len(fetch.stock_items)
             summary.ignored_non_stock_count += ignored_count
-            summary.fetched_count += len(stock_items)
+            summary.fetched_count += len(fetch.stock_items)
 
             source_inserted = 0
             source_updated = 0
-            for item in stock_items:
+            for item in fetch.stock_items:
                 result = upsert_signal(item, db_path=db_path)
                 if result.action == "inserted":
                     source_inserted += 1
@@ -358,48 +257,21 @@ def _fetch_and_persist_sources(
                     summary.duplicate_count += 1
                 summary.stock_items.append(item)
 
-            finish_signal_run(
-                run_id,
-                status="completed",
-                fetched_count=len(stock_items),
+            market_support.complete_tw_stock_source_run(
+                self,
+                source_name=source.name,
+                fetch=fetch,
+                db_path=db_path,
                 inserted_count=source_inserted,
                 updated_count=source_updated,
-                db_path=db_path,
-            )
-            emit_log(
-                "source_run_completed",
-                message="Source run completed",
-                db_path=str(db_path),
-                source_name=source.name,
-                run_id=run_id,
-                fetched_count=len(fetched_items),
-                accepted_count=len(stock_items),
                 ignored_count=ignored_count,
                 new_count=source_inserted,
                 duplicate_count=source_updated,
                 skipped_count=source_updated + ignored_count,
             )
             summary.successful_sources += 1
-        except Exception as exc:
-            finish_signal_run(
-                run_id,
-                status="failed",
-                error=str(exc),
-                db_path=db_path,
-            )
-            summary.failed_sources.append((source.name, str(exc)))
-            emit_log(
-                "source_run_failed",
-                message="Source run failed",
-                level=logging.ERROR,
-                exc_info=exc,
-                db_path=str(db_path),
-                source_name=source.name,
-                run_id=run_id,
-                error=str(exc),
-            )
 
-    return summary
+        return summary
 
 
 def _persist_assistant_outputs(
@@ -499,10 +371,3 @@ def _build_console_summary(
     for source_name, message in stock_summary.failed_sources:
         lines.append(f"source failed: {source_name}: {message}")
     return lines
-
-
-def _resolve_db_path() -> Path:
-    raw_path = os.getenv(DB_PATH_ENV_VAR)
-    if raw_path:
-        return Path(raw_path).expanduser()
-    return DEFAULT_DB_PATH

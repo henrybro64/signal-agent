@@ -235,12 +235,18 @@ signal-agent/
 - `python main.py --task stock_watchlist` runs personal watchlist threshold
   alerts during market hours, persists `stock_watchlist_alert` signals, and
   sends Telegram only when newly triggered alerts exist.
+- `python main.py --task tw_market_assistant` builds a research-oriented Taiwan
+  market digest (theme bullets, watchlist hits, ranked movers, research
+  candidates) during market hours. It is research-only — never buy/sell advice.
+  Enable under `tasks.tw_market_assistant` and optional `investment:` theme
+  mappings; k3s ships it disabled with no CronJob until you schedule it.
 - `python main.py --telegram-test` sends a one-off Telegram test message using
   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
 ## Structured logging
 
-`fetch`, `job_search`, `tw_stock_movers`, and `stock_watchlist` emit JSON log
+`fetch`, `job_search`, `tw_stock_movers`, `stock_watchlist`, and
+`tw_market_assistant` emit JSON log
 lines to stdout so Docker and k3s can collect task, source, and notification
 events from container logs. Human-readable summaries are still printed for local
 CLI use.
@@ -585,6 +591,27 @@ tasks:
         symbols: ["2330"]
       CPO_optical:
         symbols: ["3081"]
+  tw_market_assistant:
+    enabled: false
+    timezone: Asia/Taipei
+    market_hours_only: true
+    top_n: 20
+    notify_language: zh-TW
+    sources:
+      - twse
+      - tpex
+
+investment:
+  watchlist:
+    - "2330"
+    - "2454"
+  theme_mappings:
+    ai_server:
+      label: AI伺服器
+      keywords:
+        - 伺服器
+        - AI
+        - GPU
 
 notifiers:
   telegram:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -9,6 +10,10 @@ from app.core import SignalItem
 from app.core.config import ThemeMappingConfig
 from app.core.tw_stock_utils import TwStockMarketReport
 from app.core.tw_stock_utils import change_percent as stock_change_percent
+
+# Short ASCII tokens (IC, AI, GPU, …) use word boundaries so they do not
+# match accidental substrings inside English words like "price".
+_SHORT_ASCII_KEYWORD_MAX_LEN: Final[int] = 3
 
 FORBIDDEN_RECOMMENDATION_PHRASES: Final[tuple[str, ...]] = (
     "應該買進",
@@ -46,7 +51,7 @@ def classify_item_themes(
     haystack = _item_search_text(item).lower()
     matched_labels: list[str] = []
     for mapping in theme_mappings.values():
-        if any(keyword.lower() in haystack for keyword in mapping.keywords):
+        if any(_keyword_matches(keyword, haystack) for keyword in mapping.keywords):
             matched_labels.append(mapping.label)
     return matched_labels
 
@@ -218,11 +223,23 @@ def _candidate_priority(candidate: ResearchCandidate) -> int:
 
 
 def _has_volume_signal(item: SignalItem) -> bool:
+    """Require real volume metadata before claiming a volume spike."""
+
     volume = item.metadata.get("volume")
-    percent = stock_change_percent(item)
     if not isinstance(volume, int | float) or volume <= 0:
-        return percent >= VOLUME_SPIKE_CHANGE_THRESHOLD
+        return False
+    percent = stock_change_percent(item)
     return percent >= VOLUME_SPIKE_CHANGE_THRESHOLD and volume >= 1_000
+
+
+def _keyword_matches(keyword: str, haystack: str) -> bool:
+    needle = keyword.strip().lower()
+    if not needle:
+        return False
+    if needle.isascii() and len(needle) <= _SHORT_ASCII_KEYWORD_MAX_LEN:
+        pattern = rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])"
+        return re.search(pattern, haystack) is not None
+    return needle in haystack
 
 
 def _item_search_text(item: SignalItem) -> str:

@@ -9,6 +9,7 @@ from app.formatters.tw_market_digest import build_tw_market_assistant_digest
 from app.scorers.tw_signal_classifier import build_research_candidates
 from app.sources.dummy import SAMPLE_OBSERVED_AT
 from app.tasks import TwMarketAssistantTask
+from app.tasks import market_task_support as market_task_support_module
 from app.tasks import tw_market_assistant as tw_market_assistant_module
 from app.tasks.tw_stock_movers import TwStockMoversSummary
 
@@ -111,6 +112,72 @@ def test_build_tw_market_assistant_digest_includes_research_and_risk_sections() 
     assert "應該賣出" not in digest
 
 
+def test_build_tw_market_assistant_digest_uses_configured_top_n() -> None:
+    summary = TwStockMoversSummary(successful_sources=1, fetched_count=1)
+    reports = [
+        TwStockMarketReport(
+            market_key="twse",
+            title="TWSE listed (上市)",
+            gainers=[_stock_item("2330", "台積電", 3.5, market="twse")],
+            losers=[],
+        )
+    ]
+
+    digest = build_tw_market_assistant_digest(
+        summary=summary,
+        market_reports=reports,
+        summary_bullets=[],
+        watchlist_hits=[],
+        research_candidates=[],
+        top_n=5,
+        timezone_name="Asia/Taipei",
+    )
+
+    assert "上市前5漲幅" in digest
+    assert "上市前20漲幅" not in digest
+
+
+def _prepare_assistant_run(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    db_path: Path,
+    sources: list | None = None,
+    skip_reason: str | None = None,
+    notifier: object | None = None,
+) -> None:
+    monkeypatch.setattr(
+        market_task_support_module,
+        "resolve_task_db_path",
+        lambda: db_path,
+    )
+    monkeypatch.setattr(
+        market_task_support_module,
+        "tw_market_skip_reason",
+        lambda: skip_reason,
+    )
+    if sources is not None:
+        monkeypatch.setattr(
+            tw_market_assistant_module,
+            "build_tw_stock_mover_sources_for_names",
+            lambda _config, _names: sources,
+        )
+    if notifier is not None:
+        monkeypatch.setattr(
+            "app.tasks.market_task_support.build_telegram_notifier",
+            lambda env=None: notifier,
+        )
+        monkeypatch.setattr(
+            tw_market_assistant_module,
+            "validate_telegram_notifier_secrets",
+            lambda **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            tw_market_assistant_module,
+            "load_env_settings",
+            lambda: object(),
+        )
+
+
 def test_tw_market_assistant_task_skips_when_market_is_closed(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -118,14 +185,28 @@ def test_tw_market_assistant_task_skips_when_market_is_closed(
 ) -> None:
     config_path = _write_config(tmp_path)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_market_assistant_module, "DEFAULT_DB_PATH", db_path)
-    monkeypatch.setattr(tw_market_assistant_module, "is_tw_market_open", lambda: False)
+    _prepare_assistant_run(
+        monkeypatch,
+        db_path=db_path,
+        skip_reason="taiwan_market_closed",
+    )
 
     TwMarketAssistantTask(config_path=str(config_path)).run()
 
     captured = capsys.readouterr()
     assert "tw_market_assistant task skipped" in captured.out
     assert "Taiwan market is closed" in captured.out
+    with sqlite3.connect(db_path) as connection:
+        status, error = connection.execute(
+            """
+            SELECT status, error_message
+            FROM task_runs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert status == "skipped"
+    assert error == "taiwan_market_closed"
 
 
 def test_tw_market_assistant_task_persists_snapshot_and_candidates(
@@ -135,29 +216,17 @@ def test_tw_market_assistant_task_persists_snapshot_and_candidates(
 ) -> None:
     config_path = _write_config(tmp_path)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_market_assistant_module, "DEFAULT_DB_PATH", db_path)
-    monkeypatch.setattr(tw_market_assistant_module, "is_tw_market_open", lambda: True)
-    monkeypatch.setattr(
-        tw_market_assistant_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: [TwseStockSource(), TpexStockSource()],
-    )
-    monkeypatch.setattr(
-        tw_market_assistant_module,
-        "validate_telegram_notifier_secrets",
-        lambda **kwargs: None,
-    )
-
     sent_messages: list[str] = []
 
     class FakeNotifier:
         def send_message(self, text: str) -> None:
             sent_messages.append(text)
 
-    monkeypatch.setattr(
-        tw_market_assistant_module,
-        "build_telegram_notifier",
-        lambda env: FakeNotifier(),
+    _prepare_assistant_run(
+        monkeypatch,
+        db_path=db_path,
+        sources=[TwseStockSource(), TpexStockSource()],
+        notifier=FakeNotifier(),
     )
 
     TwMarketAssistantTask(config_path=str(config_path)).run()
@@ -201,27 +270,15 @@ def test_tw_market_assistant_task_raises_when_all_sources_fail(
 ) -> None:
     config_path = _write_config(tmp_path)
     db_path = tmp_path / "signals.sqlite3"
-    monkeypatch.setattr(tw_market_assistant_module, "DEFAULT_DB_PATH", db_path)
-    monkeypatch.setattr(tw_market_assistant_module, "is_tw_market_open", lambda: True)
-    monkeypatch.setattr(
-        tw_market_assistant_module,
-        "build_tw_stock_mover_sources_for_names",
-        lambda _config, _names: [FailingTwseSource()],
+    _prepare_assistant_run(
+        monkeypatch,
+        db_path=db_path,
+        sources=[FailingTwseSource()],
     )
-    monkeypatch.setattr(
-        tw_market_assistant_module,
-        "validate_telegram_notifier_secrets",
-        lambda **kwargs: None,
-    )
-    class FakeNotifier:
-        def send_message(self, text: str) -> None:
-            return None
-
-    monkeypatch.setattr(
-        tw_market_assistant_module,
-        "build_telegram_notifier",
-        lambda env: FakeNotifier(),
-    )
+    # Leave Telegram secrets unpatched: all-sources-failed must surface even
+    # when Telegram would otherwise raise a secret/validation error first.
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
 
     with pytest.raises(
         ValueError,

@@ -38,8 +38,9 @@ tasks:
       CPO_optical:
         symbols: ["3081"]
   # Research-oriented market assistant (reuses TWSE/TPEx movers).
+  # Disabled by default; enable locally or schedule a CronJob when ready.
   tw_market_assistant:
-    enabled: true
+    enabled: false
     timezone: Asia/Taipei
     market_hours_only: true
     top_n: 20
