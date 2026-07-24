@@ -4,14 +4,13 @@ from pathlib import Path
 import pytest
 
 from app.core import SignalItem
-from app.core.tw_stock_utils import TwStockMarketReport
+from app.core.tw_stock_utils import TwStockMarketReport, TwStockMoversSummary
 from app.formatters.tw_market_digest import build_tw_market_assistant_digest
 from app.scorers.tw_signal_classifier import build_research_candidates
 from app.sources.dummy import SAMPLE_OBSERVED_AT
 from app.tasks import TwMarketAssistantTask
 from app.tasks import market_task_support as market_task_support_module
 from app.tasks import tw_market_assistant as tw_market_assistant_module
-from app.tasks.tw_stock_movers import TwStockMoversSummary
 
 
 class TwseStockSource:

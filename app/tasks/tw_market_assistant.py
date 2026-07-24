@@ -17,6 +17,7 @@ from app.config import (
 from app.core import SignalItem, upsert_signal
 from app.core.tw_stock_utils import (
     TwStockMarketReport,
+    TwStockMoversSummary,
     build_market_reports,
     count_reported_movers,
 )
@@ -27,7 +28,6 @@ from app.scorers.tw_signal_classifier import (
     summarize_theme_activity,
 )
 from app.sources import build_tw_stock_mover_sources_for_names
-from app.tasks.tw_stock_movers import TwStockMoversSummary
 
 from . import market_task_support as market_support
 from .base import BaseTask

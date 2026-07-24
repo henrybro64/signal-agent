@@ -61,10 +61,14 @@ class TwStockMoversTaskConfig:
     timezone: str
 
 
+_DEFAULT_TW_TIMEZONE = "Asia/Taipei"
+_TW_MARKET_ASSISTANT_CONFIG_PATH = "tasks.tw_market_assistant"
+
+
 @dataclass(slots=True)
 class TwMarketAssistantTaskConfig:
     enabled: bool = False
-    timezone: str = "Asia/Taipei"
+    timezone: str = _DEFAULT_TW_TIMEZONE
     market_hours_only: bool = True
     top_n: int = 20
     notify_language: str = "zh-TW"
@@ -387,42 +391,42 @@ def _parse_tw_market_assistant_config(
             data,
             "enabled",
             default=False,
-            parent_path="tasks.tw_market_assistant",
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
             source_name=source_name,
         ),
         timezone=_optional_str(
             data,
             "timezone",
-            default="Asia/Taipei",
-            parent_path="tasks.tw_market_assistant",
+            default=_DEFAULT_TW_TIMEZONE,
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
             source_name=source_name,
         ),
         market_hours_only=_optional_bool(
             data,
             "market_hours_only",
             default=True,
-            parent_path="tasks.tw_market_assistant",
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
             source_name=source_name,
         ),
         top_n=_optional_int(
             data,
             "top_n",
             default=20,
-            parent_path="tasks.tw_market_assistant",
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
             source_name=source_name,
         ),
         notify_language=_optional_str(
             data,
             "notify_language",
             default="zh-TW",
-            parent_path="tasks.tw_market_assistant",
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
             source_name=source_name,
         ),
         sources=_optional_str_list(
             data,
             "sources",
             default=["twse", "tpex"],
-            parent_path="tasks.tw_market_assistant",
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
             source_name=source_name,
         ),
     )

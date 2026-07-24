@@ -15,10 +15,17 @@ from app.core import (
     tw_market_skip_label,
     tw_market_skip_reason,
 )
+from app.core import tw_stock_utils as tw_stock_utils
 from app.notifiers import build_telegram_notifier
 
 from .base import BaseTask
 from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
+
+# Re-export metadata helpers so market tasks keep a stable import path.
+change_percent = tw_stock_utils.change_percent
+company_name = tw_stock_utils.company_name_for_item
+source_warning_label = tw_stock_utils.source_warning_label
+stock_code = tw_stock_utils.stock_code_for_item
 
 
 class _NamedFetchSource(Protocol):
@@ -200,39 +207,6 @@ def complete_tw_stock_source_run(
         accepted_count=len(fetch.stock_items),
         **extra_log_fields,
     )
-
-
-def stock_code(item: SignalItem) -> str:
-    value = item.metadata.get("stock_code")
-    if isinstance(value, str):
-        return value.strip()
-    return ""
-
-
-def company_name(item: SignalItem) -> str:
-    value = item.metadata.get("company")
-    if isinstance(value, str):
-        return value.strip()
-    return ""
-
-
-def change_percent(item: SignalItem) -> float:
-    value = item.metadata.get("change_percent")
-    if isinstance(value, int | float):
-        return float(value)
-    return 0.0
-
-
-_SOURCE_WARNING_LABELS: dict[str, str] = {
-    "twse": "上市資料",
-    "tpex": "上櫃資料",
-}
-
-
-def source_warning_label(source_name: str) -> str:
-    """Traditional Chinese label for a quote-source outage in digests."""
-
-    return _SOURCE_WARNING_LABELS.get(source_name, source_name)
 
 
 def send_optional_telegram_digest(

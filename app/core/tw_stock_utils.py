@@ -11,6 +11,23 @@ _MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
     ("twse", "TWSE listed (上市)"),
     ("tpex", "TPEx OTC (上櫃)"),
 )
+_SOURCE_WARNING_LABELS: Final[dict[str, str]] = {
+    "twse": "上市資料",
+    "tpex": "上櫃資料",
+}
+
+
+@dataclass(slots=True)
+class TwStockMoversSummary:
+    """Collected counts and movers for one Taiwan stock-mover style run."""
+
+    successful_sources: int = 0
+    fetched_count: int = 0
+    new_count: int = 0
+    duplicate_count: int = 0
+    stock_items: list[SignalItem] = field(default_factory=list)
+    failed_sources: list[tuple[str, str]] = field(default_factory=list)
+    ignored_non_stock_count: int = 0
 
 
 @dataclass(slots=True)
@@ -146,3 +163,9 @@ def market_key_for_item(item: SignalItem) -> str:
         return item.source
 
     return item.source
+
+
+def source_warning_label(source_name: str) -> str:
+    """Traditional Chinese label for a quote-source outage in digests."""
+
+    return _SOURCE_WARNING_LABELS.get(source_name, source_name)
