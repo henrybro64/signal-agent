@@ -78,19 +78,12 @@ def select_top_gainers(
     limit: int,
     market_key: str | None = None,
 ) -> list[SignalItem]:
-    if limit <= 0 or not items:
-        return []
-    gainers = [
-        item
-        for item in items
-        if change_percent(item) > 0
-        and (market_key is None or market_key_for_item(item) == market_key)
-    ]
-    return sorted(
-        gainers,
-        key=lambda item: (change_percent(item), item.observed_at),
-        reverse=True,
-    )[:limit]
+    return _select_ranked_movers(
+        items,
+        limit=limit,
+        market_key=market_key,
+        positive=True,
+    )
 
 
 def select_top_losers(
@@ -99,18 +92,47 @@ def select_top_losers(
     limit: int,
     market_key: str | None = None,
 ) -> list[SignalItem]:
+    return _select_ranked_movers(
+        items,
+        limit=limit,
+        market_key=market_key,
+        positive=False,
+    )
+
+
+def _select_ranked_movers(
+    items: list[SignalItem],
+    *,
+    limit: int,
+    market_key: str | None,
+    positive: bool,
+) -> list[SignalItem]:
     if limit <= 0 or not items:
         return []
-    losers = [
-        item
-        for item in items
-        if change_percent(item) < 0
-        and (market_key is None or market_key_for_item(item) == market_key)
-    ]
-    return sorted(
-        losers,
-        key=lambda item: (change_percent(item), -item.observed_at.timestamp()),
-    )[:limit]
+
+    def matches(item: SignalItem) -> bool:
+        percent = change_percent(item)
+        if positive:
+            if percent <= 0:
+                return False
+        elif percent >= 0:
+            return False
+        return market_key is None or market_key_for_item(item) == market_key
+
+    ranked = [item for item in items if matches(item)]
+    if positive:
+        ranked.sort(
+            key=lambda item: (change_percent(item), item.observed_at),
+            reverse=True,
+        )
+    else:
+        ranked.sort(
+            key=lambda item: (
+                change_percent(item),
+                -item.observed_at.timestamp(),
+            ),
+        )
+    return ranked[:limit]
 
 
 def render_digest_ranked_line(index: int, item: SignalItem) -> str:

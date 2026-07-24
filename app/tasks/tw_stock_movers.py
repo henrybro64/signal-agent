@@ -15,7 +15,6 @@ from app.config import (
 )
 from app.core import (
     SignalItem,
-    upsert_signal,
 )
 from app.core.tw_stock_utils import (
     TwStockMarketReport,
@@ -34,8 +33,7 @@ from app.sources import build_tw_stock_mover_sources
 from .base import BaseTask
 from .market_task_support import (
     NotificationOutcome,
-    complete_tw_stock_source_run,
-    fetch_tw_stock_mover_source,
+    collect_tw_stock_mover_summary,
     resolve_task_db_path,
     send_optional_telegram_digest,
     skip_outside_tw_market_hours,
@@ -83,45 +81,11 @@ class TwStockMoversTask(BaseTask):
             sources = build_tw_stock_mover_sources(config)
             if not sources:
                 raise ValueError("No Taiwan stock-mover sources are configured.")
-            for source in sources:
-                fetch = fetch_tw_stock_mover_source(
-                    self,
-                    source=source,
-                    db_path=db_path,
-                    failed_sources=summary.failed_sources,
-                )
-                if fetch is None:
-                    continue
-
-                ignored_count = len(fetch.fetched_items) - len(fetch.stock_items)
-                summary.ignored_non_stock_count += ignored_count
-                summary.fetched_count += len(fetch.stock_items)
-
-                source_inserted = 0
-                source_updated = 0
-                for item in fetch.stock_items:
-                    result = upsert_signal(item, db_path=db_path)
-                    if result.action == "inserted":
-                        source_inserted += 1
-                        summary.new_count += 1
-                    else:
-                        source_updated += 1
-                        summary.duplicate_count += 1
-                    summary.stock_items.append(item)
-
-                complete_tw_stock_source_run(
-                    self,
-                    source_name=source.name,
-                    fetch=fetch,
-                    db_path=db_path,
-                    inserted_count=source_inserted,
-                    updated_count=source_updated,
-                    ignored_count=ignored_count,
-                    new_count=source_inserted,
-                    duplicate_count=source_updated,
-                    skipped_count=source_updated + ignored_count,
-                )
-                summary.successful_sources += 1
+            summary = collect_tw_stock_mover_summary(
+                self,
+                sources=sources,
+                db_path=db_path,
+            )
 
             market_reports = build_market_reports(
                 summary.stock_items,

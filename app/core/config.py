@@ -492,7 +492,7 @@ def _parse_stock_watchlist_task_config(
     if not data:
         return StockWatchlistTaskConfig(
             enabled=False,
-            timezone="Asia/Taipei",
+            timezone=_DEFAULT_TW_TIMEZONE,
             sources=list(_DEFAULT_STOCK_WATCHLIST_SOURCES),
             symbols=[],
             themes={},
@@ -516,7 +516,7 @@ def _parse_stock_watchlist_task_config(
         timezone = _optional_str(
             data,
             "timezone",
-            default="Asia/Taipei",
+            default=_DEFAULT_TW_TIMEZONE,
             parent_path=parent_path,
             source_name=source_name,
         )
