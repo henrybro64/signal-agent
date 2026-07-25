@@ -98,17 +98,18 @@ repo-wide rewrite.
 ## File-level direction
 
 Use each GitHub issue body as the source of truth for acceptance criteria.
-Starting points (names may shift slightly to match package conventions):
+**Preferred package roots** (freeze these names in the first child PR that
+creates them; rename only with an explicit follow-up that updates this map):
 
-| Issue | Likely touch points |
-|-------|---------------------|
-| #61 | `app/llm/` (base, models, openai, fake, factory); refactor `app/scorers/job_llm_scorer.py` to consume the gateway |
-| #62 | `app/tools/` (base, models, registry, job/stock/notification/health wrappers); allowlist only |
-| #63 | optional `.[langchain]`; `app/integrations/langchain/`; no LangChain imports in domain packages |
-| #64 | `app/workflows/`, `app/tasks/job_research_agent.py`; keep `job_search` unchanged |
+| Issue | Preferred packages / entry points |
+|-------|-----------------------------------|
+| #61 | `app/llm/` (`base`, `models`, `openai_provider`, `fake_provider`, `factory`); refactor `app/scorers/job_llm_scorer.py` onto the gateway |
+| #62 | `app/tools/` (`base`, `models`, `registry`, job/stock/notification/health wrappers); allowlist only |
+| #63 | optional `.[langchain]` extra; `app/integrations/langchain/`; no LangChain imports in domain packages |
+| #64 | `app/workflows/` + additive `app/tasks/job_research_agent.py`; keep `job_search` unchanged |
 | #65 | `app/memory/`; SQLite migrations for memory metadata; keyword retrieval before optional vectors |
-| #66 | `app/evaluation/`, `evals/`; offline CI subset; redacted traces |
-| #67 | optional `.[mcp]`; `app/integrations/mcp/`; localhost + allowlisted read tools by default |
+| #66 | `app/evaluation/` + `evals/`; offline CI subset; redacted traces |
+| #67 | optional `.[mcp]` extra; `app/integrations/mcp/`; localhost + allowlisted read tools by default |
 
 ## Implementation principles
 
@@ -137,6 +138,10 @@ Starting points (names may shift slightly to match package conventions):
 
 ## Closing #60
 
-Shipping this roadmap (documented order, dependency direction, and child-issue
-map) satisfies #60. Implementation belongs in the child PRs (#61–#67), each
-narrow and independently reviewable.
+Shipping this roadmap (documented order, dependency direction, preferred
+package roots, and child-issue map) satisfies **#60**. The checklist on the
+GitHub issue body tracks **child implementation** (#61–#67), not roadmap
+authorship — leave those boxes unchecked until each child PR lands.
+
+Implementation belongs in the child PRs (#61–#67), each narrow and
+independently reviewable.

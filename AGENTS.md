@@ -48,9 +48,11 @@ signal-agent/
 │   │   ├── config.py       # config.yaml loader
 │   │   ├── db.py           # SQLite storage, dedup, run history
 │   │   ├── migrations.py   # SQLite schema versioning (PRAGMA user_version)
+│   │   ├── health.py       # --health / --status scheduled-run report
 │   │   ├── secrets.py      # env-based secrets
 │   │   ├── time_utils.py   # Taiwan market-hours helpers
 │   │   ├── tw_market_calendar.py  # static TW holiday calendar
+│   │   ├── tw_stock_utils.py  # shared TW mover ranking / summary helpers
 │   │   ├── logging.py      # structured JSON logging
 │   │   └── error_handling.py  # Telegram failure alerts + redaction
 │   ├── data/
@@ -72,13 +74,17 @@ signal-agent/
 │   │   ├── job_search.py   # job digest workflow
 │   │   ├── tw_stock_movers.py  # TW stock mover digest workflow
 │   │   ├── stock_watchlist.py  # personal watchlist threshold alerts
+│   │   ├── tw_market_assistant.py  # research-oriented TW market digest
 │   │   └── market_task_support.py  # shared TW market task helpers
 │   ├── scorers/
 │   │   ├── job_rule_scorer.py
 │   │   ├── job_llm_scorer.py   # optional; fail open to rules
 │   │   ├── job_score_pipeline.py  # two-stage rule → LLM orchestration
-│   │   └── job_search.py   # profile loading + score orchestration
-│   ├── profiles/           # packaged job-scoring profiles (*.md)
+│   │   ├── job_search.py   # profile loading + score orchestration
+│   │   └── tw_signal_classifier.py  # TW theme / research-candidate rules
+│   ├── formatters/
+│   │   └── tw_market_digest.py  # Traditional Chinese assistant digest text
+│   ├── profiles/           # packaged scoring/preference text (*.md)
 │   ├── sql/
 │   │   └── migrations/     # packaged SQLite migrations (NNN_name.sql)
 │   └── notifiers/
@@ -103,10 +109,11 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 
 | Layer | Responsibility | Do not |
 |-------|----------------|--------|
-| `core` | Models, config, DB, secrets, time, logging, error alerts | Provider HTTP/scrape logic |
+| `core` | Models, config, DB, secrets, time, logging, error alerts, TW stock helpers | Provider HTTP/scrape logic |
 | `sources` | One provider → `list[SignalItem]` | Scoring, Telegram, CLI |
 | `tasks` | One end-to-end workflow | Reimplement storage/notifier internals |
-| `scorers` | Ranking / filtering | Fetching remote data |
+| `scorers` | Ranking / filtering / research classification | Fetching remote data |
+| `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |
 | `notifiers` | Outbound delivery | Business ranking rules |
 | `profiles` | Packaged preference text for scorers | Secrets |
 
@@ -235,8 +242,8 @@ deterministic tasks; LangChain/LangGraph/MCP remain optional extras.
 Use each GitHub issue body as the source of truth for acceptance criteria.
 Starting points (see also the M7 roadmap doc):
 
-| Issue | Likely touch points |
-|-------|---------------------|
+| Issue | Preferred packages / entry points |
+|-------|-----------------------------------|
 | #61 | `app/llm/`, refactor `app/scorers/job_llm_scorer.py` onto the gateway |
 | #62 | `app/tools/` protocol + allowlisted registry wrappers |
 | #63 | optional `.[langchain]`; `app/integrations/langchain/` |

@@ -57,6 +57,29 @@ def test_m7_roadmap_separates_domain_from_adapters() -> None:
         assert domain in text, f"M7 roadmap should name domain package {domain}"
 
 
+def test_m7_roadmap_freezes_preferred_package_roots() -> None:
+    text = _roadmap_text()
+    lowered = text.lower()
+    assert "preferred package roots" in lowered
+    for package in (
+        "app/llm/",
+        "app/tools/",
+        "app/integrations/langchain/",
+        "app/workflows/",
+        "app/memory/",
+        "app/evaluation/",
+        "app/integrations/mcp/",
+    ):
+        assert package in text, f"M7 roadmap missing preferred package {package}"
+    assert "job_research_agent.py" in text
+
+
+def test_m7_roadmap_clarifies_issue_60_close_vs_child_checklist() -> None:
+    text = _roadmap_text().lower()
+    assert "child implementation" in text
+    assert "leave those boxes unchecked" in text or "unchecked until" in text
+
+
 def test_m7_roadmap_preserves_deterministic_workflows() -> None:
     text = _roadmap_text().lower()
     assert "deterministic" in text
