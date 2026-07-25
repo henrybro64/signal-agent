@@ -24,8 +24,8 @@ watchlists, investment assistants) without collapsing module boundaries.
 | Milestone | Scope | Status |
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
-| M6 | Hardening / extensions #49–#57 | **In progress** — through #52 done; #57 in progress |
-| M7 | LangChain-ready platform evolution #60–#67 | Later — only when asked |
+| M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
+| M7 | LangChain-ready platform evolution #60–#67 | **Roadmap ready** — implement child issues when asked |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -86,7 +86,8 @@ signal-agent/
 ├── sql/
 │   └── schema.sql          # docs pointer to app/sql/migrations/
 ├── docs/
-│   └── ubuntu-vm-deployment.md  # Ubuntu VM + Compose + cron/systemd runbook
+│   ├── ubuntu-vm-deployment.md  # Ubuntu VM + Compose + cron/systemd runbook
+│   └── m7-agent-platform-roadmap.md  # M7 LangChain-ready evolution map (#60–#67)
 ├── deploy/
 │   ├── ubuntu/             # cron wrappers, crontab.example, optional systemd units
 │   └── k3s/                # CronJob manifests (optional)
@@ -186,9 +187,10 @@ a regression is found. Paths below are the current landing spots for each slice.
 
 Also present from MVP bootstrap (not a separate open issue): `app/tasks/fetch.py`
 multi-source fetch/persist helper used for wiring and source-level failure isolation.
-## Next execution order (M6)
+## Completed M6 map (#49–#57)
 
-Work in this order unless a human asks otherwise:
+Historical hardening order (already merged). Archaeology only — do not reopen
+unless a regression is found.
 
 ```text
 1. #56  Ubuntu VM deployment runbook (cron / systemd + Compose) — DONE
@@ -199,34 +201,49 @@ Work in this order unless a human asks otherwise:
 6. #55  Two-stage job scoring with LLM budget and digest limits — DONE
 7. #51  Taiwan market holiday calendar in market-hours guard — DONE
 8. #52  Stock watchlist alert task (separate from top movers) — DONE
-9. #57  SQLite schema versioning and migration path
+9. #57  SQLite schema versioning and migration path — DONE
 ```
 
-Also open (schedule separately; not part of the M6 hardening sequence above):
+Also shipped outside the numbered M6 sequence: #29 Taiwan market assistant
+digest (`tw_market_assistant`) on PR #69.
 
-- #29 — Taiwan stock investment assistant digest (`tw_market_assistant`).
-  Product feature on PR #69; ships alongside `stock_watchlist`, reuses
-  `market_task_support` / TWSE+TPEx movers, and stays disabled in k3s until
-  explicitly scheduled.
-- #60–#67 — M7 agent-platform evolution (LangChain/LangGraph/MCP). Implement only
-  when explicitly requested; preserve the current CLI and scheduled task model.
+## Next execution order (M7)
 
-## File-level direction for open M6 issues
+Canonical roadmap: [`docs/m7-agent-platform-roadmap.md`](docs/m7-agent-platform-roadmap.md)
+(coordination issue #60). Implement child issues only when explicitly requested.
+Preserve the current CLI and scheduled task model throughout.
 
-Use each issue body as the source of truth for acceptance criteria. Starting
-points:
+Work in this order unless a human asks otherwise (`#61` and `#62` may proceed
+in parallel):
+
+```text
+1. #61  Framework-neutral LLM provider gateway
+2. #62  Agent-callable tool protocol and registry
+3. #63  Optional LangChain adapters for LLMs and tools
+4. #64  Bounded LangGraph pilot workflow (job_research_agent)
+5. #65  Durable agent memory and optional RAG retrieval
+6. #66  Agent evaluation, tracing, and regression fixtures
+7. #67  Optional MCP interoperability for selected tools
+```
+
+Do **not** treat #60 as a request to rewrite M0–M6 domain logic. Framework
+adapters stay outside `core` / `sources` / `scorers` / `notifiers` /
+deterministic tasks; LangChain/LangGraph/MCP remain optional extras.
+
+## File-level direction for open M7 issues
+
+Use each GitHub issue body as the source of truth for acceptance criteria.
+Starting points (see also the M7 roadmap doc):
 
 | Issue | Likely touch points |
 |-------|---------------------|
-| #56 | `docs/ubuntu-vm-deployment.md`, `deploy/ubuntu/` (wrappers, crontab, `install-systemd.sh`) — done |
-| #54 | `.github/workflows/ci.yml`, `tests/test_ci_workflow.py`, README CI notes — done |
-| #50 | `app/cli.py`, `app/core/db.py`, `app/core/health.py`, tests — done |
-| #53 | `config.yaml` `sources:`, `app/core/config.py`, source `from_config`, tests — done |
-| #49 | `config.yaml`, `app/core/config.py`, `app/tasks/job_search.py`, source builder, tests — done |
-| #55 | `app/scorers/job_score_pipeline.py`, `app/tasks/job_search.py`, scoring config keys — done |
-| #51 | `app/core/tw_market_calendar.py`, `app/data/tw_market_holidays.yaml`, `app/core/time_utils.py`, tests — done |
-| #52 | `app/tasks/stock_watchlist.py`, `app/tasks/market_task_support.py`, config + Telegram — done |
-| #57 | `app/core/migrations.py`, `app/core/db.py` `init_db()`, `app/sql/migrations/`, tests — in this PR |
+| #61 | `app/llm/`, refactor `app/scorers/job_llm_scorer.py` onto the gateway |
+| #62 | `app/tools/` protocol + allowlisted registry wrappers |
+| #63 | optional `.[langchain]`; `app/integrations/langchain/` |
+| #64 | `app/workflows/`, additive `app/tasks/job_research_agent.py` (keep `job_search`) |
+| #65 | `app/memory/`, SQLite migrations, keyword retrieval before optional vectors |
+| #66 | `app/evaluation/`, `evals/`, offline CI subset |
+| #67 | optional `.[mcp]`; `app/integrations/mcp/` (localhost + allowlist) |
 
 ## How to pick up work
 
