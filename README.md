@@ -5,14 +5,17 @@ such as job openings and Taiwan stock mover reports, then sending Telegram
 digests.
 
 Coding agents should follow [`AGENTS.md`](AGENTS.md) for architecture,
-coding rules, completed MVP scope (#1–#25), and the recommended M6 execution
-order. Operator docs stay in this README.
+coding rules, completed MVP/M6 scope, and the recommended M7 execution order.
+The LangChain-ready platform roadmap lives in
+[`docs/m7-agent-platform-roadmap.md`](docs/m7-agent-platform-roadmap.md).
+Operator docs stay in this README.
 
 ## Status
 
 MVP workflows for job search and Taiwan stock movers are implemented, with
-Docker Compose and k3s CronJob deployment paths. Open work focuses on M6
-hardening and later agent-platform evolution; see `AGENTS.md`.
+Docker Compose and k3s CronJob deployment paths. M6 hardening (#49–#57) is
+complete on `main`. Open platform work is M7 (#60–#67); see `AGENTS.md` and
+the M7 roadmap.
 
 It now includes early best-effort job collectors for `job104`, `indeed`,
 `glassdoor`, and `linkedin_email`. Some live runs can still be blocked by
