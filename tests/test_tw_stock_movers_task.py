@@ -5,6 +5,11 @@ from pathlib import Path
 import pytest
 
 from app.core import SignalItem
+from app.core.tw_stock_utils import (
+    build_market_reports,
+    select_top_gainers,
+    select_top_losers,
+)
 from app.sources import BaseSource, DummySource
 from app.sources.dummy import SAMPLE_OBSERVED_AT
 from app.tasks import TwStockMoversTask
@@ -425,7 +430,7 @@ def test_select_top_gainers_limits_to_top_n() -> None:
         for index in range(1, 26)
     ]
 
-    top_gainers = tw_stock_movers_task_module._select_top_gainers(items, limit=20)
+    top_gainers = select_top_gainers(items, limit=20)
 
     assert len(top_gainers) == 20
     assert top_gainers[0].metadata["change_percent"] == 25.0
@@ -442,7 +447,7 @@ def test_select_top_losers_limits_to_top_n() -> None:
         for index in range(1, 26)
     ]
 
-    top_losers = tw_stock_movers_task_module._select_top_losers(items, limit=20)
+    top_losers = select_top_losers(items, limit=20)
 
     assert len(top_losers) == 20
     assert top_losers[0].metadata["change_percent"] == -25.0
@@ -467,7 +472,7 @@ def test_select_top_gainers_ranks_each_market_separately() -> None:
         ),
     ]
 
-    reports = tw_stock_movers_task_module._build_market_reports(items, limit=20)
+    reports = build_market_reports(items, limit=20)
 
     twse_report = reports[0]
     tpex_report = reports[1]

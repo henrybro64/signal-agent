@@ -49,6 +49,7 @@ def test_main_list_tasks_command() -> None:
         "fetch",
         "job_search",
         "stock_watchlist",
+        "tw_market_assistant",
         "tw_stock_movers",
     ]
 
@@ -244,8 +245,8 @@ def test_main_invalid_task_returns_error() -> None:
     assert result.returncode == 1
     assert "Unknown task: missing-task" in result.stderr
     assert (
-        "Available tasks: dummy, fetch, job_search, "
-        "stock_watchlist, tw_stock_movers"
+        "Available tasks: dummy, fetch, job_search, stock_watchlist, "
+        "tw_market_assistant, tw_stock_movers"
     ) in result.stderr
 
 

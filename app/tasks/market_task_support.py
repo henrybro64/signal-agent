@@ -14,11 +14,20 @@ from app.core import (
     start_signal_run,
     tw_market_skip_label,
     tw_market_skip_reason,
+    upsert_signal,
 )
+from app.core import tw_stock_utils as tw_stock_utils
+from app.core.tw_stock_utils import TwStockMoversSummary
 from app.notifiers import build_telegram_notifier
 
 from .base import BaseTask
 from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
+
+# Re-export metadata helpers so market tasks keep a stable import path.
+change_percent = tw_stock_utils.change_percent
+company_name = tw_stock_utils.company_name_for_item
+source_warning_label = tw_stock_utils.source_warning_label
+stock_code = tw_stock_utils.stock_code_for_item
 
 
 class _NamedFetchSource(Protocol):
@@ -202,37 +211,55 @@ def complete_tw_stock_source_run(
     )
 
 
-def stock_code(item: SignalItem) -> str:
-    value = item.metadata.get("stock_code")
-    if isinstance(value, str):
-        return value.strip()
-    return ""
+def collect_tw_stock_mover_summary(
+    task: BaseTask,
+    *,
+    sources: list[_NamedFetchSource],
+    db_path: Path,
+) -> TwStockMoversSummary:
+    """Fetch, persist, and summarize TWSE/TPEx mover quotes for one task run."""
 
+    summary = TwStockMoversSummary()
+    for source in sources:
+        fetch = fetch_tw_stock_mover_source(
+            task,
+            source=source,
+            db_path=db_path,
+            failed_sources=summary.failed_sources,
+        )
+        if fetch is None:
+            continue
 
-def company_name(item: SignalItem) -> str:
-    value = item.metadata.get("company")
-    if isinstance(value, str):
-        return value.strip()
-    return ""
+        ignored_count = len(fetch.fetched_items) - len(fetch.stock_items)
+        summary.ignored_non_stock_count += ignored_count
+        summary.fetched_count += len(fetch.stock_items)
 
+        source_inserted = 0
+        source_updated = 0
+        for item in fetch.stock_items:
+            result = upsert_signal(item, db_path=db_path)
+            if result.action == "inserted":
+                source_inserted += 1
+                summary.new_count += 1
+            else:
+                source_updated += 1
+                summary.duplicate_count += 1
+            summary.stock_items.append(item)
 
-def change_percent(item: SignalItem) -> float:
-    value = item.metadata.get("change_percent")
-    if isinstance(value, int | float):
-        return float(value)
-    return 0.0
-
-
-_SOURCE_WARNING_LABELS: dict[str, str] = {
-    "twse": "上市資料",
-    "tpex": "上櫃資料",
-}
-
-
-def source_warning_label(source_name: str) -> str:
-    """Traditional Chinese label for a quote-source outage in digests."""
-
-    return _SOURCE_WARNING_LABELS.get(source_name, source_name)
+        complete_tw_stock_source_run(
+            task,
+            source_name=source.name,
+            fetch=fetch,
+            db_path=db_path,
+            inserted_count=source_inserted,
+            updated_count=source_updated,
+            ignored_count=ignored_count,
+            new_count=source_inserted,
+            duplicate_count=source_updated,
+            skipped_count=source_updated + ignored_count,
+        )
+        summary.successful_sources += 1
+    return summary
 
 
 def send_optional_telegram_digest(

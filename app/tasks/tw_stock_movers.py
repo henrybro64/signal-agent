@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, Final
@@ -16,65 +15,35 @@ from app.config import (
 )
 from app.core import (
     SignalItem,
-    upsert_signal,
+)
+from app.core.tw_stock_utils import (
+    TwStockMarketReport,
+    TwStockMoversSummary,
+    build_market_reports,
+    company_name_for_item,
+    count_reported_movers,
+    render_digest_ranked_line,
+    stock_code_for_item,
+)
+from app.core.tw_stock_utils import (
+    change_percent as item_change_percent,
 )
 from app.sources import build_tw_stock_mover_sources
 
 from .base import BaseTask
 from .market_task_support import (
     NotificationOutcome,
-    complete_tw_stock_source_run,
-    fetch_tw_stock_mover_source,
+    collect_tw_stock_mover_summary,
     resolve_task_db_path,
     send_optional_telegram_digest,
     skip_outside_tw_market_hours,
     source_warning_label,
 )
-from .market_task_support import (
-    change_percent as item_change_percent,
-)
-from .market_task_support import (
-    company_name as item_company_name,
-)
-from .market_task_support import (
-    stock_code as item_stock_code,
-)
 
-_MARKET_SECTIONS: Final[tuple[tuple[str, str], ...]] = (
-    ("twse", "TWSE listed (上市)"),
-    ("tpex", "TPEx OTC (上櫃)"),
-)
 _MARKET_TELEGRAM_LABELS: Final[dict[str, str]] = {
     "twse": "上市",
     "tpex": "上櫃",
 }
-
-
-@dataclass(slots=True)
-class TwStockMoversSummary:
-    """Collected counts and movers for one stock-mover task run."""
-
-    successful_sources: int = 0
-    fetched_count: int = 0
-    new_count: int = 0
-    duplicate_count: int = 0
-    stock_items: list[SignalItem] = field(default_factory=list)
-    failed_sources: list[tuple[str, str]] = field(default_factory=list)
-    ignored_non_stock_count: int = 0
-
-
-@dataclass(slots=True)
-class TwStockMarketReport:
-    """Ranked gainers and losers for one Taiwan stock market."""
-
-    market_key: str
-    title: str
-    gainers: list[SignalItem] = field(default_factory=list)
-    losers: list[SignalItem] = field(default_factory=list)
-
-    @property
-    def reported_count(self) -> int:
-        return len(self.gainers) + len(self.losers)
 
 
 class TwStockMoversTask(BaseTask):
@@ -112,47 +81,13 @@ class TwStockMoversTask(BaseTask):
             sources = build_tw_stock_mover_sources(config)
             if not sources:
                 raise ValueError("No Taiwan stock-mover sources are configured.")
-            for source in sources:
-                fetch = fetch_tw_stock_mover_source(
-                    self,
-                    source=source,
-                    db_path=db_path,
-                    failed_sources=summary.failed_sources,
-                )
-                if fetch is None:
-                    continue
+            summary = collect_tw_stock_mover_summary(
+                self,
+                sources=sources,
+                db_path=db_path,
+            )
 
-                ignored_count = len(fetch.fetched_items) - len(fetch.stock_items)
-                summary.ignored_non_stock_count += ignored_count
-                summary.fetched_count += len(fetch.stock_items)
-
-                source_inserted = 0
-                source_updated = 0
-                for item in fetch.stock_items:
-                    result = upsert_signal(item, db_path=db_path)
-                    if result.action == "inserted":
-                        source_inserted += 1
-                        summary.new_count += 1
-                    else:
-                        source_updated += 1
-                        summary.duplicate_count += 1
-                    summary.stock_items.append(item)
-
-                complete_tw_stock_source_run(
-                    self,
-                    source_name=source.name,
-                    fetch=fetch,
-                    db_path=db_path,
-                    inserted_count=source_inserted,
-                    updated_count=source_updated,
-                    ignored_count=ignored_count,
-                    new_count=source_inserted,
-                    duplicate_count=source_updated,
-                    skipped_count=source_updated + ignored_count,
-                )
-                summary.successful_sources += 1
-
-            market_reports = _build_market_reports(
+            market_reports = build_market_reports(
                 summary.stock_items,
                 limit=config.tasks.tw_stock_movers.top_n,
             )
@@ -194,7 +129,7 @@ class TwStockMoversTask(BaseTask):
                     successful_source_count=summary.successful_sources,
                     failed_source_count=len(summary.failed_sources),
                     ignored_count=summary.ignored_non_stock_count,
-                    reported_count=_count_reported_movers(market_reports),
+                    reported_count=count_reported_movers(market_reports),
                     active_market_count=sum(
                         1
                         for report in market_reports
@@ -224,7 +159,7 @@ class TwStockMoversTask(BaseTask):
                 successful_source_count=summary.successful_sources,
                 failed_source_count=len(summary.failed_sources),
                 ignored_count=summary.ignored_non_stock_count,
-                reported_count=_count_reported_movers(market_reports),
+                reported_count=count_reported_movers(market_reports),
                 active_market_count=sum(
                     1 for report in market_reports if report.reported_count > 0
                 ),
@@ -272,7 +207,7 @@ class TwStockMoversTask(BaseTask):
         timezone_name: str,
         db_path: Path,
     ) -> NotificationOutcome:
-        reported_count = _count_reported_movers(market_reports)
+        reported_count = count_reported_movers(market_reports)
         digest = _build_telegram_digest(
             summary=summary,
             market_reports=market_reports,
@@ -304,7 +239,7 @@ def _build_console_summary(
     market_reports: list[TwStockMarketReport],
     top_n: int,
 ) -> list[str]:
-    reported_count = _count_reported_movers(market_reports)
+    reported_count = count_reported_movers(market_reports)
     active_markets = sum(1 for report in market_reports if report.reported_count > 0)
     lines = [
         f"tw_stock_movers task executed using {config_path}:",
@@ -356,7 +291,7 @@ def _build_telegram_digest(
     run_status: str,
     notified_count: int,
 ) -> str:
-    reported_count = _count_reported_movers(market_reports)
+    reported_count = count_reported_movers(market_reports)
     has_useful_output = reported_count > 0 or bool(summary.failed_sources)
     if not has_useful_output:
         return ""
@@ -376,7 +311,7 @@ def _build_telegram_digest(
                 )
             )
             for index, item in enumerate(report.gainers, start=1):
-                lines.append(_render_digest_ranked_line(index, item))
+                lines.append(render_digest_ranked_line(index, item))
 
         if report.losers:
             lines.append("")
@@ -388,7 +323,7 @@ def _build_telegram_digest(
                 )
             )
             for index, item in enumerate(report.losers, start=1):
-                lines.append(_render_digest_ranked_line(index, item))
+                lines.append(render_digest_ranked_line(index, item))
 
     if summary.failed_sources:
         lines.append("")
@@ -429,97 +364,9 @@ def _build_telegram_section_title(
     return f"{market_label}前{top_n}{direction_label}"
 
 
-def _build_market_reports(
-    items: list[SignalItem],
-    *,
-    limit: int,
-) -> list[TwStockMarketReport]:
-    return [
-        TwStockMarketReport(
-            market_key=market_key,
-            title=title,
-            gainers=_select_top_gainers(
-                items,
-                limit=limit,
-                market_key=market_key,
-            ),
-            losers=_select_top_losers(
-                items,
-                limit=limit,
-                market_key=market_key,
-            ),
-        )
-        for market_key, title in _MARKET_SECTIONS
-    ]
-
-
-def _count_reported_movers(market_reports: list[TwStockMarketReport]) -> int:
-    return sum(report.reported_count for report in market_reports)
-
-
-def _select_top_gainers(
-    items: list[SignalItem],
-    *,
-    limit: int,
-    market_key: str | None = None,
-) -> list[SignalItem]:
-    if limit <= 0 or not items:
-        return []
-    gainers = [
-        item
-        for item in items
-        if item_change_percent(item) > 0
-        and (market_key is None or _market_key(item) == market_key)
-    ]
-    return sorted(
-        gainers,
-        key=lambda item: (item_change_percent(item), item.observed_at),
-        reverse=True,
-    )[:limit]
-
-
-def _select_top_losers(
-    items: list[SignalItem],
-    *,
-    limit: int,
-    market_key: str | None = None,
-) -> list[SignalItem]:
-    if limit <= 0 or not items:
-        return []
-    losers = [
-        item
-        for item in items
-        if item_change_percent(item) < 0
-        and (market_key is None or _market_key(item) == market_key)
-    ]
-    return sorted(
-        losers,
-        key=lambda item: (item_change_percent(item), -item.observed_at.timestamp()),
-    )[:limit]
-
-
-def _market_key(item: SignalItem) -> str:
-    market = item.metadata.get("market")
-    if isinstance(market, str) and market.strip():
-        return market.strip().lower()
-
-    exchange = item.metadata.get("exchange")
-    if isinstance(exchange, str):
-        normalized_exchange = exchange.strip().lower()
-        if normalized_exchange == "otc":
-            return "tpex"
-        if normalized_exchange == "tse":
-            return "twse"
-
-    if item.source in {"twse", "tpex"}:
-        return item.source
-
-    return item.source
-
-
 def _render_mover_line(item: SignalItem) -> str:
-    code = item_stock_code(item)
-    company = item_company_name(item)
+    code = stock_code_for_item(item)
+    company = company_name_for_item(item)
     pct = item_change_percent(item)
     title = item.title.strip()
 
@@ -528,17 +375,5 @@ def _render_mover_line(item: SignalItem) -> str:
     if prefix:
         prefix += " "
     return f"{prefix}{pct:+.1f}% | {title}"
-
-
-def _render_digest_ranked_line(index: int, item: SignalItem) -> str:
-    code = item_stock_code(item)
-    company = item_company_name(item)
-    pct = item_change_percent(item)
-
-    prefix_parts = [part for part in (code, company) if part]
-    prefix = " ".join(prefix_parts).strip()
-    if not prefix:
-        prefix = item.title.strip()
-    return f"{index}. {prefix} {pct:+.2f}%"
 
 

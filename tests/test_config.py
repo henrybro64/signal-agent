@@ -38,6 +38,11 @@ def test_load_config_reads_sample_file() -> None:
         "AI_infrastructure",
         "CPO_optical",
     }
+    assert config.tasks.tw_market_assistant.enabled is False
+    assert config.tasks.tw_market_assistant.top_n == 20
+    assert config.investment.watchlist == ["2330", "2454"]
+    assert config.investment.theme_mappings["cpo_optical"].label == "CPO / 光通訊"
+    assert "CPO" in config.investment.theme_mappings["cpo_optical"].keywords
     assert config.notifiers.telegram.enabled is True
     assert config.notifiers.telegram.failure_alerts_enabled is True
     assert config.scoring.freshness_weight == 0.6

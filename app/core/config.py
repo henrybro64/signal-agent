@@ -61,6 +61,33 @@ class TwStockMoversTaskConfig:
     timezone: str
 
 
+_DEFAULT_TW_TIMEZONE = "Asia/Taipei"
+_TW_MARKET_ASSISTANT_CONFIG_PATH = "tasks.tw_market_assistant"
+
+
+@dataclass(slots=True)
+class TwMarketAssistantTaskConfig:
+    enabled: bool = False
+    timezone: str = _DEFAULT_TW_TIMEZONE
+    market_hours_only: bool = True
+    top_n: int = 20
+    notify_language: str = "zh-TW"
+    sources: list[str] = field(default_factory=lambda: ["twse", "tpex"])
+
+
+@dataclass(slots=True)
+class ThemeMappingConfig:
+    label: str
+    keywords: list[str]
+
+
+@dataclass(slots=True)
+class InvestmentConfig:
+    watchlist: list[str] = field(default_factory=list)
+    theme_mappings: dict[str, ThemeMappingConfig] = field(default_factory=dict)
+
+
+
 @dataclass(slots=True)
 class StockWatchlistSymbolConfig:
     code: str
@@ -87,6 +114,9 @@ class TasksConfig:
     job_search: JobSearchTaskConfig
     tw_stock_movers: TwStockMoversTaskConfig
     stock_watchlist: StockWatchlistTaskConfig
+    tw_market_assistant: TwMarketAssistantTaskConfig = field(
+        default_factory=TwMarketAssistantTaskConfig
+    )
 
 
 @dataclass(slots=True)
@@ -156,6 +186,7 @@ class AppConfig:
     notifiers: NotifiersConfig
     scoring: ScoringConfig
     sources: SourcesConfig = field(default_factory=SourcesConfig)
+    investment: InvestmentConfig = field(default_factory=InvestmentConfig)
 
     @classmethod
     def from_dict(
@@ -182,6 +213,17 @@ class AppConfig:
             tasks,
             "stock_watchlist",
             parent_path="tasks",
+            source_name=source_name,
+        )
+        tw_market_assistant = _optional_mapping(
+            tasks,
+            "tw_market_assistant",
+            parent_path="tasks",
+            source_name=source_name,
+        )
+        investment = _optional_mapping(
+            data,
+            "investment",
             source_name=source_name,
         )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
@@ -246,6 +288,10 @@ class AppConfig:
                 ),
                 stock_watchlist=_parse_stock_watchlist_task_config(
                     stock_watchlist,
+                    source_name=source_name,
+                ),
+                tw_market_assistant=_parse_tw_market_assistant_config(
+                    tw_market_assistant,
                     source_name=source_name,
                 ),
             ),
@@ -319,11 +365,120 @@ class AppConfig:
                 ),
             ),
             sources=_parse_sources_config(sources, source_name=source_name),
+            investment=_parse_investment_config(
+                investment,
+                source_name=source_name,
+            ),
         )
 
 
 _DEFAULT_STOCK_WATCHLIST_SOURCES: tuple[str, ...] = ("twse", "tpex")
 _SUPPORTED_STOCK_WATCHLIST_SOURCES = frozenset(_DEFAULT_STOCK_WATCHLIST_SOURCES)
+
+
+
+
+def _parse_tw_market_assistant_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> TwMarketAssistantTaskConfig:
+    if not data:
+        return TwMarketAssistantTaskConfig()
+
+    return TwMarketAssistantTaskConfig(
+        enabled=_optional_bool(
+            data,
+            "enabled",
+            default=False,
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        timezone=_optional_str(
+            data,
+            "timezone",
+            default=_DEFAULT_TW_TIMEZONE,
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        market_hours_only=_optional_bool(
+            data,
+            "market_hours_only",
+            default=True,
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        top_n=_optional_int(
+            data,
+            "top_n",
+            default=20,
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        notify_language=_optional_str(
+            data,
+            "notify_language",
+            default="zh-TW",
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        sources=_optional_str_list(
+            data,
+            "sources",
+            default=["twse", "tpex"],
+            parent_path=_TW_MARKET_ASSISTANT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+    )
+
+
+def _parse_investment_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> InvestmentConfig:
+    if not data:
+        return InvestmentConfig()
+
+    theme_data = _optional_mapping(
+        data,
+        "theme_mappings",
+        parent_path="investment",
+        source_name=source_name,
+    )
+    theme_mappings: dict[str, ThemeMappingConfig] = {}
+    for theme_key, raw_mapping in theme_data.items():
+        if not isinstance(raw_mapping, dict):
+            raise ConfigError(
+                "Config value "
+                f"'investment.theme_mappings.{theme_key}' must be a mapping "
+                f"in {source_name}"
+            )
+        theme_mappings[theme_key] = ThemeMappingConfig(
+            label=_require_str(
+                raw_mapping,
+                "label",
+                parent_path=f"investment.theme_mappings.{theme_key}",
+                source_name=source_name,
+            ),
+            keywords=_require_str_list(
+                raw_mapping,
+                "keywords",
+                parent_path=f"investment.theme_mappings.{theme_key}",
+                source_name=source_name,
+            ),
+        )
+
+    return InvestmentConfig(
+        watchlist=_optional_str_list(
+            data,
+            "watchlist",
+            default=[],
+            parent_path="investment",
+            source_name=source_name,
+        ),
+        theme_mappings=theme_mappings,
+    )
 
 
 def _parse_stock_watchlist_task_config(
@@ -337,7 +492,7 @@ def _parse_stock_watchlist_task_config(
     if not data:
         return StockWatchlistTaskConfig(
             enabled=False,
-            timezone="Asia/Taipei",
+            timezone=_DEFAULT_TW_TIMEZONE,
             sources=list(_DEFAULT_STOCK_WATCHLIST_SOURCES),
             symbols=[],
             themes={},
@@ -361,7 +516,7 @@ def _parse_stock_watchlist_task_config(
         timezone = _optional_str(
             data,
             "timezone",
-            default="Asia/Taipei",
+            default=_DEFAULT_TW_TIMEZONE,
             parent_path=parent_path,
             source_name=source_name,
         )

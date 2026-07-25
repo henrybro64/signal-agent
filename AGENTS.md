@@ -204,8 +204,10 @@ Work in this order unless a human asks otherwise:
 
 Also open (schedule separately; not part of the M6 hardening sequence above):
 
-- #29 — Taiwan stock investment assistant digest (product feature). Parked behind
-  M6; prefer completing #52 first so the epic can reuse watchlist alerts.
+- #29 — Taiwan stock investment assistant digest (`tw_market_assistant`).
+  Product feature on PR #69; ships alongside `stock_watchlist`, reuses
+  `market_task_support` / TWSE+TPEx movers, and stays disabled in k3s until
+  explicitly scheduled.
 - #60–#67 — M7 agent-platform evolution (LangChain/LangGraph/MCP). Implement only
   when explicitly requested; preserve the current CLI and scheduled task model.
 
