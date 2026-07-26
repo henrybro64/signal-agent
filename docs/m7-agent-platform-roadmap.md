@@ -84,7 +84,7 @@ independently implementable once its listed dependencies are done — no
 repo-wide rewrite.
 
 ```text
-1. #61  Framework-neutral LLM provider gateway
+1. #61  Framework-neutral LLM provider gateway — DONE (see `app/llm/`)
 2. #62  Agent-callable tool protocol and registry
 3. #63  Optional LangChain adapters for LLMs and tools   (needs #61, #62)
 4. #64  Bounded LangGraph pilot: job_research_agent      (needs #61–#63)

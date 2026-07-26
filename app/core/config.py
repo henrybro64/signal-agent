@@ -144,6 +144,20 @@ class ScoringConfig:
 
 
 @dataclass(slots=True)
+class LlmConfig:
+    """Framework-neutral LLM gateway defaults (optional OpenAI/fake).
+
+    ``model`` is the source of truth for gateway calls; ``ScoringConfig.llm_model``
+    is kept in sync by ``AppConfig.from_dict``.
+    """
+
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    timeout_seconds: float = 20.0
+    temperature: float = 0.2
+
+
+@dataclass(slots=True)
 class JobHttpSourceConfig:
     timeout_seconds: float = 10.0
     max_retries: int = 2
@@ -187,6 +201,7 @@ class AppConfig:
     scoring: ScoringConfig
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     investment: InvestmentConfig = field(default_factory=InvestmentConfig)
+    llm: LlmConfig = field(default_factory=LlmConfig)
 
     @classmethod
     def from_dict(
@@ -226,6 +241,11 @@ class AppConfig:
             "investment",
             source_name=source_name,
         )
+        llm = _optional_mapping(
+            data,
+            "llm",
+            source_name=source_name,
+        )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
         telegram = _require_mapping(
             notifiers,
@@ -243,6 +263,71 @@ class AppConfig:
         sources = _optional_mapping(
             data,
             "sources",
+            source_name=source_name,
+        )
+        scoring_config = ScoringConfig(
+            freshness_weight=_require_float(
+                scoring,
+                "freshness_weight",
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            priority_weight=_require_float(
+                scoring,
+                "priority_weight",
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            llm_enabled=_optional_bool(
+                scoring,
+                "llm_enabled",
+                default=False,
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            llm_model=_optional_str(
+                scoring,
+                "llm_model",
+                default="gpt-4o-mini",
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            llm_min_rule_score=_parse_scoring_llm_min_rule_score(
+                scoring,
+                source_name=source_name,
+            ),
+            llm_max_jobs_per_run=_parse_scoring_positive_int(
+                scoring,
+                key="llm_max_jobs_per_run",
+                default=20,
+                source_name=source_name,
+            ),
+            digest_max_strong_matches=_parse_scoring_positive_int(
+                scoring,
+                key="digest_max_strong_matches",
+                default=10,
+                source_name=source_name,
+            ),
+            digest_max_maybe_matches=_parse_scoring_positive_int(
+                scoring,
+                key="digest_max_maybe_matches",
+                default=10,
+                source_name=source_name,
+            ),
+            include_rejected_summary=_optional_bool(
+                scoring,
+                "include_rejected_summary",
+                default=True,
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+        )
+        llm_config = _parse_llm_config(llm, source_name=source_name)
+        scoring_config, llm_config = _reconcile_llm_model_settings(
+            scoring_config,
+            llm_config,
+            scoring_raw=scoring,
+            llm_raw=llm,
             source_name=source_name,
         )
 
@@ -307,68 +392,13 @@ class AppConfig:
                     ),
                 ),
             ),
-            scoring=ScoringConfig(
-                freshness_weight=_require_float(
-                    scoring,
-                    "freshness_weight",
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                priority_weight=_require_float(
-                    scoring,
-                    "priority_weight",
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                llm_enabled=_optional_bool(
-                    scoring,
-                    "llm_enabled",
-                    default=False,
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                llm_model=_optional_str(
-                    scoring,
-                    "llm_model",
-                    default="gpt-4o-mini",
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                llm_min_rule_score=_parse_scoring_llm_min_rule_score(
-                    scoring,
-                    source_name=source_name,
-                ),
-                llm_max_jobs_per_run=_parse_scoring_positive_int(
-                    scoring,
-                    key="llm_max_jobs_per_run",
-                    default=20,
-                    source_name=source_name,
-                ),
-                digest_max_strong_matches=_parse_scoring_positive_int(
-                    scoring,
-                    key="digest_max_strong_matches",
-                    default=10,
-                    source_name=source_name,
-                ),
-                digest_max_maybe_matches=_parse_scoring_positive_int(
-                    scoring,
-                    key="digest_max_maybe_matches",
-                    default=10,
-                    source_name=source_name,
-                ),
-                include_rejected_summary=_optional_bool(
-                    scoring,
-                    "include_rejected_summary",
-                    default=True,
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-            ),
+            scoring=scoring_config,
             sources=_parse_sources_config(sources, source_name=source_name),
             investment=_parse_investment_config(
                 investment,
                 source_name=source_name,
             ),
+            llm=llm_config,
         )
 
 
@@ -479,6 +509,114 @@ def _parse_investment_config(
         ),
         theme_mappings=theme_mappings,
     )
+
+
+_SUPPORTED_LLM_PROVIDERS = frozenset({"openai", "fake"})
+_LLM_CONFIG_PATH = "llm"
+
+
+def _parse_llm_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> LlmConfig:
+    """Parse optional ``llm:`` gateway defaults; omit section for defaults."""
+
+    if not data:
+        return LlmConfig()
+
+    provider = _optional_str(
+        data,
+        "provider",
+        default="openai",
+        parent_path=_LLM_CONFIG_PATH,
+        source_name=source_name,
+    ).strip().lower()
+    if provider == "ollama":
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.provider' value 'ollama' is "
+            f"reserved but not implemented yet in {source_name}"
+        )
+    if provider not in _SUPPORTED_LLM_PROVIDERS:
+        supported = ", ".join(sorted(_SUPPORTED_LLM_PROVIDERS))
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.provider' must be one of "
+            f"{supported} in {source_name}"
+        )
+
+    timeout_seconds = _optional_float(
+        data,
+        "timeout_seconds",
+        default=20.0,
+        parent_path=_LLM_CONFIG_PATH,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout_seconds,
+        config_path=f"{_LLM_CONFIG_PATH}.timeout_seconds",
+        source_name=source_name,
+    )
+
+    temperature = _optional_float(
+        data,
+        "temperature",
+        default=0.2,
+        parent_path=_LLM_CONFIG_PATH,
+        source_name=source_name,
+    )
+    if temperature < 0 or temperature > 2:
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.temperature' must be between "
+            f"0 and 2 in {source_name}"
+        )
+
+    return LlmConfig(
+        provider=provider,
+        model=_optional_str(
+            data,
+            "model",
+            default="gpt-4o-mini",
+            parent_path=_LLM_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        timeout_seconds=timeout_seconds,
+        temperature=temperature,
+    )
+
+
+def _reconcile_llm_model_settings(
+    scoring: ScoringConfig,
+    llm: LlmConfig,
+    *,
+    scoring_raw: dict[str, Any],
+    llm_raw: dict[str, Any] | None,
+    source_name: str,
+) -> tuple[ScoringConfig, LlmConfig]:
+    """Keep ``scoring.llm_model`` and ``llm.model`` as one logical value.
+
+    ``llm.model`` is the gateway source of truth when set. ``scoring.llm_model``
+    remains a supported alias for older configs. When both are set explicitly to
+    different values, raise ``ConfigError``.
+    """
+
+    scoring_model_explicit = "llm_model" in scoring_raw
+    llm_model_explicit = isinstance(llm_raw, dict) and "model" in llm_raw
+
+    if (
+        scoring_model_explicit
+        and llm_model_explicit
+        and scoring.llm_model != llm.model
+    ):
+        raise ConfigError(
+            f"Config values 'scoring.llm_model' ({scoring.llm_model!r}) and "
+            f"'llm.model' ({llm.model!r}) must match in {source_name}; "
+            f"prefer setting llm.model"
+        )
+    if llm_model_explicit and not scoring_model_explicit:
+        return replace(scoring, llm_model=llm.model), llm
+    if scoring_model_explicit and not llm_model_explicit:
+        return scoring, replace(llm, model=scoring.llm_model)
+    return scoring, llm
 
 
 def _parse_stock_watchlist_task_config(

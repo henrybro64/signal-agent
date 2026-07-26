@@ -38,6 +38,7 @@ class DummyTask(BaseTask):
             validate_llm_scoring_secrets(
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
+                provider=config.llm.provider,
             )
             telegram_ready = has_telegram_credentials(env)
 

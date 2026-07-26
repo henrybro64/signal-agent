@@ -25,7 +25,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
 | M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
-| M7 | LangChain-ready platform evolution #60–#67 | **Roadmap ready** — implement child issues when asked |
+| M7 | LangChain-ready platform evolution #60–#67 | **In progress** — #60 roadmap done; #61 gateway done |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -78,10 +78,17 @@ signal-agent/
 │   │   └── market_task_support.py  # shared TW market task helpers
 │   ├── scorers/
 │   │   ├── job_rule_scorer.py
-│   │   ├── job_llm_scorer.py   # optional; fail open to rules
+│   │   ├── job_llm_scorer.py   # optional; fail open to rules via app.llm
 │   │   ├── job_score_pipeline.py  # two-stage rule → LLM orchestration
 │   │   ├── job_search.py   # profile loading + score orchestration
 │   │   └── tw_signal_classifier.py  # TW theme / research-candidate rules
+│   ├── llm/                # framework-neutral LLM gateway (#61)
+│   │   ├── base.py         # LLMProvider protocol
+│   │   ├── models.py       # request/response models
+│   │   ├── exceptions.py   # project-owned LLM errors
+│   │   ├── openai_provider.py
+│   │   ├── fake_provider.py
+│   │   └── factory.py
 │   ├── formatters/
 │   │   └── tw_market_digest.py  # Traditional Chinese assistant digest text
 │   ├── profiles/           # packaged scoring/preference text (*.md)
@@ -112,7 +119,8 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 | `core` | Models, config, DB, secrets, time, logging, error alerts, TW stock helpers | Provider HTTP/scrape logic |
 | `sources` | One provider → `list[SignalItem]` | Scoring, Telegram, CLI |
 | `tasks` | One end-to-end workflow | Reimplement storage/notifier internals |
-| `scorers` | Ranking / filtering / research classification | Fetching remote data |
+| `scorers` | Ranking / filtering / research classification | Fetching remote data; provider SDKs |
+| `llm` | Framework-neutral LLM gateway (OpenAI/fake; Ollama reserved) | Business scoring rules; LangChain |
 | `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |
 | `notifiers` | Outbound delivery | Business ranking rules |
 | `profiles` | Packaged preference text for scorers | Secrets |
@@ -224,7 +232,7 @@ Work in this order unless a human asks otherwise (`#61` and `#62` may proceed
 in parallel):
 
 ```text
-1. #61  Framework-neutral LLM provider gateway
+1. #61  Framework-neutral LLM provider gateway — DONE
 2. #62  Agent-callable tool protocol and registry
 3. #63  Optional LangChain adapters for LLMs and tools
 4. #64  Bounded LangGraph pilot workflow (job_research_agent)
@@ -244,7 +252,7 @@ Starting points (see also the M7 roadmap doc):
 
 | Issue | Preferred packages / entry points |
 |-------|-----------------------------------|
-| #61 | `app/llm/`, refactor `app/scorers/job_llm_scorer.py` onto the gateway |
+| #61 | `app/llm/`, refactor `app/scorers/job_llm_scorer.py` onto the gateway — done |
 | #62 | `app/tools/` protocol + allowlisted registry wrappers |
 | #63 | optional `.[langchain]`; `app/integrations/langchain/` |
 | #64 | `app/workflows/`, additive `app/tasks/job_research_agent.py` (keep `job_search`) |

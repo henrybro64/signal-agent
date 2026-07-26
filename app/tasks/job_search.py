@@ -111,6 +111,7 @@ class JobSearchTask(BaseTask):
             validate_llm_scoring_secrets(
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
+                provider=config.llm.provider,
             )
 
             profiles = list(config.tasks.job_search.profiles)
@@ -143,6 +144,7 @@ class JobSearchTask(BaseTask):
                         env=env,
                         scorer_profile=profile.scorer_profile,
                         llm_budget=llm_budget,
+                        llm_config=config.llm,
                     )
                     scorers_by_key[profile.scorer_profile] = pipeline
 

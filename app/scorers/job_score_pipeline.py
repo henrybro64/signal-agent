@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from app.core import SignalItem
-from app.core.config import ScoringConfig
+from app.core.config import LlmConfig, ScoringConfig
 from app.core.secrets import EnvSettings
+from app.llm import create_llm_provider
 
 from .job_llm_scorer import JobLLMScorer, JobLLMScorerError
 from .job_rule_scorer import JobRuleScore, JobRuleScorer
@@ -126,18 +127,34 @@ def build_job_score_pipeline(
     env: EnvSettings,
     scorer_profile: str | None = None,
     llm_budget: LlmCallBudget | None = None,
+    llm_config: LlmConfig | None = None,
 ) -> JobScorePipeline:
-    """Build a configured two-stage scoring pipeline."""
+    """Build a configured two-stage scoring pipeline.
+
+    Model selection uses ``llm.model`` (``LlmConfig.model``). When ``llm_config``
+    is omitted, ``scoring.llm_model`` seeds the gateway defaults so unit tests
+    and older call sites keep working. Loaded ``AppConfig`` keeps both in sync.
+    """
 
     profile = load_job_search_profile(scorer_profile)
     rule_scorer = JobRuleScorer(profile)
     llm_scorer: JobLLMScorer | None = None
+    gateway = llm_config or LlmConfig(model=config.llm_model)
     if config.llm_enabled:
-        llm_scorer = JobLLMScorer(
+        provider = create_llm_provider(
+            provider=gateway.provider,
             api_key=env.openai_api_key or "",
-            model=config.llm_model,
+            model=gateway.model,
+            timeout_seconds=gateway.timeout_seconds,
+            temperature=gateway.temperature,
+        )
+        llm_scorer = JobLLMScorer(
+            provider=provider,
+            model=gateway.model,
             profile=profile,
             fallback_scorer=rule_scorer,
+            timeout_seconds=gateway.timeout_seconds,
+            temperature=gateway.temperature,
         )
     budget = llm_budget or LlmCallBudget(max_calls=config.llm_max_jobs_per_run)
     return JobScorePipeline(

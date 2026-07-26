@@ -54,6 +54,10 @@ def test_load_config_reads_sample_file() -> None:
     assert config.scoring.digest_max_strong_matches == 10
     assert config.scoring.digest_max_maybe_matches == 10
     assert config.scoring.include_rejected_summary is True
+    assert config.llm.provider == "openai"
+    assert config.llm.model == "gpt-4o-mini"
+    assert_close(config.llm.timeout_seconds, 20.0)
+    assert_close(config.llm.temperature, 0.2)
     assert_close(config.sources.job104.timeout_seconds, 10.0)
     assert config.sources.job104.max_retries == 2
     assert_close(config.sources.job104.request_delay_seconds, 1.0)
@@ -707,6 +711,125 @@ def test_app_config_from_dict_rejects_invalid_llm_model_type() -> None:
                     "priority_weight": 0.5,
                     "llm_model": 123,
                 },
+            }
+        )
+
+
+def test_app_config_from_dict_parses_llm_gateway_section() -> None:
+    config = AppConfig.from_dict(
+        {
+            "agent": {"timezone": "UTC", "digest_time": "09:00"},
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "sources": ["job104"],
+                    "keywords": ["python"],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 5,
+                    "timezone": "UTC",
+                },
+            },
+            "notifiers": {"telegram": {"enabled": False}},
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+            },
+            "llm": {
+                "provider": "fake",
+                "model": "local-test",
+                "timeout_seconds": 7.5,
+                "temperature": 0.0,
+            },
+        }
+    )
+    assert config.llm.provider == "fake"
+    assert config.llm.model == "local-test"
+    assert config.scoring.llm_model == "local-test"
+    assert config.llm.timeout_seconds == 7.5
+    assert config.llm.temperature == 0.0
+
+
+def test_app_config_syncs_llm_model_from_scoring_alias() -> None:
+    config = AppConfig.from_dict(
+        {
+            "agent": {"timezone": "UTC", "digest_time": "09:00"},
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "sources": ["job104"],
+                    "keywords": ["python"],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 5,
+                    "timezone": "UTC",
+                },
+            },
+            "notifiers": {"telegram": {"enabled": False}},
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+                "llm_model": "gpt-from-scoring",
+            },
+        }
+    )
+    assert config.scoring.llm_model == "gpt-from-scoring"
+    assert config.llm.model == "gpt-from-scoring"
+
+
+def test_app_config_rejects_mismatched_llm_model_settings() -> None:
+    with pytest.raises(ConfigError, match="scoring.llm_model.*llm.model"):
+        AppConfig.from_dict(
+            {
+                "agent": {"timezone": "UTC", "digest_time": "09:00"},
+                "tasks": {
+                    "job_search": {
+                        "enabled": True,
+                        "sources": ["job104"],
+                        "keywords": ["python"],
+                    },
+                    "tw_stock_movers": {
+                        "enabled": True,
+                        "top_n": 5,
+                        "timezone": "UTC",
+                    },
+                },
+                "notifiers": {"telegram": {"enabled": False}},
+                "scoring": {
+                    "freshness_weight": 0.5,
+                    "priority_weight": 0.5,
+                    "llm_model": "gpt-scoring",
+                },
+                "llm": {"model": "gpt-gateway"},
+            }
+        )
+
+
+def test_app_config_from_dict_rejects_invalid_llm_provider() -> None:
+    with pytest.raises(ConfigError, match="llm.provider"):
+        AppConfig.from_dict(
+            {
+                "agent": {"timezone": "UTC", "digest_time": "09:00"},
+                "tasks": {
+                    "job_search": {
+                        "enabled": True,
+                        "sources": ["job104"],
+                        "keywords": ["python"],
+                    },
+                    "tw_stock_movers": {
+                        "enabled": True,
+                        "top_n": 5,
+                        "timezone": "UTC",
+                    },
+                },
+                "notifiers": {"telegram": {"enabled": False}},
+                "scoring": {
+                    "freshness_weight": 0.5,
+                    "priority_weight": 0.5,
+                },
+                "llm": {"provider": "anthropic"},
             }
         )
 

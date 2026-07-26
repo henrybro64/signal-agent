@@ -182,6 +182,7 @@ signal-agent/
 │   │   ├── job_llm_scorer.py
 │   │   ├── job_rule_scorer.py
 │   │   └── job_search.py
+│   ├── llm/                 # framework-neutral LLM gateway
 │   ├── sources/
 │   │   ├── job104.py
 │   │   ├── indeed.py
@@ -191,7 +192,8 @@ signal-agent/
 │   │   └── twse.py
 │   └── tasks/
 ├── docs/
-│   └── ubuntu-vm-deployment.md
+│   ├── ubuntu-vm-deployment.md
+│   └── m7-agent-platform-roadmap.md
 ├── deploy/
 │   ├── ubuntu/
 │   │   ├── crontab.example
@@ -625,6 +627,7 @@ scoring:
   freshness_weight: 0.6
   priority_weight: 0.4
   llm_enabled: false
+  # Alias kept in sync with llm.model (either may be set; both must match).
   llm_model: gpt-4o-mini
   # Optional LLM budget and digest caps when llm_enabled: true
   # llm_min_rule_score: 25
@@ -632,6 +635,14 @@ scoring:
   # digest_max_strong_matches: 10
   # digest_max_maybe_matches: 10
   # include_rejected_summary: true
+
+# Optional LLM gateway defaults (provider/model/timeout/temperature).
+# llm.model is the source of truth for the OpenAI/fake gateway model.
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  timeout_seconds: 20
+  temperature: 0.2
 
 # Optional. Omit the whole section (or any nested key) to keep safe defaults.
 sources:
@@ -676,9 +687,14 @@ env = load_env_settings()
 ```
 
 - Put local secrets in `.env`, not in `config.yaml` or committed files.
-- Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`.
-- Set `scoring.llm_model` in `config.yaml` to choose which OpenAI model powers
-  the optional LLM scorer.
+- Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`
+  with `llm.provider: openai` (default). The offline `llm.provider: fake`
+  path does not require an OpenAI key.
+- Set `llm.model` in `config.yaml` to choose which model the gateway uses for
+  the optional LLM scorer. `scoring.llm_model` remains a supported alias and
+  is kept in sync; setting both to different values raises `ConfigError`.
+- Optional `llm:` gateway settings also control provider (`openai` / `fake`),
+  timeout, and temperature.
 - Two-stage scoring: rule score always runs first; LLM runs only when enabled,
   the rule score is at or above `scoring.llm_min_rule_score`, and
   `scoring.llm_max_jobs_per_run` has not been reached. Stored reasons are

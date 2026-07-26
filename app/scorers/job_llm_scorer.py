@@ -1,4 +1,7 @@
-"""Optional OpenAI-backed job scorer with rule-based fallback."""
+"""Optional OpenAI-backed job scorer with rule-based fallback.
+
+Uses the project-owned ``app.llm`` gateway; does not import LangChain.
+"""
 
 from __future__ import annotations
 
@@ -9,12 +12,20 @@ from typing import Final
 import requests
 
 from app.core import SignalItem
+from app.llm import (
+    DEFAULT_OPENAI_RESPONSES_URL,
+    LLMError,
+    LLMProvider,
+    LLMRequest,
+    StructuredOutputSpec,
+    create_llm_provider,
+)
 
 from .job_rule_scorer import JobRuleScore, JobRuleScorer
 from .job_search import JobSearchProfile, load_job_search_profile
 
-_RESPONSES_API_URL: Final[str] = "https://api.openai.com/v1/responses"
-_REQUEST_TIMEOUT_SECONDS: Final[int] = 20
+_REQUEST_TIMEOUT_SECONDS: Final[float] = 20.0
+_REQUEST_TEMPERATURE: Final[float] = 0.2
 _ALLOWED_RECOMMENDATIONS: Final[frozenset[str]] = frozenset(
     {"strong_match", "maybe", "reject"}
 )
@@ -47,6 +58,11 @@ _STRUCTURED_OUTPUT_SCHEMA: Final[dict[str, object]] = {
         },
     },
 }
+_JOB_FIT_OUTPUT = StructuredOutputSpec(
+    name="job_fit_assessment",
+    schema=_STRUCTURED_OUTPUT_SCHEMA,
+    strict=True,
+)
 
 
 _PROMPT_METADATA_SKIP_KEYS: Final[frozenset[str]] = frozenset(
@@ -69,26 +85,39 @@ class JobLLMScoreResult:
 
 
 class JobLLMScorer:
-    """Score job postings with the OpenAI Responses API."""
+    """Score job postings via the framework-neutral LLM gateway."""
 
     def __init__(
         self,
         *,
-        api_key: str,
-        model: str,
+        provider: LLMProvider | None = None,
+        api_key: str | None = None,
+        model: str = "gpt-4o-mini",
         profile: JobSearchProfile | None = None,
         fallback_scorer: JobRuleScorer | None = None,
         session: requests.Session | None = None,
-        api_url: str = _RESPONSES_API_URL,
-        timeout_seconds: int = _REQUEST_TIMEOUT_SECONDS,
+        api_url: str = DEFAULT_OPENAI_RESPONSES_URL,
+        timeout_seconds: float = _REQUEST_TIMEOUT_SECONDS,
+        temperature: float = _REQUEST_TEMPERATURE,
     ) -> None:
-        self.api_key = api_key
         self.model = model
         self.profile = profile or load_job_search_profile()
         self.fallback_scorer = fallback_scorer or JobRuleScorer(self.profile)
-        self.session = session or requests.Session()
-        self.api_url = api_url
         self.timeout_seconds = timeout_seconds
+        self.temperature = temperature
+        if provider is not None:
+            self.provider = provider
+        else:
+            # Convenience path for unit tests; production injects provider=.
+            self.provider = create_llm_provider(
+                provider="openai",
+                api_key=api_key or "",
+                model=model,
+                timeout_seconds=timeout_seconds,
+                temperature=temperature,
+                session=session,
+                api_url=api_url,
+            )
 
     def score(self, item: SignalItem) -> JobRuleScore:
         """Return an LLM score, falling back to rule-based scoring on failure."""
@@ -112,50 +141,22 @@ class JobLLMScorer:
         return _job_rule_score_from_llm(self._score_with_llm(item))
 
     def _score_with_llm(self, item: SignalItem) -> JobLLMScoreResult:
-        payload = {
-            "model": self.model,
-            "instructions": _SYSTEM_PROMPT,
-            "input": _build_user_prompt(item, self.profile),
-            "store": False,
-            "temperature": 0.2,
-            "text": {
-                "verbosity": "low",
-                "format": {
-                    "type": "json_schema",
-                    "name": "job_fit_assessment",
-                    "strict": True,
-                    "schema": _STRUCTURED_OUTPUT_SCHEMA,
-                },
-            },
-        }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        request = LLMRequest(
+            instructions=_SYSTEM_PROMPT,
+            input=_build_user_prompt(item, self.profile),
+            model=self.model,
+            temperature=self.temperature,
+            timeout_seconds=self.timeout_seconds,
+            structured_output=_JOB_FIT_OUTPUT,
+            store=False,
+        )
+        try:
+            response = self.provider.generate(request)
+        except LLMError as exc:
+            raise JobLLMScorerError(str(exc)) from exc
 
         try:
-            response = self.session.post(
-                self.api_url,
-                headers=headers,
-                json=payload,
-                timeout=self.timeout_seconds,
-            )
-        except requests.RequestException as exc:
-            raise JobLLMScorerError("LLM request failed") from exc
-
-        if response.status_code >= 400:
-            raise JobLLMScorerError(
-                f"LLM request failed with status {response.status_code}"
-            )
-
-        try:
-            response_payload = response.json()
-        except ValueError as exc:
-            raise JobLLMScorerError("LLM response was not valid JSON") from exc
-
-        output_text = _extract_output_text(response_payload)
-        try:
-            parsed = json.loads(output_text)
+            parsed = json.loads(response.text)
         except json.JSONDecodeError as exc:
             raise JobLLMScorerError(
                 "LLM structured output was not valid JSON"
@@ -234,37 +235,6 @@ def _metadata_prompt_lines(item: SignalItem) -> list[str]:
 
 def _format_metadata_key(key: str) -> str:
     return key.replace("_", " ").strip().title()
-
-
-def _extract_output_text(payload: object) -> str:
-    if not isinstance(payload, dict):
-        raise JobLLMScorerError("LLM response payload was not an object")
-
-    output_text = payload.get("output_text")
-    if isinstance(output_text, str) and output_text.strip():
-        return output_text
-
-    output = payload.get("output")
-    if not isinstance(output, list):
-        raise JobLLMScorerError("LLM response did not include output text")
-
-    for item in output:
-        if not isinstance(item, dict):
-            continue
-        content = item.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            text = block.get("text")
-            if isinstance(text, str) and text.strip():
-                return text
-            parsed = block.get("parsed")
-            if isinstance(parsed, dict):
-                return json.dumps(parsed, ensure_ascii=False)
-
-    raise JobLLMScorerError("LLM response did not include parsable text")
 
 
 def _parse_llm_score_result(payload: object) -> JobLLMScoreResult:

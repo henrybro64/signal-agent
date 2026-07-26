@@ -90,7 +90,17 @@ scoring:
   freshness_weight: 0.6
   priority_weight: 0.4
   llm_enabled: false
+  # Kept in sync with llm.model (alias for older configs).
   llm_model: gpt-4o-mini
+
+# Optional LLM gateway defaults (used when scoring.llm_enabled is true).
+# llm.model is the source of truth; provider "fake" is for offline tests;
+# "ollama" is reserved for later.
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  timeout_seconds: 20
+  temperature: 0.2
 
 # Optional source runtime tuning. Safe defaults apply when this section
 # (or any nested key) is omitted.

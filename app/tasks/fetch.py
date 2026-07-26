@@ -44,6 +44,7 @@ class FetchTask(BaseTask):
             validate_llm_scoring_secrets(
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
+                provider=config.llm.provider,
             )
 
             sources = build_job_search_sources(
