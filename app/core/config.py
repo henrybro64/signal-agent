@@ -144,6 +144,16 @@ class ScoringConfig:
 
 
 @dataclass(slots=True)
+class LlmConfig:
+    """Framework-neutral LLM gateway defaults (optional OpenAI/fake)."""
+
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    timeout_seconds: float = 20.0
+    temperature: float = 0.2
+
+
+@dataclass(slots=True)
 class JobHttpSourceConfig:
     timeout_seconds: float = 10.0
     max_retries: int = 2
@@ -187,6 +197,7 @@ class AppConfig:
     scoring: ScoringConfig
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     investment: InvestmentConfig = field(default_factory=InvestmentConfig)
+    llm: LlmConfig = field(default_factory=LlmConfig)
 
     @classmethod
     def from_dict(
@@ -224,6 +235,11 @@ class AppConfig:
         investment = _optional_mapping(
             data,
             "investment",
+            source_name=source_name,
+        )
+        llm = _optional_mapping(
+            data,
+            "llm",
             source_name=source_name,
         )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
@@ -369,6 +385,7 @@ class AppConfig:
                 investment,
                 source_name=source_name,
             ),
+            llm=_parse_llm_config(llm, source_name=source_name),
         )
 
 
@@ -478,6 +495,79 @@ def _parse_investment_config(
             source_name=source_name,
         ),
         theme_mappings=theme_mappings,
+    )
+
+
+_SUPPORTED_LLM_PROVIDERS = frozenset({"openai", "fake"})
+_LLM_CONFIG_PATH = "llm"
+
+
+def _parse_llm_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> LlmConfig:
+    """Parse optional ``llm:`` gateway defaults; omit section for defaults."""
+
+    if not data:
+        return LlmConfig()
+
+    provider = _optional_str(
+        data,
+        "provider",
+        default="openai",
+        parent_path=_LLM_CONFIG_PATH,
+        source_name=source_name,
+    ).strip().lower()
+    if provider == "ollama":
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.provider' value 'ollama' is "
+            f"reserved but not implemented yet in {source_name}"
+        )
+    if provider not in _SUPPORTED_LLM_PROVIDERS:
+        supported = ", ".join(sorted(_SUPPORTED_LLM_PROVIDERS))
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.provider' must be one of "
+            f"{supported} in {source_name}"
+        )
+
+    timeout_seconds = _optional_float(
+        data,
+        "timeout_seconds",
+        default=20.0,
+        parent_path=_LLM_CONFIG_PATH,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout_seconds,
+        config_path=f"{_LLM_CONFIG_PATH}.timeout_seconds",
+        source_name=source_name,
+    )
+
+    temperature = _optional_float(
+        data,
+        "temperature",
+        default=0.2,
+        parent_path=_LLM_CONFIG_PATH,
+        source_name=source_name,
+    )
+    if temperature < 0 or temperature > 2:
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.temperature' must be between "
+            f"0 and 2 in {source_name}"
+        )
+
+    return LlmConfig(
+        provider=provider,
+        model=_optional_str(
+            data,
+            "model",
+            default="gpt-4o-mini",
+            parent_path=_LLM_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        timeout_seconds=timeout_seconds,
+        temperature=temperature,
     )
 
 

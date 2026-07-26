@@ -518,6 +518,7 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
             model: str,
             profile,
             fallback_scorer,
+            **_kwargs,
         ) -> None:
             calls.append((api_key, model))
 

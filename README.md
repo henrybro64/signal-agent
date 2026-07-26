@@ -182,6 +182,7 @@ signal-agent/
 │   │   ├── job_llm_scorer.py
 │   │   ├── job_rule_scorer.py
 │   │   └── job_search.py
+│   ├── llm/                 # framework-neutral LLM gateway
 │   ├── sources/
 │   │   ├── job104.py
 │   │   ├── indeed.py
@@ -191,7 +192,8 @@ signal-agent/
 │   │   └── twse.py
 │   └── tasks/
 ├── docs/
-│   └── ubuntu-vm-deployment.md
+│   ├── ubuntu-vm-deployment.md
+│   └── m7-agent-platform-roadmap.md
 ├── deploy/
 │   ├── ubuntu/
 │   │   ├── crontab.example
@@ -633,6 +635,14 @@ scoring:
   # digest_max_maybe_matches: 10
   # include_rejected_summary: true
 
+# Optional LLM gateway defaults (timeout/temperature/provider).
+# scoring.llm_model still selects the model used for job scoring.
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  timeout_seconds: 20
+  temperature: 0.2
+
 # Optional. Omit the whole section (or any nested key) to keep safe defaults.
 sources:
   job104:
@@ -679,6 +689,8 @@ env = load_env_settings()
 - Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`.
 - Set `scoring.llm_model` in `config.yaml` to choose which OpenAI model powers
   the optional LLM scorer.
+- Optional `llm:` gateway settings control provider (`openai` / `fake`),
+  timeout, and temperature. Job scoring still uses `scoring.llm_model`.
 - Two-stage scoring: rule score always runs first; LLM runs only when enabled,
   the rule score is at or above `scoring.llm_min_rule_score`, and
   `scoring.llm_max_jobs_per_run` has not been reached. Stored reasons are

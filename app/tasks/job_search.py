@@ -143,6 +143,7 @@ class JobSearchTask(BaseTask):
                         env=env,
                         scorer_profile=profile.scorer_profile,
                         llm_budget=llm_budget,
+                        llm_config=config.llm,
                     )
                     scorers_by_key[profile.scorer_profile] = pipeline
 
