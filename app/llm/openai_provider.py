@@ -14,9 +14,12 @@ from app.core.logging import get_logger, log_event
 from .exceptions import LLMProviderError, LLMResponseError, LLMTimeoutError
 from .models import LLMRequest, LLMResponse, StructuredOutputSpec
 
-_DEFAULT_API_URL: Final[str] = "https://api.openai.com/v1/responses"
+DEFAULT_OPENAI_RESPONSES_URL: Final[str] = "https://api.openai.com/v1/responses"
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
 _DEFAULT_TEMPERATURE: Final[float] = 0.2
+_SUPPORTED_INPUT_ROLES: Final[frozenset[str]] = frozenset(
+    {"user", "assistant", "developer"}
+)
 _LOGGER = get_logger("llm.openai")
 
 
@@ -32,7 +35,7 @@ class OpenAIProvider:
         default_model: str = "gpt-4o-mini",
         default_timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
         default_temperature: float = _DEFAULT_TEMPERATURE,
-        api_url: str = _DEFAULT_API_URL,
+        api_url: str = DEFAULT_OPENAI_RESPONSES_URL,
         session: requests.Session | None = None,
     ) -> None:
         if not api_key.strip():
@@ -153,10 +156,19 @@ def _structured_format(spec: StructuredOutputSpec) -> dict[str, object]:
     }
 
 
-def _resolve_prompt_parts(request: LLMRequest) -> tuple[str, str]:
+def _resolve_prompt_parts(
+    request: LLMRequest,
+) -> tuple[str, str | list[dict[str, str]]]:
+    """Map a gateway request onto Responses ``instructions`` + ``input``.
+
+    Chat ``system`` messages become ``instructions``. ``user`` / ``assistant`` /
+    ``developer`` keep their roles in a Responses input list (or a plain string
+    when there is a single user turn). Unsupported roles are rejected.
+    """
+
     if request.messages:
         instructions_parts: list[str] = []
-        user_parts: list[str] = []
+        input_items: list[dict[str, str]] = []
         for message in request.messages:
             role = message.role.strip().lower()
             content = message.content.strip()
@@ -164,13 +176,24 @@ def _resolve_prompt_parts(request: LLMRequest) -> tuple[str, str]:
                 continue
             if role == "system":
                 instructions_parts.append(content)
-            else:
-                user_parts.append(content)
+                continue
+            if role not in _SUPPORTED_INPUT_ROLES:
+                supported = ", ".join(
+                    ["system", *sorted(_SUPPORTED_INPUT_ROLES)]
+                )
+                raise LLMProviderError(
+                    f"Unsupported chat message role {message.role!r}; "
+                    f"supported: {supported}"
+                )
+            input_items.append({"role": role, "content": content})
+        if not any(item["role"] == "user" for item in input_items):
+            raise LLMProviderError(
+                "LLM request messages must include user content"
+            )
         instructions = "\n\n".join(instructions_parts)
-        user_input = "\n\n".join(user_parts)
-        if not user_input:
-            raise LLMProviderError("LLM request messages must include user content")
-        return instructions, user_input
+        if len(input_items) == 1 and input_items[0]["role"] == "user":
+            return instructions, input_items[0]["content"]
+        return instructions, input_items
 
     instructions = (request.instructions or "").strip()
     user_input = (request.input or "").strip()

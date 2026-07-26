@@ -318,6 +318,40 @@ def test_job_search_task_requires_openai_key_when_llm_enabled(
         JobSearchTask(str(config_path)).run()
 
 
+def test_job_search_task_allows_fake_llm_provider_without_openai_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        source_names=["static_jobs"],
+        llm_enabled=True,
+        llm_provider="fake",
+    )
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources_for_profile.__globals__[
+            "SOURCE_FACTORIES"
+        ],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()[:1]),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
+
+    JobSearchTask(str(config_path)).run()
+
+    assert len(notifier.messages) == 1
+
+
 def test_job_search_task_skips_telegram_validation_without_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -514,13 +548,13 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
         def __init__(
             self,
             *,
-            api_key: str,
+            provider,
             model: str,
             profile,
             fallback_scorer,
             **_kwargs,
         ) -> None:
-            calls.append((api_key, model))
+            calls.append((provider.name, model))
 
         def score_with_llm(self, item: SignalItem):
             return job_search_task_module.JobRuleScore(
@@ -541,7 +575,7 @@ def test_job_search_task_uses_llm_scorer_when_enabled(
 
     JobSearchTask(str(config_path)).run()
 
-    assert calls == [("sk-test", "gpt-5.2")]
+    assert calls == [("openai", "gpt-5.2")]
     assert len(notifier.messages) == 1
     assert "LLM fit" in notifier.messages[0]
     rows = _fetch_signal_rows(db_path)
@@ -812,6 +846,7 @@ def _write_config(
     telegram_enabled: bool = True,
     llm_enabled: bool = False,
     llm_model: str = "gpt-4o-mini",
+    llm_provider: str | None = None,
     llm_min_rule_score: int | None = None,
     digest_max_strong_matches: int | None = None,
     digest_max_maybe_matches: int | None = None,
@@ -840,6 +875,13 @@ def _write_config(
             f"  include_rejected_summary: "
             f"{'true' if include_rejected_summary else 'false'}"
         )
+    llm_lines: list[str] = []
+    if llm_provider is not None:
+        llm_lines = [
+            "llm:",
+            f"  provider: {llm_provider}",
+            f"  model: {llm_model}",
+        ]
 
     config_path.write_text(
         "\n".join(
@@ -863,6 +905,7 @@ def _write_config(
                 "  telegram:",
                 f"    enabled: {'true' if telegram_enabled else 'false'}",
                 *scoring_lines,
+                *llm_lines,
             ]
         ),
         encoding="utf-8",

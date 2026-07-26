@@ -13,10 +13,10 @@ import requests
 
 from app.core import SignalItem
 from app.llm import (
+    DEFAULT_OPENAI_RESPONSES_URL,
     LLMError,
     LLMProvider,
     LLMRequest,
-    OpenAIProvider,
     StructuredOutputSpec,
     create_llm_provider,
 )
@@ -24,7 +24,6 @@ from app.llm import (
 from .job_rule_scorer import JobRuleScore, JobRuleScorer
 from .job_search import JobSearchProfile, load_job_search_profile
 
-_RESPONSES_API_URL: Final[str] = "https://api.openai.com/v1/responses"
 _REQUEST_TIMEOUT_SECONDS: Final[float] = 20.0
 _REQUEST_TEMPERATURE: Final[float] = 0.2
 _ALLOWED_RECOMMENDATIONS: Final[frozenset[str]] = frozenset(
@@ -91,13 +90,13 @@ class JobLLMScorer:
     def __init__(
         self,
         *,
+        provider: LLMProvider | None = None,
         api_key: str | None = None,
         model: str = "gpt-4o-mini",
         profile: JobSearchProfile | None = None,
         fallback_scorer: JobRuleScorer | None = None,
-        provider: LLMProvider | None = None,
         session: requests.Session | None = None,
-        api_url: str = _RESPONSES_API_URL,
+        api_url: str = DEFAULT_OPENAI_RESPONSES_URL,
         timeout_seconds: float = _REQUEST_TIMEOUT_SECONDS,
         temperature: float = _REQUEST_TEMPERATURE,
     ) -> None:
@@ -109,6 +108,7 @@ class JobLLMScorer:
         if provider is not None:
             self.provider = provider
         else:
+            # Convenience path for unit tests; production injects provider=.
             self.provider = create_llm_provider(
                 provider="openai",
                 api_key=api_key or "",
@@ -118,15 +118,6 @@ class JobLLMScorer:
                 session=session,
                 api_url=api_url,
             )
-        # Retain attributes used by older call sites / tests.
-        if isinstance(self.provider, OpenAIProvider):
-            self.api_key = api_key or ""
-            self.session = self.provider.session
-            self.api_url = self.provider.api_url
-        else:
-            self.api_key = api_key or ""
-            self.session = session
-            self.api_url = api_url
 
     def score(self, item: SignalItem) -> JobRuleScore:
         """Return an LLM score, falling back to rule-based scoring on failure."""

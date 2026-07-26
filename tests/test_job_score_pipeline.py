@@ -162,6 +162,19 @@ def test_build_job_score_pipeline_from_config() -> None:
     assert pipeline.llm_max_jobs_per_run == 5
     assert pipeline.llm_scorer is not None
     assert isinstance(pipeline.llm_scorer, JobLLMScorer)
+    assert pipeline.llm_scorer.model == "gpt-5.2"
+    assert pipeline.llm_scorer.provider.name == "openai"
+    assert not hasattr(pipeline.llm_scorer, "api_key")
+
+    from app.core.config import LlmConfig
+
+    gateway_pipeline = build_job_score_pipeline(
+        config=config,
+        env=_env_with_key(),
+        llm_config=LlmConfig(model="gpt-from-gateway"),
+    )
+    assert gateway_pipeline.llm_scorer is not None
+    assert gateway_pipeline.llm_scorer.model == "gpt-from-gateway"
 
 
 class _FakeRuleScorer:

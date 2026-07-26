@@ -129,37 +129,33 @@ def build_job_score_pipeline(
     llm_budget: LlmCallBudget | None = None,
     llm_config: LlmConfig | None = None,
 ) -> JobScorePipeline:
-    """Build a configured two-stage scoring pipeline."""
+    """Build a configured two-stage scoring pipeline.
+
+    Model selection uses ``llm.model`` (``LlmConfig.model``). When ``llm_config``
+    is omitted, ``scoring.llm_model`` seeds the gateway defaults so unit tests
+    and older call sites keep working. Loaded ``AppConfig`` keeps both in sync.
+    """
 
     profile = load_job_search_profile(scorer_profile)
     rule_scorer = JobRuleScorer(profile)
     llm_scorer: JobLLMScorer | None = None
-    gateway = llm_config or LlmConfig()
+    gateway = llm_config or LlmConfig(model=config.llm_model)
     if config.llm_enabled:
-        if gateway.provider == "fake":
-            provider = create_llm_provider(
-                provider="fake",
-                model=config.llm_model,
-            )
-            llm_scorer = JobLLMScorer(
-                provider=provider,
-                model=config.llm_model,
-                profile=profile,
-                fallback_scorer=rule_scorer,
-                timeout_seconds=gateway.timeout_seconds,
-                temperature=gateway.temperature,
-            )
-        else:
-            # Construct with api_key/model so existing test doubles that patch
-            # JobLLMScorer keep working without a provider= kwarg.
-            llm_scorer = JobLLMScorer(
-                api_key=env.openai_api_key or "",
-                model=config.llm_model,
-                profile=profile,
-                fallback_scorer=rule_scorer,
-                timeout_seconds=gateway.timeout_seconds,
-                temperature=gateway.temperature,
-            )
+        provider = create_llm_provider(
+            provider=gateway.provider,
+            api_key=env.openai_api_key or "",
+            model=gateway.model,
+            timeout_seconds=gateway.timeout_seconds,
+            temperature=gateway.temperature,
+        )
+        llm_scorer = JobLLMScorer(
+            provider=provider,
+            model=gateway.model,
+            profile=profile,
+            fallback_scorer=rule_scorer,
+            timeout_seconds=gateway.timeout_seconds,
+            temperature=gateway.temperature,
+        )
     budget = llm_budget or LlmCallBudget(max_calls=config.llm_max_jobs_per_run)
     return JobScorePipeline(
         rule_scorer=rule_scorer,

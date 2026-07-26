@@ -9,7 +9,7 @@ import requests
 from .base import LLMProvider
 from .exceptions import LLMProviderError
 from .fake_provider import FakeLLMProvider
-from .openai_provider import OpenAIProvider
+from .openai_provider import DEFAULT_OPENAI_RESPONSES_URL, OpenAIProvider
 
 _SUPPORTED_PROVIDERS: Final[frozenset[str]] = frozenset({"openai", "fake"})
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
@@ -52,7 +52,7 @@ def create_llm_provider(
         default_model=model,
         default_timeout_seconds=timeout_seconds,
         default_temperature=temperature,
-        api_url=api_url or "https://api.openai.com/v1/responses",
+        api_url=api_url or DEFAULT_OPENAI_RESPONSES_URL,
         session=session,
     )
 

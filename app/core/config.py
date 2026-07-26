@@ -145,7 +145,11 @@ class ScoringConfig:
 
 @dataclass(slots=True)
 class LlmConfig:
-    """Framework-neutral LLM gateway defaults (optional OpenAI/fake)."""
+    """Framework-neutral LLM gateway defaults (optional OpenAI/fake).
+
+    ``model`` is the source of truth for gateway calls; ``ScoringConfig.llm_model``
+    is kept in sync by ``AppConfig.from_dict``.
+    """
 
     provider: str = "openai"
     model: str = "gpt-4o-mini"
@@ -261,6 +265,71 @@ class AppConfig:
             "sources",
             source_name=source_name,
         )
+        scoring_config = ScoringConfig(
+            freshness_weight=_require_float(
+                scoring,
+                "freshness_weight",
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            priority_weight=_require_float(
+                scoring,
+                "priority_weight",
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            llm_enabled=_optional_bool(
+                scoring,
+                "llm_enabled",
+                default=False,
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            llm_model=_optional_str(
+                scoring,
+                "llm_model",
+                default="gpt-4o-mini",
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+            llm_min_rule_score=_parse_scoring_llm_min_rule_score(
+                scoring,
+                source_name=source_name,
+            ),
+            llm_max_jobs_per_run=_parse_scoring_positive_int(
+                scoring,
+                key="llm_max_jobs_per_run",
+                default=20,
+                source_name=source_name,
+            ),
+            digest_max_strong_matches=_parse_scoring_positive_int(
+                scoring,
+                key="digest_max_strong_matches",
+                default=10,
+                source_name=source_name,
+            ),
+            digest_max_maybe_matches=_parse_scoring_positive_int(
+                scoring,
+                key="digest_max_maybe_matches",
+                default=10,
+                source_name=source_name,
+            ),
+            include_rejected_summary=_optional_bool(
+                scoring,
+                "include_rejected_summary",
+                default=True,
+                parent_path="scoring",
+                source_name=source_name,
+            ),
+        )
+        llm_config = _parse_llm_config(llm, source_name=source_name)
+        scoring_config, llm_config = _reconcile_llm_model_settings(
+            scoring_config,
+            llm_config,
+            scoring_raw=scoring,
+            llm_raw=llm,
+            source_name=source_name,
+        )
 
         return cls(
             agent=AgentConfig(
@@ -323,69 +392,13 @@ class AppConfig:
                     ),
                 ),
             ),
-            scoring=ScoringConfig(
-                freshness_weight=_require_float(
-                    scoring,
-                    "freshness_weight",
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                priority_weight=_require_float(
-                    scoring,
-                    "priority_weight",
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                llm_enabled=_optional_bool(
-                    scoring,
-                    "llm_enabled",
-                    default=False,
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                llm_model=_optional_str(
-                    scoring,
-                    "llm_model",
-                    default="gpt-4o-mini",
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-                llm_min_rule_score=_parse_scoring_llm_min_rule_score(
-                    scoring,
-                    source_name=source_name,
-                ),
-                llm_max_jobs_per_run=_parse_scoring_positive_int(
-                    scoring,
-                    key="llm_max_jobs_per_run",
-                    default=20,
-                    source_name=source_name,
-                ),
-                digest_max_strong_matches=_parse_scoring_positive_int(
-                    scoring,
-                    key="digest_max_strong_matches",
-                    default=10,
-                    source_name=source_name,
-                ),
-                digest_max_maybe_matches=_parse_scoring_positive_int(
-                    scoring,
-                    key="digest_max_maybe_matches",
-                    default=10,
-                    source_name=source_name,
-                ),
-                include_rejected_summary=_optional_bool(
-                    scoring,
-                    "include_rejected_summary",
-                    default=True,
-                    parent_path="scoring",
-                    source_name=source_name,
-                ),
-            ),
+            scoring=scoring_config,
             sources=_parse_sources_config(sources, source_name=source_name),
             investment=_parse_investment_config(
                 investment,
                 source_name=source_name,
             ),
-            llm=_parse_llm_config(llm, source_name=source_name),
+            llm=llm_config,
         )
 
 
@@ -569,6 +582,41 @@ def _parse_llm_config(
         timeout_seconds=timeout_seconds,
         temperature=temperature,
     )
+
+
+def _reconcile_llm_model_settings(
+    scoring: ScoringConfig,
+    llm: LlmConfig,
+    *,
+    scoring_raw: dict[str, Any],
+    llm_raw: dict[str, Any] | None,
+    source_name: str,
+) -> tuple[ScoringConfig, LlmConfig]:
+    """Keep ``scoring.llm_model`` and ``llm.model`` as one logical value.
+
+    ``llm.model`` is the gateway source of truth when set. ``scoring.llm_model``
+    remains a supported alias for older configs. When both are set explicitly to
+    different values, raise ``ConfigError``.
+    """
+
+    scoring_model_explicit = "llm_model" in scoring_raw
+    llm_model_explicit = isinstance(llm_raw, dict) and "model" in llm_raw
+
+    if (
+        scoring_model_explicit
+        and llm_model_explicit
+        and scoring.llm_model != llm.model
+    ):
+        raise ConfigError(
+            f"Config values 'scoring.llm_model' ({scoring.llm_model!r}) and "
+            f"'llm.model' ({llm.model!r}) must match in {source_name}; "
+            f"prefer setting llm.model"
+        )
+    if llm_model_explicit and not scoring_model_explicit:
+        return replace(scoring, llm_model=llm.model), llm
+    if scoring_model_explicit and not llm_model_explicit:
+        return scoring, replace(llm, model=scoring.llm_model)
+    return scoring, llm
 
 
 def _parse_stock_watchlist_task_config(

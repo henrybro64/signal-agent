@@ -111,6 +111,7 @@ class JobSearchTask(BaseTask):
             validate_llm_scoring_secrets(
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
+                provider=config.llm.provider,
             )
 
             profiles = list(config.tasks.job_search.profiles)

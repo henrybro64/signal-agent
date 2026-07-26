@@ -178,6 +178,47 @@ def test_openai_provider_accepts_chat_messages() -> None:
     assert body["input"] == "Hi"
 
 
+def test_openai_provider_preserves_multi_turn_roles() -> None:
+    session = _FakeSession(
+        [_FakeHttpResponse(json_payload={"output_text": "ok"})]
+    )
+    provider = OpenAIProvider(api_key="sk-test", session=session)
+    request = LLMRequest(
+        messages=(
+            LLMMessage(role="system", content="Stay brief."),
+            LLMMessage(role="user", content="Name a color."),
+            LLMMessage(role="assistant", content="Blue."),
+            LLMMessage(role="user", content="And another?"),
+        )
+    )
+
+    provider.generate(request)
+
+    body = session.calls[0]["json"]
+    assert body["instructions"] == "Stay brief."
+    assert body["input"] == [
+        {"role": "user", "content": "Name a color."},
+        {"role": "assistant", "content": "Blue."},
+        {"role": "user", "content": "And another?"},
+    ]
+
+
+def test_openai_provider_rejects_unsupported_chat_roles() -> None:
+    provider = OpenAIProvider(
+        api_key="sk-test",
+        session=_FakeSession([]),
+    )
+    with pytest.raises(LLMProviderError, match="Unsupported chat message role"):
+        provider.generate(
+            LLMRequest(
+                messages=(
+                    LLMMessage(role="user", content="Hi"),
+                    LLMMessage(role="tool", content="secret"),
+                )
+            )
+        )
+
+
 def test_openai_provider_timeout_and_http_error() -> None:
     timeout_session = _FakeSession([requests.Timeout("slow")])
     provider = OpenAIProvider(api_key="sk-test", session=timeout_session)

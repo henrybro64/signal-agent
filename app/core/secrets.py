@@ -81,12 +81,21 @@ def validate_llm_scoring_secrets(
     *,
     llm_enabled: bool,
     env: EnvSettings,
+    provider: str | None = None,
 ) -> None:
-    """Ensure OpenAI credentials exist before enabling LLM-backed scoring."""
+    """Ensure OpenAI credentials exist before enabling LLM-backed scoring.
 
-    if llm_enabled and not has_openai_api_key(env):
+    The offline ``fake`` gateway provider does not need ``OPENAI_API_KEY``.
+    """
+
+    if not llm_enabled:
+        return
+    if (provider or "openai").strip().lower() == "fake":
+        return
+    if not has_openai_api_key(env):
         raise SecretError(
-            "OPENAI_API_KEY is required when scoring.llm_enabled is true"
+            "OPENAI_API_KEY is required when scoring.llm_enabled is true "
+            "and llm.provider is not 'fake'"
         )
 
 

@@ -746,8 +746,65 @@ def test_app_config_from_dict_parses_llm_gateway_section() -> None:
     )
     assert config.llm.provider == "fake"
     assert config.llm.model == "local-test"
+    assert config.scoring.llm_model == "local-test"
     assert config.llm.timeout_seconds == 7.5
     assert config.llm.temperature == 0.0
+
+
+def test_app_config_syncs_llm_model_from_scoring_alias() -> None:
+    config = AppConfig.from_dict(
+        {
+            "agent": {"timezone": "UTC", "digest_time": "09:00"},
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "sources": ["job104"],
+                    "keywords": ["python"],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 5,
+                    "timezone": "UTC",
+                },
+            },
+            "notifiers": {"telegram": {"enabled": False}},
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+                "llm_model": "gpt-from-scoring",
+            },
+        }
+    )
+    assert config.scoring.llm_model == "gpt-from-scoring"
+    assert config.llm.model == "gpt-from-scoring"
+
+
+def test_app_config_rejects_mismatched_llm_model_settings() -> None:
+    with pytest.raises(ConfigError, match="scoring.llm_model.*llm.model"):
+        AppConfig.from_dict(
+            {
+                "agent": {"timezone": "UTC", "digest_time": "09:00"},
+                "tasks": {
+                    "job_search": {
+                        "enabled": True,
+                        "sources": ["job104"],
+                        "keywords": ["python"],
+                    },
+                    "tw_stock_movers": {
+                        "enabled": True,
+                        "top_n": 5,
+                        "timezone": "UTC",
+                    },
+                },
+                "notifiers": {"telegram": {"enabled": False}},
+                "scoring": {
+                    "freshness_weight": 0.5,
+                    "priority_weight": 0.5,
+                    "llm_model": "gpt-scoring",
+                },
+                "llm": {"model": "gpt-gateway"},
+            }
+        )
 
 
 def test_app_config_from_dict_rejects_invalid_llm_provider() -> None:

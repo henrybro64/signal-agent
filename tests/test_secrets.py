@@ -120,6 +120,21 @@ def test_validate_llm_scoring_secrets_requires_openai_key() -> None:
         validate_llm_scoring_secrets(llm_enabled=True, env=env)
 
 
+def test_validate_llm_scoring_secrets_allows_fake_provider_without_key() -> None:
+    env = EnvSettings(
+        openai_api_key=None,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+        signal_agent_env="test",
+    )
+
+    validate_llm_scoring_secrets(
+        llm_enabled=True,
+        env=env,
+        provider="fake",
+    )
+
+
 def test_validate_llm_scoring_secrets_allows_disabled_llm_without_key() -> None:
     env = EnvSettings(
         openai_api_key=None,
