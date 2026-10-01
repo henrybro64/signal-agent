@@ -43,6 +43,7 @@ def test_list_tasks_returns_registered_task_names() -> None:
     assert list_tasks() == [
         "dummy",
         "fetch",
+        "job_research_agent",
         "job_search",
         "stock_watchlist",
         "tw_market_assistant",
@@ -116,11 +117,11 @@ def test_build_task_unknown_name_raises_clear_error() -> None:
 
     with pytest.raises(
         ValueError,
-        match=(
-            "Available tasks: dummy, fetch, job_search, "
-            "stock_watchlist, tw_market_assistant, tw_stock_movers"
-        ),
-    ):
+            match=(
+                "Available tasks: dummy, fetch, job_research_agent, job_search, "
+                "stock_watchlist, tw_market_assistant, tw_stock_movers"
+            ),
+        ):
         build_task("missing-task", config_path="config.yaml")
 
 

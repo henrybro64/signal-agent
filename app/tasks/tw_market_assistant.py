@@ -112,7 +112,7 @@ class TwMarketAssistantTask(BaseTask):
             )
             watchlist_hits = find_watchlist_hits(
                 stock_summary.stock_items,
-                config.investment.watchlist,
+                _resolved_assistant_watchlist(config),
             )
             summary_bullets = summarize_theme_activity(
                 market_reports,
@@ -133,6 +133,7 @@ class TwMarketAssistantTask(BaseTask):
                 research_candidates=research_candidates,
                 top_n=task_config.top_n,
                 timezone_name=task_config.timezone,
+                notify_language=task_config.notify_language,
             )
             snapshot_saved = _persist_assistant_outputs(
                 db_path=db_path,
@@ -223,6 +224,23 @@ class TwMarketAssistantTask(BaseTask):
                 error=str(exc),
             )
             raise
+
+
+def _resolved_assistant_watchlist(config) -> list[str]:
+    """Prefer investment.watchlist; fall back to stock_watchlist symbol codes."""
+
+    codes = [
+        str(code).strip()
+        for code in config.investment.watchlist
+        if str(code).strip()
+    ]
+    if codes:
+        return codes
+    return [
+        symbol.code.strip()
+        for symbol in config.tasks.stock_watchlist.symbols
+        if symbol.code.strip()
+    ]
 
 
 def _persist_assistant_outputs(

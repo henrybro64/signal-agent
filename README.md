@@ -37,8 +37,11 @@ python main.py --recent-runs --limit 5
 python main.py --task dummy
 python main.py --task fetch
 python main.py --task job_search
+python main.py --task job_research_agent
 python main.py --task tw_stock_movers
 python main.py --telegram-test
+# Optional: pip install -e '.[langchain]' then:
+# python main.py --langchain-smoke
 signal-agent --help
 python -m pytest
 ```
@@ -233,7 +236,14 @@ signal-agent/
   persists results to SQLite, and prints a source-by-source summary.
 - `python main.py --task job_search` runs the full MVP pipeline: fetch jobs,
   deduplicate, score new jobs, persist results, and send a Telegram digest when
-  there is useful output.
+  there is useful output. Prefer this for scheduled production digests.
+- `python main.py --task job_research_agent` runs the bounded M7 pilot workflow
+  (tool allowlist + optional LangGraph when `.[langchain]` is installed). Use
+  it for experimentation; it does not replace `job_search`. Telegram delivery
+  stays off unless `tasks.job_research_agent.telegram_enabled: true`. The
+  LangGraph path uses the optional install for graph orchestration; #63
+  ChatModel/tool adapters are available separately and are not required for
+  the fixed pilot graph.
 - `python main.py --task tw_stock_movers` runs the Taiwan stock-mover task
   during market hours, persists `tw_stock_mover` signals, and reports separate
   top gainers and losers for TWSE listed (上市) and TPEx OTC (上櫃) stocks.
@@ -250,8 +260,8 @@ signal-agent/
 
 ## Structured logging
 
-`fetch`, `job_search`, `tw_stock_movers`, `stock_watchlist`, and
-`tw_market_assistant` emit JSON log
+`fetch`, `job_search`, `job_research_agent`, `tw_stock_movers`, `stock_watchlist`,
+and `tw_market_assistant` emit JSON log
 lines to stdout so Docker and k3s can collect task, source, and notification
 events from container logs. Human-readable summaries are still printed for local
 CLI use.
@@ -695,6 +705,9 @@ env = load_env_settings()
   is kept in sync; setting both to different values raises `ConfigError`.
 - Optional `llm:` gateway settings also control provider (`openai` / `fake`),
   timeout, and temperature.
+- Optional agent extras: `pip install -e '.[langchain]'` adds `langchain-core`
+  and `langgraph` for `--langchain-smoke` and the LangGraph path inside
+  `job_research_agent`. The base install stays free of those packages.
 - Two-stage scoring: rule score always runs first; LLM runs only when enabled,
   the rule score is at or above `scoring.llm_min_rule_score`, and
   `scoring.llm_max_jobs_per_run` has not been reached. Stored reasons are

@@ -710,6 +710,41 @@ def get_latest_task_run(
     return _row_to_task_run(row)
 
 
+def get_recent_task_runs(
+    *,
+    limit: int = 20,
+    db_path: str | Path | None = None,
+) -> list[TaskRunRecord]:
+    """Return the newest top-level task runs, newest first."""
+
+    if limit <= 0:
+        return []
+
+    resolved_path = _resolve_db_path(db_path)
+    with _connect(resolved_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                task_name,
+                started_at,
+                finished_at,
+                status,
+                fetched_count,
+                new_count,
+                skipped_count,
+                notified_count,
+                error_message
+            FROM task_runs
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [_row_to_task_run(row) for row in rows]
+
+
 def count_failed_signal_runs(
     *,
     window_hours: int = 24,
