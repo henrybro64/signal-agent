@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+import yaml
+
 from app.evaluation import (
     TraceCollector,
     format_report_text,
@@ -12,6 +15,8 @@ from app.evaluation import (
     run_suite,
     write_report_json,
 )
+from app.evaluation.models import EvalExpectation
+from app.evaluation.runner import _score_expectations
 from app.evaluation.runner import main as eval_main
 
 
@@ -78,18 +83,15 @@ def test_trace_redacts_secrets() -> None:
 def test_happy_path_records_real_tools_used() -> None:
     report = run_suite("core")
     happy = next(
-        row for row in report.results if row.case_id == "job-research-happy-path"
+        (row for row in report.results if row.case_id == "job-research-happy-path"),
+        None,
     )
+    assert happy is not None
     assert happy.passed
     assert "search_jobs" in (happy.summary.get("tools_used") or [])
 
 
 def test_empty_suite_and_unknown_kind_fail(tmp_path: Path) -> None:
-    import pytest
-    import yaml
-
-    from app.evaluation.runner import load_eval_cases, run_suite
-
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     with pytest.raises(ValueError, match="No eval cases"):
@@ -117,9 +119,6 @@ def test_empty_suite_and_unknown_kind_fail(tmp_path: Path) -> None:
 
 
 def test_require_citations_ignores_hash_in_digest() -> None:
-    from app.evaluation.models import EvalExpectation
-    from app.evaluation.runner import _score_expectations
-
     checks = _score_expectations(
         EvalExpectation(require_citations=True),
         digest="Looking for a C# Developer role",
@@ -129,5 +128,9 @@ def test_require_citations_ignores_hash_in_digest() -> None:
         used_tools=[],
         evidence=[],
     )
-    citation = next(check for check in checks if check.name == "require_citations")
+    citation = next(
+        (check for check in checks if check.name == "require_citations"),
+        None,
+    )
+    assert citation is not None
     assert not citation.passed

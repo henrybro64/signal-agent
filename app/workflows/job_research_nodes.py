@@ -126,6 +126,47 @@ def rule_score_node(state: JobResearchState) -> JobResearchState:
     return state
 
 
+def _resolve_memory_retriever(
+    state: JobResearchState,
+    *,
+    db_path: Any | None,
+) -> Any | None:
+    """Build a keyword retriever, ingesting configured docs when present."""
+
+    if db_path is None:
+        state.warnings.append("memory_retriever_absent")
+        return None
+
+    from pathlib import Path
+
+    from app.memory import SqliteMemoryStore, build_retriever, ingest_paths
+
+    store = SqliteMemoryStore(Path(db_path))
+    if state.memory_document_paths:
+        results = ingest_paths(
+            store,
+            namespace=state.memory_namespace,
+            paths=list(state.memory_document_paths),
+        )
+        errors: list[str] = []
+        for row in results:
+            if row.status == "error" and row.detail is not None:
+                errors.append(row.detail)
+        if errors:
+            state.warnings.append(
+                "memory_ingest_errors:" + ";".join(errors[:3])
+            )
+    return build_retriever(store, use_embeddings=False)
+
+
+def _evidence_query(state: JobResearchState) -> str:
+    titles = [
+        str(item.get("title") or "")
+        for item in (state.filtered or state.candidates)[:8]
+    ]
+    return " ".join(part for part in titles if part).strip() or state.profile_name
+
+
 def retrieve_evidence_node(
     state: JobResearchState,
     *,
@@ -135,39 +176,15 @@ def retrieve_evidence_node(
     """Ingest configured docs (if any) and retrieve namespaced evidence (#65)."""
 
     state.bump_step()
-    if retriever is None:
-        if db_path is None:
-            state.warnings.append("memory_retriever_absent")
+    active_retriever = retriever
+    if active_retriever is None:
+        active_retriever = _resolve_memory_retriever(state, db_path=db_path)
+        if active_retriever is None:
             return state
-        from pathlib import Path
 
-        from app.memory import SqliteMemoryStore, build_retriever, ingest_paths
-
-        store = SqliteMemoryStore(Path(db_path))
-        if state.memory_document_paths:
-            results = ingest_paths(
-                store,
-                namespace=state.memory_namespace,
-                paths=list(state.memory_document_paths),
-            )
-            errors = [
-                row.detail
-                for row in results
-                if row.status == "error" and row.detail
-            ]
-            if errors:
-                state.warnings.append(
-                    "memory_ingest_errors:" + ";".join(errors[:3])
-                )
-        retriever = build_retriever(store, use_embeddings=False)
-
-    titles = [
-        str(item.get("title") or "")
-        for item in (state.filtered or state.candidates)[:8]
-    ]
-    query = " ".join(part for part in titles if part).strip() or state.profile_name
+    query = _evidence_query(state)
     try:
-        evidence = retriever.retrieve(
+        evidence = active_retriever.retrieve(
             namespace=state.memory_namespace,
             query=query,
             limit=5,
