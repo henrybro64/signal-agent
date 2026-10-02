@@ -131,7 +131,8 @@ def test_registry_timeout_returns_promptly() -> None:
         description = "slow"
         input_schema = {"type": "object", "properties": {}}
 
-        def invoke(self, arguments, *, context):
+        @staticmethod
+        def invoke(arguments, *, context):
             time.sleep(0.3)
             return ToolResult(ok=True, data={"count": 0, "items": []})
 
@@ -140,7 +141,8 @@ def test_registry_timeout_returns_promptly() -> None:
         description = "boom"
         input_schema = {"type": "object", "properties": {}}
 
-        def invoke(self, arguments, *, context):
+        @staticmethod
+        def invoke(arguments, *, context):
             raise RuntimeError("network down token=abc")
 
     registry = ToolRegistry(
@@ -197,7 +199,8 @@ def test_timeout_sets_cancel_event() -> None:
         description = "slow"
         input_schema = {"type": "object", "properties": {}}
 
-        def invoke(self, arguments, *, context):
+        @staticmethod
+        def invoke(arguments, *, context):
             time.sleep(0.25)
             seen.append(bool(context.cancel_event and context.cancel_event.is_set()))
             return ToolResult(ok=True, data={"count": 0, "items": []})

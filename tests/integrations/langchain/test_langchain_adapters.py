@@ -38,14 +38,20 @@ def test_langchain_tools_adapt_registry_and_redact_errors() -> None:
     assert "search_jobs" in names
     assert "send_telegram_message" in names
 
-    search = next(tool for tool in tools if tool.name == "search_jobs")
+    search = next(
+        (tool for tool in tools if tool.name == "search_jobs"),
+        None,
+    )
+    assert search is not None
     payload = json.loads(search.invoke({"limit": 1}))
     assert payload["ok"] is True
     assert payload["data"]["count"] == 1
 
     telegram = next(
-        tool for tool in tools if tool.name == "send_telegram_message"
+        (tool for tool in tools if tool.name == "send_telegram_message"),
+        None,
     )
+    assert telegram is not None
     disabled = json.loads(telegram.invoke({"text": "hi sk-secret"}))
     assert disabled["ok"] is False
     assert "sk-secret" not in json.dumps(disabled)

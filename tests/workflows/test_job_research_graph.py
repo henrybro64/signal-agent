@@ -280,7 +280,8 @@ def test_job_research_source_partial_failure_warning() -> None:
         description = "flaky"
         input_schema = {"type": "object", "properties": {}}
 
-        def invoke(self, arguments, *, context):
+        @staticmethod
+        def invoke(arguments, *, context):
             from app.tools import ToolResult
 
             return ToolResult(
@@ -440,7 +441,8 @@ def test_notify_propagates_telegram_failure_as_error() -> None:
             "properties": {"text": {"type": "string"}},
         }
 
-        def invoke(self, arguments, *, context):
+        @staticmethod
+        def invoke(arguments, *, context):
             from app.tools import ToolResult
 
             return ToolResult(ok=False, error="telegram_http_failed")
@@ -472,7 +474,8 @@ def test_fetch_promotes_total_source_outage_to_error() -> None:
         description = "dead"
         input_schema = {"type": "object", "properties": {}}
 
-        def invoke(self, arguments, *, context):
+        @staticmethod
+        def invoke(arguments, *, context):
             from app.tools import ToolResult
 
             return ToolResult(
