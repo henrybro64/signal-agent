@@ -74,3 +74,21 @@ def test_gateway_chat_model_invoke() -> None:
     )
     message = model.invoke("ping")
     assert message.content == "hello from gateway"
+
+
+@pytest.mark.skipif(not langchain_available(), reason="langchain extra not installed")
+def test_gateway_chat_model_is_langchain_base_chat_model() -> None:
+    from langchain_core.language_models.chat_models import BaseChatModel
+
+    from app.integrations.langchain import build_langchain_chat_model
+
+    model = build_langchain_chat_model(
+        provider=FakeLLMProvider(
+            responses=["hello"],
+            validate_structured_json=False,
+        ),
+        provider_name="fake",
+        model="fake-model",
+    )
+    assert isinstance(model, BaseChatModel)
+    assert hasattr(model, "bind_tools")

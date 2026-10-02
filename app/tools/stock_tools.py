@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.tw_stock_utils import select_top_gainers, select_top_losers
 from app.sources import build_tw_stock_mover_sources, fetch_from_sources
 
 from .args import optional_int
@@ -34,8 +35,8 @@ class GetTwStockMoversTool:
     )
     input_schema = _INPUT_SCHEMA
 
+    @staticmethod
     def invoke(
-        self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
@@ -69,7 +70,15 @@ class GetTwStockMoversTool:
                 f"{source.name}:{type(exc).__name__}"
             ),
         )
-        payload = [signal_item_to_dict(item) for item in collected[:limit]]
+        # Rank by change_percent before applying the tool limit so agents see
+        # actual movers rather than arbitrary category/member order.
+        gainer_limit = max(1, (limit + 1) // 2)
+        loser_limit = max(1, limit // 2)
+        ranked = [
+            *select_top_gainers(collected, limit=gainer_limit),
+            *select_top_losers(collected, limit=loser_limit),
+        ]
+        payload = [signal_item_to_dict(item) for item in ranked[:limit]]
         return ToolResult(
             ok=True,
             data={"count": len(payload), "items": payload},

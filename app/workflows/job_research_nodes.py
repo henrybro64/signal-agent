@@ -56,7 +56,14 @@ def fetch_candidates_node(
         return state
     state.candidates = [item for item in items if isinstance(item, dict)]
     failed = result.metadata.get("failed_sources") or []
-    if failed:
+    source_count = int(result.metadata.get("source_count") or 0)
+    if failed and source_count > 0 and not state.candidates:
+        # Total outage: every configured source failed and nothing was returned.
+        state.errors.append(
+            "all_job_sources_failed:" + ",".join(map(str, failed))
+        )
+        state.warnings.append(f"all_source_failure:{','.join(map(str, failed))}")
+    elif failed:
         state.warnings.append(f"partial_source_failure:{','.join(map(str, failed))}")
     log_event(
         _LOGGER,
@@ -75,11 +82,16 @@ def rule_score_node(state: JobResearchState) -> JobResearchState:
         state.filtered = []
         return state
 
-    scorer = JobRuleScorer(load_job_search_profile())
+    scorers: dict[str | None, JobRuleScorer] = {}
     filtered: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
     for raw in state.candidates:
         item = _dict_to_signal_item(raw)
+        profile_key = _scorer_profile_for_item(raw)
+        scorer = scorers.get(profile_key)
+        if scorer is None:
+            scorer = JobRuleScorer(load_job_search_profile(profile_key))
+            scorers[profile_key] = scorer
         score = scorer.score(item)
         summary = {
             "title": item.title,
@@ -89,6 +101,14 @@ def rule_score_node(state: JobResearchState) -> JobResearchState:
         summaries.append(summary)
         if score.score >= 25 and score.recommendation != "reject":
             filtered.append({**raw, "rule_score": score.score})
+
+    filtered.sort(
+        key=lambda row: (
+            float(row.get("rule_score") or 0.0),
+            str(row.get("title") or ""),
+        ),
+        reverse=True,
+    )
     state.scoring_summaries = summaries
     state.filtered = filtered
     log_event(
@@ -191,7 +211,11 @@ def persist_results_node(
     db_path: Any | None = None,
     upsert: Callable[..., Any] | None = None,
 ) -> JobResearchState:
-    """Persist filtered matches and digest snapshot via ``upsert_signal``."""
+    """Persist filtered matches and digest snapshot via ``upsert_signal``.
+
+    Research candidates use a distinct source/external_id (and omit URL) so they
+    never overwrite original ``job_search`` signal rows.
+    """
 
     from dataclasses import replace
     from datetime import UTC, datetime
@@ -208,22 +232,40 @@ def persist_results_node(
             resolve_db_path(db_path) if db_path is not None else resolve_db_path()
         )
         saved = 0
+        new_items: list[dict[str, Any]] = []
         for raw in state.filtered:
             item = _dict_to_signal_item(raw)
+            origin_source = item.source
+            origin_external_id = item.external_id
+            origin_url = item.url
+            research_external_id = (
+                f"job-research:{origin_source}:"
+                f"{origin_external_id or _fallback_research_id(item)}"
+            )
             tagged = replace(
                 item,
+                source="job_research_agent",
                 item_type="job_research_candidate",
-                external_id=item.external_id
-                or f"job-research:{item.source}:{item.title}",
+                url=None,
+                external_id=research_external_id,
                 metadata={
                     **item.metadata,
+                    "origin_source": origin_source,
+                    "origin_external_id": origin_external_id,
+                    "origin_url": origin_url,
                     "rule_score": raw.get("rule_score"),
                     "profile_name": state.profile_name,
                     "task_run_id": state.task_run_id,
                 },
             )
-            writer(tagged, db_path=Path(resolved))
+            result = writer(tagged, db_path=Path(resolved))
+            action = _upsert_action(result)
             saved += 1
+            if action == "inserted":
+                new_items.append(raw)
+
+        state.new_filtered = new_items
+        state.new_candidate_count = len(new_items)
 
         if state.digest_text:
             snapshot = SignalItem(
@@ -240,6 +282,7 @@ def persist_results_node(
                     "profile_name": state.profile_name,
                     "candidate_count": len(state.candidates),
                     "filtered_count": len(state.filtered),
+                    "new_candidate_count": state.new_candidate_count,
                     "fallback_used": state.fallback_used,
                 },
             )
@@ -257,6 +300,7 @@ def persist_results_node(
         node="persist_results",
         step=state.step_count,
         persisted_count=state.persisted_count,
+        new_candidate_count=state.new_candidate_count,
         persist_error=state.persist_error,
     )
     return state
@@ -279,6 +323,11 @@ def notify_node(
     if state.tool_calls >= state.max_tool_calls:
         state.notification_status = "skipped_tool_budget"
         return state
+    if state.new_candidate_count <= 0 and state.filtered:
+        # Dedup: do not resend unchanged research candidates.
+        state.notification_status = "skipped_no_new"
+        state.warnings.append("telegram_skipped_no_new_candidates")
+        return state
 
     result = registry.invoke(
         "send_telegram_message",
@@ -290,7 +339,9 @@ def notify_node(
         state.notification_status = "sent"
     else:
         state.notification_status = "failed"
-        state.warnings.append(result.error or "telegram_failed")
+        error = result.error or "telegram_failed"
+        state.warnings.append(error)
+        state.errors.append(error)
     return state
 
 
@@ -349,6 +400,31 @@ def _dict_to_signal_item(raw: dict[str, Any]):
         content=raw.get("content") if isinstance(raw.get("content"), str) else None,
         metadata=dict(metadata) if isinstance(metadata, dict) else {},
     )
+
+
+def _scorer_profile_for_item(raw: dict[str, Any]) -> str | None:
+    metadata = raw.get("metadata")
+    if isinstance(metadata, dict):
+        profile = metadata.get("scorer_profile")
+        if isinstance(profile, str) and profile.strip():
+            return profile.strip()
+    return None
+
+
+def _fallback_research_id(item: Any) -> str:
+    title = str(getattr(item, "title", "") or "untitled").strip().lower()
+    safe = "".join(ch if ch.isalnum() else "-" for ch in title)[:80]
+    return safe or "untitled"
+
+
+def _upsert_action(result: Any) -> str:
+    if hasattr(result, "action"):
+        return str(result.action)
+    if isinstance(result, dict) and "action" in result:
+        return str(result["action"])
+    if isinstance(result, str):
+        return result
+    return "inserted"
 
 
 NodeFn = Callable[[JobResearchState], JobResearchState]

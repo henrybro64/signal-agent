@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,8 @@ class ToolContext:
     telegram_enabled: bool = False
     timeout_seconds: float = 30.0
     max_items: int = 20
+    # Cooperative cancellation signal set when the registry timeout fires.
+    cancel_event: threading.Event | None = None
     # Optional callables for unit tests / fakes (skip live network).
     fetch_jobs: Callable[..., list[dict[str, Any]]] | None = None
     fetch_movers: Callable[..., list[dict[str, Any]]] | None = None

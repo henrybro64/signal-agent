@@ -35,8 +35,8 @@ class SendTelegramMessageTool:
     )
     input_schema = _INPUT_SCHEMA
 
+    @staticmethod
     def invoke(
-        self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
@@ -54,6 +54,12 @@ class SendTelegramMessageTool:
                 code="invalid_argument",
             )
         message = text.strip()
+
+        if context.cancel_event is not None and context.cancel_event.is_set():
+            raise ToolError(
+                "send_telegram_message cancelled after tool timeout",
+                code="cancelled",
+            )
 
         if context.send_telegram is not None:
             context.send_telegram(message)

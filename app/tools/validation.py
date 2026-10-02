@@ -65,72 +65,88 @@ def validate_tool_arguments(
 def _validate_value(value: Any, schema: dict[str, Any], *, path: str) -> None:
     expected = schema.get("type")
     if expected == "integer":
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ToolError(
-                f"'{path}' must be an integer",
-                code="invalid_argument",
-            )
-        minimum = schema.get("minimum")
-        maximum = schema.get("maximum")
-        if isinstance(minimum, int) and value < minimum:
-            raise ToolError(
-                f"'{path}' must be >= {minimum}",
-                code="invalid_argument",
-            )
-        if isinstance(maximum, int) and value > maximum:
-            raise ToolError(
-                f"'{path}' must be <= {maximum}",
-                code="invalid_argument",
-            )
+        _validate_integer(value, schema, path=path)
     elif expected == "string":
-        if not isinstance(value, str):
-            raise ToolError(
-                f"'{path}' must be a string",
-                code="invalid_argument",
-            )
-        min_length = schema.get("minLength")
-        max_length = schema.get("maxLength")
-        if isinstance(min_length, int) and len(value) < min_length:
-            raise ToolError(
-                f"'{path}' must be at least {min_length} characters",
-                code="invalid_argument",
-            )
-        if isinstance(max_length, int) and len(value) > max_length:
-            raise ToolError(
-                f"'{path}' must be at most {max_length} characters",
-                code="invalid_argument",
-            )
-        enum = schema.get("enum")
-        if isinstance(enum, list) and value not in enum:
-            raise ToolError(
-                f"'{path}' must be one of {enum}",
-                code="invalid_argument",
-            )
+        _validate_string(value, schema, path=path)
     elif expected == "boolean":
-        if not isinstance(value, bool):
-            raise ToolError(
-                f"'{path}' must be a boolean",
-                code="invalid_argument",
-            )
+        _validate_boolean(value, path=path)
     elif expected == "array":
-        if not isinstance(value, list):
-            raise ToolError(
-                f"'{path}' must be an array",
-                code="invalid_argument",
-            )
-        min_items = schema.get("minItems")
-        max_items = schema.get("maxItems")
-        if isinstance(min_items, int) and len(value) < min_items:
-            raise ToolError(
-                f"'{path}' must have at least {min_items} items",
-                code="invalid_argument",
-            )
-        if isinstance(max_items, int) and len(value) > max_items:
-            raise ToolError(
-                f"'{path}' must have at most {max_items} items",
-                code="invalid_argument",
-            )
-        item_schema = schema.get("items")
-        if isinstance(item_schema, dict):
-            for index, item in enumerate(value):
-                _validate_value(item, item_schema, path=f"{path}[{index}]")
+        _validate_array(value, schema, path=path)
+
+
+def _validate_integer(value: Any, schema: dict[str, Any], *, path: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ToolError(
+            f"'{path}' must be an integer",
+            code="invalid_argument",
+        )
+    minimum = schema.get("minimum")
+    maximum = schema.get("maximum")
+    if isinstance(minimum, int) and value < minimum:
+        raise ToolError(
+            f"'{path}' must be >= {minimum}",
+            code="invalid_argument",
+        )
+    if isinstance(maximum, int) and value > maximum:
+        raise ToolError(
+            f"'{path}' must be <= {maximum}",
+            code="invalid_argument",
+        )
+
+
+def _validate_string(value: Any, schema: dict[str, Any], *, path: str) -> None:
+    if not isinstance(value, str):
+        raise ToolError(
+            f"'{path}' must be a string",
+            code="invalid_argument",
+        )
+    min_length = schema.get("minLength")
+    max_length = schema.get("maxLength")
+    if isinstance(min_length, int) and len(value) < min_length:
+        raise ToolError(
+            f"'{path}' must be at least {min_length} characters",
+            code="invalid_argument",
+        )
+    if isinstance(max_length, int) and len(value) > max_length:
+        raise ToolError(
+            f"'{path}' must be at most {max_length} characters",
+            code="invalid_argument",
+        )
+    enum = schema.get("enum")
+    if isinstance(enum, list) and value not in enum:
+        raise ToolError(
+            f"'{path}' must be one of {enum}",
+            code="invalid_argument",
+        )
+
+
+def _validate_boolean(value: Any, *, path: str) -> None:
+    if not isinstance(value, bool):
+        raise ToolError(
+            f"'{path}' must be a boolean",
+            code="invalid_argument",
+        )
+
+
+def _validate_array(value: Any, schema: dict[str, Any], *, path: str) -> None:
+    if not isinstance(value, list):
+        raise ToolError(
+            f"'{path}' must be an array",
+            code="invalid_argument",
+        )
+    min_items = schema.get("minItems")
+    max_items = schema.get("maxItems")
+    if isinstance(min_items, int) and len(value) < min_items:
+        raise ToolError(
+            f"'{path}' must have at least {min_items} items",
+            code="invalid_argument",
+        )
+    if isinstance(max_items, int) and len(value) > max_items:
+        raise ToolError(
+            f"'{path}' must have at most {max_items} items",
+            code="invalid_argument",
+        )
+    item_schema = schema.get("items")
+    if isinstance(item_schema, dict):
+        for index, item in enumerate(value):
+            _validate_value(item, item_schema, path=f"{path}[{index}]")

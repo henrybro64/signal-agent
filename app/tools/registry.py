@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Any
 
 from app.core.logging import get_logger, log_event
@@ -126,7 +125,7 @@ class ToolRegistry:
 
         try:
             validate_tool_arguments(args, tool.input_schema, tool_name=name)
-            result = self._invoke_with_timeout(tool, args, context=ctx)
+            result = _invoke_with_timeout(tool, args, context=ctx)
         except ToolError as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
             log_event(
@@ -197,33 +196,6 @@ class ToolRegistry:
         )
         return safe_result
 
-    def _invoke_with_timeout(
-        self,
-        tool: Tool,
-        arguments: dict[str, Any],
-        *,
-        context: ToolContext,
-    ) -> ToolResult:
-        timeout = context.timeout_seconds
-        if timeout <= 0:
-            return tool.invoke(arguments, context=context)
-
-        # Do not use ``with ThreadPoolExecutor``: context-manager shutdown waits
-        # for the worker, so a "timeout" would still block for the full job.
-        pool = ThreadPoolExecutor(max_workers=1)
-        try:
-            future = pool.submit(tool.invoke, arguments, context=context)
-            try:
-                return future.result(timeout=timeout)
-            except FuturesTimeout as exc:
-                future.cancel()
-                raise ToolError(
-                    f"Tool {tool.name!r} timed out after {timeout}s",
-                    code="timeout",
-                ) from exc
-        finally:
-            pool.shutdown(wait=False, cancel_futures=True)
-
 
 def build_tool_registry(
     *,
@@ -236,6 +208,59 @@ def build_tool_registry(
     if include_telegram and "send_telegram_message" not in names:
         names.append("send_telegram_message")
     return ToolRegistry(allowlist=names)
+
+
+def _invoke_with_timeout(
+    tool: Tool,
+    arguments: dict[str, Any],
+    *,
+    context: ToolContext,
+) -> ToolResult:
+    """Run a tool with a wall-clock timeout.
+
+    Python cannot forcibly kill a running thread. We therefore:
+    1. run the worker on a *daemon* thread so a hung collector cannot keep a
+       one-shot CLI process alive after the caller has moved on;
+    2. set ``context.cancel_event`` on timeout so cooperative tools (and
+       HTTP clients that already honor request timeouts) can stop promptly.
+    """
+
+    timeout = context.timeout_seconds
+    if timeout <= 0:
+        return tool.invoke(arguments, context=context)
+
+    cancel_event = context.cancel_event or threading.Event()
+    if context.cancel_event is None:
+        context.cancel_event = cancel_event
+
+    box: list[ToolResult | BaseException] = []
+    done = threading.Event()
+
+    def _worker() -> None:
+        try:
+            box.append(tool.invoke(arguments, context=context))
+        except BaseException as exc:  # noqa: BLE001 - surface to caller
+            box.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(
+        target=_worker,
+        name=f"tool-{tool.name}",
+        daemon=True,
+    )
+    thread.start()
+    if not done.wait(timeout=timeout):
+        cancel_event.set()
+        raise ToolError(
+            f"Tool {tool.name!r} timed out after {timeout}s",
+            code="timeout",
+        )
+
+    outcome = box[0]
+    if isinstance(outcome, BaseException):
+        raise outcome
+    return outcome
 
 
 def _redact_text(value: str, secrets: tuple[str, ...]) -> str:

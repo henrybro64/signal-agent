@@ -43,8 +43,8 @@ class QueryRecentRunsTool:
     )
     input_schema = _INPUT_SCHEMA
 
+    @staticmethod
     def invoke(
-        self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
@@ -66,8 +66,9 @@ class QueryRecentRunsTool:
             )
 
         db_path = resolve_db_path(context.db_path)
+        runs: list[dict[str, Any]]
         if run_kind == "signal":
-            records = get_recent_signal_runs(limit=limit, db_path=db_path)
+            signal_records = get_recent_signal_runs(limit=limit, db_path=db_path)
             runs = [
                 {
                     "id": row.id,
@@ -84,10 +85,10 @@ class QueryRecentRunsTool:
                     "updated_count": row.updated_count,
                     "error": row.error,
                 }
-                for row in records
+                for row in signal_records
             ]
         else:
-            records = get_recent_task_runs(limit=limit, db_path=db_path)
+            task_records = get_recent_task_runs(limit=limit, db_path=db_path)
             runs = [
                 {
                     "id": row.id,
@@ -105,7 +106,7 @@ class QueryRecentRunsTool:
                     "notified_count": row.notified_count,
                     "error_message": row.error_message,
                 }
-                for row in records
+                for row in task_records
             ]
         return ToolResult(
             ok=True,

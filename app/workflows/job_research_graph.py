@@ -255,6 +255,8 @@ def _state_to_dict(state: JobResearchState) -> dict[str, Any]:
         "telegram_enabled": state.telegram_enabled,
         "persisted_count": state.persisted_count,
         "persist_error": state.persist_error,
+        "new_candidate_count": state.new_candidate_count,
+        "new_filtered": list(state.new_filtered),
     }
 
 
@@ -294,4 +296,6 @@ def _dict_to_state(
             if data.get("persist_error") in (None, "")
             else str(data.get("persist_error"))
         ),
+        new_candidate_count=int(data.get("new_candidate_count") or 0),
+        new_filtered=list(data.get("new_filtered") or []),
     )

@@ -8,6 +8,8 @@ from app.llm import LLMProvider, LLMRequest, create_llm_provider
 
 from .deps import require_langchain
 
+_GATEWAY_CHAT_MODEL_CLS: type[Any] | None = None
+
 
 def build_langchain_chat_model(
     *,
@@ -18,7 +20,7 @@ def build_langchain_chat_model(
     timeout_seconds: float = 20.0,
     provider_name: str = "openai",
 ) -> Any:
-    """Create a LangChain chat model backed by the project LLM gateway."""
+    """Create a LangChain ``BaseChatModel`` backed by the project LLM gateway."""
 
     require_langchain()
     llm = provider or create_llm_provider(
@@ -28,66 +30,99 @@ def build_langchain_chat_model(
         temperature=temperature,
         timeout_seconds=timeout_seconds,
     )
-    return GatewayChatModel(provider=llm, model_name=model, temperature=temperature)
+    model_cls = _gateway_chat_model_class()
+    return model_cls(
+        provider=llm,
+        model_name=model,
+        temperature=temperature,
+    )
 
 
-class GatewayChatModel:
-    """Minimal LangChain-compatible chat model wrapping ``LLMProvider``.
+def _gateway_chat_model_class() -> type[Any]:
+    """Return a cached ``BaseChatModel`` subclass (requires langchain)."""
 
-    Implements the small surface area needed for smoke tests and graph pilots
-    without pulling OpenAI SDK usage into business logic.
-    """
+    global _GATEWAY_CHAT_MODEL_CLS
+    if _GATEWAY_CHAT_MODEL_CLS is not None:
+        return _GATEWAY_CHAT_MODEL_CLS
 
-    def __init__(
-        self,
-        *,
-        provider: LLMProvider,
-        model_name: str,
-        temperature: float = 0.2,
-    ) -> None:
-        require_langchain()
-        self.provider = provider
-        self.model_name = model_name
-        self.temperature = temperature
+    require_langchain()
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import (
+        AIMessage,
+        BaseMessage,
+        HumanMessage,
+        SystemMessage,
+    )
+    from langchain_core.outputs import ChatGeneration, ChatResult
 
-    @property
-    def _llm_type(self) -> str:
-        return f"signal-agent-{self.provider.name}"
+    class GatewayChatModel(BaseChatModel):
+        """LangChain chat model wrapping the project-owned ``LLMProvider``."""
 
-    def invoke(self, input: Any, config: Any | None = None) -> Any:
-        del config
-        from langchain_core.messages import (
-            AIMessage,
-            BaseMessage,
-            HumanMessage,
-            SystemMessage,
-        )
+        model_name: str = "gpt-4o-mini"
+        temperature: float = 0.2
 
-        instructions = None
-        user_parts: list[str] = []
-        if isinstance(input, str):
-            user_parts.append(input)
-        elif isinstance(input, list):
-            for message in input:
+        def __init__(
+            self,
+            *,
+            provider: LLMProvider,
+            model_name: str = "gpt-4o-mini",
+            temperature: float = 0.2,
+            **kwargs: Any,
+        ) -> None:
+            super().__init__(
+                model_name=model_name,
+                temperature=temperature,
+                **kwargs,
+            )
+            object.__setattr__(self, "_provider", provider)
+
+        @property
+        def _llm_type(self) -> str:
+            return f"signal-agent-{self._provider.name}"
+
+        def _generate(
+            self,
+            messages: list[Any],
+            stop: list[str] | None = None,
+            run_manager: Any | None = None,
+            **kwargs: Any,
+        ) -> ChatResult:
+            _ = (stop, run_manager, kwargs)
+            instructions = None
+            user_parts: list[str] = []
+            for message in messages:
                 if isinstance(message, SystemMessage):
                     instructions = str(message.content)
                 elif isinstance(message, (HumanMessage, BaseMessage)):
                     user_parts.append(str(message.content))
                 else:
                     user_parts.append(str(message))
-        else:
-            user_parts.append(str(input))
 
-        response = self.provider.generate(
-            LLMRequest(
-                instructions=instructions,
-                input="\n".join(user_parts).strip() or " ",
-                model=self.model_name,
-                temperature=self.temperature,
+            response = self._provider.generate(
+                LLMRequest(
+                    instructions=instructions,
+                    input="\n".join(user_parts).strip() or " ",
+                    model=self.model_name,
+                    temperature=self.temperature,
+                )
             )
-        )
-        return AIMessage(content=response.text)
+            ai_message = AIMessage(content=response.text)
+            return ChatResult(generations=[ChatGeneration(message=ai_message)])
 
-    def with_config(self, **kwargs: Any) -> GatewayChatModel:
-        del kwargs
-        return self
+        @property
+        def _identifying_params(self) -> dict[str, Any]:
+            return {
+                "model_name": self.model_name,
+                "provider": self._provider.name,
+            }
+
+    GatewayChatModel.__name__ = "GatewayChatModel"
+    GatewayChatModel.__qualname__ = "GatewayChatModel"
+    _GATEWAY_CHAT_MODEL_CLS = GatewayChatModel
+    return GatewayChatModel
+
+
+def __getattr__(name: str) -> Any:
+    if name == "GatewayChatModel":
+        return _gateway_chat_model_class()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

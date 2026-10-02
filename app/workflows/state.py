@@ -31,6 +31,8 @@ class JobResearchState:
     telegram_enabled: bool = False
     persisted_count: int = 0
     persist_error: str | None = None
+    new_candidate_count: int = 0
+    new_filtered: list[dict[str, Any]] = field(default_factory=list)
 
     def bump_step(self) -> None:
         self.step_count += 1

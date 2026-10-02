@@ -8,7 +8,7 @@ from app.llm import LLMProvider
 from app.tools import ToolContext, ToolRegistry, build_tool_registry
 
 from .deps import langchain_available, langgraph_available, require_langchain
-from .models import GatewayChatModel, build_langchain_chat_model
+from .models import build_langchain_chat_model
 from .tools import to_langchain_tools
 
 
@@ -70,7 +70,6 @@ def run_langchain_smoke(
 
 
 __all__ = [
-    "GatewayChatModel",
     "build_langchain_bundle",
     "build_langchain_chat_model",
     "langchain_available",

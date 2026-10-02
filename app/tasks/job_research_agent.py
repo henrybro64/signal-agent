@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core import load_config, load_env_settings
-from app.core.db import finish_task_run, init_db, start_task_run
+from app.core.db import TaskRunStatus, finish_task_run, init_db, start_task_run
 from app.core.health import resolve_db_path
 from app.core.logging import get_logger, log_event
 from app.llm import FakeLLMProvider, create_llm_provider
@@ -51,6 +51,53 @@ class JobResearchAgentTask(BaseTask):
             db_path=str(db_path),
         )
 
+        try:
+            registry, context, provider = self._build_runtime(
+                config=config,
+                env=env,
+                db_path=db_path,
+                telegram_enabled=telegram_enabled,
+                allowlist=allowlist,
+            )
+            state = JobResearchState(
+                profile_name="default",
+                task_run_id=run_id,
+                config_path=self.config_path,
+                telegram_enabled=telegram_enabled,
+                max_steps=task_cfg.max_steps,
+                max_tool_calls=task_cfg.max_tool_calls,
+                max_llm_calls=task_cfg.max_llm_calls,
+            )
+            final = run_job_research(
+                state,
+                registry=registry,
+                context=context,
+                provider=provider,
+                use_langgraph=None,
+            )
+            self._finish_success(run_id=run_id, db_path=db_path, final=final)
+        except Exception as exc:
+            finish_task_run(
+                run_id,
+                status="failed",
+                fetched_count=0,
+                new_count=0,
+                skipped_count=0,
+                notified_count=0,
+                error_message=str(exc)[:500],
+                db_path=db_path,
+            )
+            raise
+
+    @staticmethod
+    def _build_runtime(
+        *,
+        config,
+        env,
+        db_path: Path,
+        telegram_enabled: bool,
+        allowlist: list[str],
+    ):
         registry = build_tool_registry(
             allowlist=allowlist,
             include_telegram=telegram_enabled,
@@ -87,66 +134,40 @@ class JobResearchAgentTask(BaseTask):
                 validate_structured_json=False,
             )
         context.llm = provider
+        return registry, context, provider
 
-        state = JobResearchState(
-            profile_name="default",
-            task_run_id=run_id,
-            config_path=self.config_path,
-            telegram_enabled=telegram_enabled,
-            max_steps=task_cfg.max_steps,
-            max_tool_calls=task_cfg.max_tool_calls,
-            max_llm_calls=task_cfg.max_llm_calls,
+    @staticmethod
+    def _finish_success(*, run_id: int, db_path: Path, final) -> None:
+        notified = 1 if final.notification_status == "sent" else 0
+        run_status: TaskRunStatus = (
+            "success" if final.status == "completed" else "failed"
         )
-
-        try:
-            final = run_job_research(
-                state,
-                registry=registry,
-                context=context,
-                provider=provider,
-                use_langgraph=None,
-            )
-            notified = 1 if final.notification_status == "sent" else 0
-            run_status = (
-                "success" if final.status == "completed" else "failed"
-            )
-            if final.status == "completed_with_errors":
-                run_status = "failed"
-            error_message = None
-            if final.errors:
-                error_message = "; ".join(final.errors)[:500]
-            finish_task_run(
-                run_id,
-                status=run_status,
-                fetched_count=len(final.candidates),
-                new_count=len(final.filtered),
-                skipped_count=max(0, len(final.candidates) - len(final.filtered)),
-                notified_count=notified,
-                error_message=error_message,
-                db_path=db_path,
-            )
-            log_event(
-                _LOGGER,
-                event="task_finished",
-                message="Job research agent task finished",
-                task_run_id=run_id,
-                status=final.status,
-                task_run_status=run_status,
-                digest_chars=len(final.digest_text),
-                fallback_used=final.fallback_used,
-                persisted_count=final.persisted_count,
-            )
-            if final.digest_text:
-                print(final.digest_text)
-        except Exception as exc:
-            finish_task_run(
-                run_id,
-                status="failed",
-                fetched_count=0,
-                new_count=0,
-                skipped_count=0,
-                notified_count=0,
-                error_message=str(exc)[:500],
-                db_path=db_path,
-            )
-            raise
+        if final.status == "completed_with_errors":
+            run_status = "failed"
+        error_message = None
+        if final.errors:
+            error_message = "; ".join(final.errors)[:500]
+        finish_task_run(
+            run_id,
+            status=run_status,
+            fetched_count=len(final.candidates),
+            new_count=final.new_candidate_count or len(final.filtered),
+            skipped_count=max(0, len(final.candidates) - len(final.filtered)),
+            notified_count=notified,
+            error_message=error_message,
+            db_path=db_path,
+        )
+        log_event(
+            _LOGGER,
+            event="task_finished",
+            message="Job research agent task finished",
+            task_run_id=run_id,
+            status=final.status,
+            task_run_status=run_status,
+            digest_chars=len(final.digest_text),
+            fallback_used=final.fallback_used,
+            persisted_count=final.persisted_count,
+            new_candidate_count=final.new_candidate_count,
+        )
+        if final.digest_text:
+            print(final.digest_text)

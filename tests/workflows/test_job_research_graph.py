@@ -357,3 +357,144 @@ def test_job_research_langgraph_path_and_no_candidates() -> None:
         registry=registry, context=context, provider=None
     )
     assert graph is not None
+
+
+def test_rule_score_sorts_by_score_descending() -> None:
+    from app.workflows.job_research_nodes import rule_score_node
+
+    state = JobResearchState(
+        candidates=[
+            {
+                "source": "dummy",
+                "item_type": "job",
+                "title": "Helpdesk Support Engineer",
+                "observed_at": datetime(2026, 7, 1, tzinfo=UTC).isoformat(),
+                "content": "SLA-heavy support and rotating on-call coverage.",
+                "metadata": {"company": "Example Support"},
+                "external_id": "low",
+            },
+            {
+                "source": "dummy",
+                "item_type": "job",
+                "title": "Cloud SDET",
+                "observed_at": datetime(2026, 7, 1, tzinfo=UTC).isoformat(),
+                "content": "Python automation with Kubernetes.",
+                "metadata": {"company": "Example Security"},
+                "external_id": "high",
+            },
+        ],
+        max_steps=10,
+    )
+    scored = rule_score_node(state)
+    assert scored.filtered
+    scores = [item["rule_score"] for item in scored.filtered]
+    assert scores == sorted(scores, reverse=True)
+    assert scored.filtered[0]["title"] == "Cloud SDET"
+
+
+def test_persist_uses_distinct_research_identity() -> None:
+    saved: list[object] = []
+
+    def _upsert(item, *, db_path=None):
+        saved.append(item)
+
+        class _Result:
+            action = "inserted"
+
+        return _Result()
+
+    state = JobResearchState(
+        filtered=[
+            {
+                "source": "job104",
+                "item_type": "job",
+                "title": "Cloud SDET",
+                "observed_at": datetime(2026, 7, 1, tzinfo=UTC).isoformat(),
+                "url": "https://example.com/jobs/1",
+                "external_id": "job104-1",
+                "content": "x" * 600,
+                "metadata": {},
+                "rule_score": 80,
+            }
+        ],
+        digest_text="Job research digest",
+        max_steps=10,
+    )
+    persist_results_node(state, upsert=_upsert)
+    assert state.new_candidate_count == 1
+    candidate = saved[0]
+    assert candidate.source == "job_research_agent"
+    assert candidate.item_type == "job_research_candidate"
+    assert candidate.url is None
+    assert candidate.external_id.startswith("job-research:job104:")
+    assert candidate.metadata["origin_url"] == "https://example.com/jobs/1"
+
+
+def test_notify_propagates_telegram_failure_as_error() -> None:
+    class FailTelegram:
+        name = "send_telegram_message"
+        description = "fail"
+        input_schema = {
+            "type": "object",
+            "required": ["text"],
+            "properties": {"text": {"type": "string"}},
+        }
+
+        def invoke(self, arguments, *, context):
+            from app.tools import ToolResult
+
+            return ToolResult(ok=False, error="telegram_http_failed")
+
+    tools = builtin_tools()
+    tools["send_telegram_message"] = FailTelegram()
+    registry = ToolRegistry(tools, allowlist=["send_telegram_message", "search_jobs"])
+    from app.workflows.job_research_nodes import notify_node
+
+    state = JobResearchState(
+        telegram_enabled=True,
+        digest_text="hi",
+        new_candidate_count=1,
+        filtered=[{"title": "x"}],
+        max_steps=10,
+    )
+    notify_node(
+        state,
+        registry=registry,
+        context=ToolContext(telegram_enabled=True),
+    )
+    assert state.notification_status == "failed"
+    assert "telegram_http_failed" in state.errors
+
+
+def test_fetch_promotes_total_source_outage_to_error() -> None:
+    class DeadSearch:
+        name = "search_jobs"
+        description = "dead"
+        input_schema = {"type": "object", "properties": {}}
+
+        def invoke(self, arguments, *, context):
+            from app.tools import ToolResult
+
+            return ToolResult(
+                ok=True,
+                data={"count": 0, "items": []},
+                metadata={
+                    "failed_sources": ["job104:Timeout", "indeed:Timeout"],
+                    "source_count": 2,
+                },
+            )
+
+    tools = builtin_tools()
+    tools["search_jobs"] = DeadSearch()
+    registry = ToolRegistry(
+        tools,
+        allowlist=["search_jobs", "query_recent_runs", "get_tw_stock_movers"],
+    )
+    from app.workflows.job_research_nodes import fetch_candidates_node
+
+    state = fetch_candidates_node(
+        JobResearchState(max_steps=10),
+        registry=registry,
+        context=ToolContext(),
+    )
+    assert any("all_job_sources_failed" in err for err in state.errors)
