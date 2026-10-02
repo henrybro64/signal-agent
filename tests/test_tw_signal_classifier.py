@@ -187,6 +187,7 @@ def test_build_research_candidates_omits_volume_reason_without_volume_data() -> 
 
     assert len(candidates) == 1
     assert "成交量相對放大" not in candidates[0].reasons
+    assert "成交量達觀測門檻" not in candidates[0].reasons
 
 
 def test_build_research_candidates_includes_volume_reason_with_volume_data() -> None:
@@ -214,4 +215,4 @@ def test_build_research_candidates_includes_volume_reason_with_volume_data() -> 
     )
 
     assert len(candidates) == 1
-    assert "成交量相對放大" in candidates[0].reasons
+    assert "成交量達觀測門檻" in candidates[0].reasons

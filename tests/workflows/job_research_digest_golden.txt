@@ -1,0 +1,6 @@
+# Stable digest skeleton for job_research_agent (#64).
+# Lines must appear in the produced digest text.
+Job research digest
+Profile: snapshot_profile
+Candidates fetched:
+Filtered matches:

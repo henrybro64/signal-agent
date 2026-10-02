@@ -26,6 +26,7 @@ package-smoke:
 	list_output=$$("$$venv_dir/bin/signal-agent" --list-tasks); \
 	printf '%s\n' "$$list_output"; \
 	printf '%s\n' "$$list_output" | grep -Fx job_search >/dev/null; \
+	printf '%s\n' "$$list_output" | grep -Fx job_research_agent >/dev/null; \
 	printf '%s\n' "$$list_output" | grep -Fx tw_market_assistant >/dev/null; \
 	printf '%s\n' "$$list_output" | grep -Fx tw_stock_movers >/dev/null; \
 	printf '%s\n' "$$list_output" | grep -Fx stock_watchlist >/dev/null; \

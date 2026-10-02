@@ -22,10 +22,15 @@ FORBIDDEN_RECOMMENDATION_PHRASES: Final[tuple[str, ...]] = (
     "建議賣出",
     "立即買進",
     "立即賣出",
+    "避免追高",
+    "buy now",
+    "sell now",
 )
 
 HIGH_GAIN_RISK_THRESHOLD: Final[float] = 9.5
 VOLUME_SPIKE_CHANGE_THRESHOLD: Final[float] = 3.0
+# Absolute share-count floor only (not vs average volume).
+VOLUME_ABSOLUTE_FLOOR: Final[float] = 1_000
 
 
 @dataclass(slots=True)
@@ -179,7 +184,7 @@ def _build_candidate(
     if watchlist_hit:
         reasons.append("自選股異動")
     if _has_volume_signal(item):
-        reasons.append("成交量相對放大")
+        reasons.append("成交量達觀測門檻")
     if themes:
         reasons.append(f"屬於 {' / '.join(themes)} 題材")
 
@@ -191,7 +196,7 @@ def _build_candidate(
     status = "值得研究"
     if percent >= HIGH_GAIN_RISK_THRESHOLD:
         status = "風險偏高"
-        follow_up.append("漲幅已大，避免追高，等待回檔或量能確認")
+        follow_up.append("漲幅已大，優先核對基本面與流動性風險")
     elif not themes and not watchlist_hit:
         status = "需要觀察"
 
@@ -223,14 +228,16 @@ def _candidate_priority(candidate: ResearchCandidate) -> int:
 
 
 def _has_volume_signal(item: SignalItem) -> bool:
-    """Require real volume metadata before claiming a volume spike."""
+    """Flag absolute volume + change; does not claim relative volume vs average."""
 
     volume = item.metadata.get("volume")
     if not isinstance(volume, int | float) or volume <= 0:
         return False
     percent = stock_change_percent(item)
-    return percent >= VOLUME_SPIKE_CHANGE_THRESHOLD and volume >= 1_000
-
+    return (
+        percent >= VOLUME_SPIKE_CHANGE_THRESHOLD
+        and volume >= VOLUME_ABSOLUTE_FLOOR
+    )
 
 def _keyword_matches(keyword: str, haystack: str) -> bool:
     needle = keyword.strip().lower()

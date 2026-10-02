@@ -75,6 +75,34 @@ class TwMarketAssistantTaskConfig:
     sources: list[str] = field(default_factory=lambda: ["twse", "tpex"])
 
 
+_JOB_RESEARCH_AGENT_CONFIG_PATH = "tasks.job_research_agent"
+
+
+@dataclass(slots=True)
+class JobResearchAgentTaskConfig:
+    """Optional bounded LangGraph/plain-Python job research pilot (#64)."""
+
+    enabled: bool = True
+    telegram_enabled: bool = False
+    max_steps: int = 10
+    max_tool_calls: int = 6
+    max_llm_calls: int = 3
+
+
+@dataclass(slots=True)
+class ToolsConfig:
+    """Optional agent tool registry defaults (#62)."""
+
+    allowlist: list[str] = field(
+        default_factory=lambda: [
+            "search_jobs",
+            "get_tw_stock_movers",
+            "query_recent_runs",
+        ]
+    )
+    timeout_seconds: float = 30.0
+
+
 @dataclass(slots=True)
 class ThemeMappingConfig:
     label: str
@@ -116,6 +144,9 @@ class TasksConfig:
     stock_watchlist: StockWatchlistTaskConfig
     tw_market_assistant: TwMarketAssistantTaskConfig = field(
         default_factory=TwMarketAssistantTaskConfig
+    )
+    job_research_agent: JobResearchAgentTaskConfig = field(
+        default_factory=JobResearchAgentTaskConfig
     )
 
 
@@ -202,6 +233,7 @@ class AppConfig:
     sources: SourcesConfig = field(default_factory=SourcesConfig)
     investment: InvestmentConfig = field(default_factory=InvestmentConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
 
     @classmethod
     def from_dict(
@@ -236,6 +268,12 @@ class AppConfig:
             parent_path="tasks",
             source_name=source_name,
         )
+        job_research_agent = _optional_mapping(
+            tasks,
+            "job_research_agent",
+            parent_path="tasks",
+            source_name=source_name,
+        )
         investment = _optional_mapping(
             data,
             "investment",
@@ -244,6 +282,11 @@ class AppConfig:
         llm = _optional_mapping(
             data,
             "llm",
+            source_name=source_name,
+        )
+        tools = _optional_mapping(
+            data,
+            "tools",
             source_name=source_name,
         )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
@@ -379,6 +422,10 @@ class AppConfig:
                     tw_market_assistant,
                     source_name=source_name,
                 ),
+                job_research_agent=_parse_job_research_agent_config(
+                    job_research_agent,
+                    source_name=source_name,
+                ),
             ),
             notifiers=NotifiersConfig(
                 telegram=TelegramNotifierConfig(
@@ -399,6 +446,7 @@ class AppConfig:
                 source_name=source_name,
             ),
             llm=llm_config,
+            tools=_parse_tools_config(tools, source_name=source_name),
         )
 
 
@@ -460,6 +508,107 @@ def _parse_tw_market_assistant_config(
             source_name=source_name,
         ),
     )
+
+
+def _parse_job_research_agent_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> JobResearchAgentTaskConfig:
+    if not data:
+        return JobResearchAgentTaskConfig()
+
+    max_steps = _optional_int(
+        data,
+        "max_steps",
+        default=10,
+        parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+        source_name=source_name,
+    )
+    max_tool_calls = _optional_int(
+        data,
+        "max_tool_calls",
+        default=6,
+        parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+        source_name=source_name,
+    )
+    max_llm_calls = _optional_int(
+        data,
+        "max_llm_calls",
+        default=3,
+        parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+        source_name=source_name,
+    )
+    for key, value in (
+        ("max_steps", max_steps),
+        ("max_tool_calls", max_tool_calls),
+        ("max_llm_calls", max_llm_calls),
+    ):
+        _require_positive_int(
+            value,
+            config_path=f"{_JOB_RESEARCH_AGENT_CONFIG_PATH}.{key}",
+            source_name=source_name,
+        )
+
+    return JobResearchAgentTaskConfig(
+        enabled=_optional_bool(
+            data,
+            "enabled",
+            default=True,
+            parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        telegram_enabled=_optional_bool(
+            data,
+            "telegram_enabled",
+            default=False,
+            parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+            source_name=source_name,
+        ),
+        max_steps=max_steps,
+        max_tool_calls=max_tool_calls,
+        max_llm_calls=max_llm_calls,
+    )
+
+
+def _parse_tools_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> ToolsConfig:
+    """Parse optional ``tools:`` registry defaults; omit section for defaults."""
+
+    if not data:
+        return ToolsConfig()
+
+    parent = "tools"
+    timeout_seconds = _optional_float(
+        data,
+        "timeout_seconds",
+        default=30.0,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout_seconds,
+        config_path=f"{parent}.timeout_seconds",
+        source_name=source_name,
+    )
+
+    allowlist_raw = data.get("allowlist")
+    if allowlist_raw is None:
+        allowlist = ToolsConfig().allowlist
+    elif not isinstance(allowlist_raw, list) or not all(
+        isinstance(item, str) and item.strip() for item in allowlist_raw
+    ):
+        raise ConfigError(
+            f"Config value '{parent}.allowlist' must be a list of non-empty "
+            f"strings in {source_name}"
+        )
+    else:
+        allowlist = [item.strip() for item in allowlist_raw]
+
+    return ToolsConfig(allowlist=allowlist, timeout_seconds=timeout_seconds)
 
 
 def _parse_investment_config(

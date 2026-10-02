@@ -48,6 +48,14 @@ tasks:
     sources:
       - twse
       - tpex
+  # Bounded job-research pilot (#64). Prefer deterministic job_search for
+  # production digests; enable Telegram delivery only after review.
+  job_research_agent:
+    enabled: true
+    telegram_enabled: false
+    max_steps: 10
+    max_tool_calls: 6
+    max_llm_calls: 3
 
 investment:
   watchlist:
@@ -101,6 +109,15 @@ llm:
   model: gpt-4o-mini
   timeout_seconds: 20
   temperature: 0.2
+
+# Optional agent tool registry defaults (#62). Telegram stays off the default
+# allowlist; enable via include path / job_research_agent.telegram_enabled.
+tools:
+  allowlist:
+    - search_jobs
+    - get_tw_stock_movers
+    - query_recent_runs
+  timeout_seconds: 30
 
 # Optional source runtime tuning. Safe defaults apply when this section
 # (or any nested key) is omitted.

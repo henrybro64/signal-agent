@@ -25,7 +25,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
 | M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
-| M7 | LangChain-ready platform evolution #60–#67 | **In progress** — #60 roadmap done; #61 gateway done |
+| M7 | LangChain-ready platform evolution #60–#67 | **In progress** — #61–#64 done locally; #65–#67 next |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -75,6 +75,7 @@ signal-agent/
 │   │   ├── tw_stock_movers.py  # TW stock mover digest workflow
 │   │   ├── stock_watchlist.py  # personal watchlist threshold alerts
 │   │   ├── tw_market_assistant.py  # research-oriented TW market digest
+│   │   ├── job_research_agent.py  # bounded LangGraph/plain pilot (#64)
 │   │   └── market_task_support.py  # shared TW market task helpers
 │   ├── scorers/
 │   │   ├── job_rule_scorer.py
@@ -89,6 +90,10 @@ signal-agent/
 │   │   ├── openai_provider.py
 │   │   ├── fake_provider.py
 │   │   └── factory.py
+│   ├── tools/              # agent-callable tool protocol + registry (#62)
+│   ├── integrations/       # optional framework adapters (#63+)
+│   │   └── langchain/      # LangChain/LangGraph extras only
+│   ├── workflows/          # bounded agent workflows (#64)
 │   ├── formatters/
 │   │   └── tw_market_digest.py  # Traditional Chinese assistant digest text
 │   ├── profiles/           # packaged scoring/preference text (*.md)
@@ -121,6 +126,9 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 | `tasks` | One end-to-end workflow | Reimplement storage/notifier internals |
 | `scorers` | Ranking / filtering / research classification | Fetching remote data; provider SDKs |
 | `llm` | Framework-neutral LLM gateway (OpenAI/fake; Ollama reserved) | Business scoring rules; LangChain |
+| `tools` | Allowlisted agent-callable capabilities wrapping existing code | Unrestricted shell/SQL/HTTP |
+| `integrations` | Optional LangChain/MCP adapters | Own business rules or live in domain packages |
+| `workflows` | Bounded multi-step agent pilots | Replace deterministic tasks |
 | `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |
 | `notifiers` | Outbound delivery | Business ranking rules |
 | `profiles` | Packaged preference text for scorers | Secrets |
@@ -233,9 +241,9 @@ in parallel):
 
 ```text
 1. #61  Framework-neutral LLM provider gateway — DONE
-2. #62  Agent-callable tool protocol and registry
-3. #63  Optional LangChain adapters for LLMs and tools
-4. #64  Bounded LangGraph pilot workflow (job_research_agent)
+2. #62  Agent-callable tool protocol and registry — DONE
+3. #63  Optional LangChain adapters for LLMs and tools — DONE
+4. #64  Bounded LangGraph pilot workflow (job_research_agent) — DONE
 5. #65  Durable agent memory and optional RAG retrieval
 6. #66  Agent evaluation, tracing, and regression fixtures
 7. #67  Optional MCP interoperability for selected tools
@@ -253,9 +261,9 @@ Starting points (see also the M7 roadmap doc):
 | Issue | Preferred packages / entry points |
 |-------|-----------------------------------|
 | #61 | `app/llm/`, refactor `app/scorers/job_llm_scorer.py` onto the gateway — done |
-| #62 | `app/tools/` protocol + allowlisted registry wrappers |
-| #63 | optional `.[langchain]`; `app/integrations/langchain/` |
-| #64 | `app/workflows/`, additive `app/tasks/job_research_agent.py` (keep `job_search`) |
+| #62 | `app/tools/` protocol + allowlisted registry wrappers — done |
+| #63 | optional `.[langchain]`; `app/integrations/langchain/` — done |
+| #64 | `app/workflows/`, additive `app/tasks/job_research_agent.py` — done |
 | #65 | `app/memory/`, SQLite migrations, keyword retrieval before optional vectors |
 | #66 | `app/evaluation/`, `evals/`, offline CI subset |
 | #67 | optional `.[mcp]`; `app/integrations/mcp/` (localhost + allowlist) |

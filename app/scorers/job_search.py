@@ -102,7 +102,7 @@ def parse_job_search_profile(
 ) -> JobSearchProfile:
     """Parse the Markdown profile into a typed structure."""
 
-    sections = {
+    sections: dict[str, list[str]] = {
         "target_roles": [],
         "strong_skills": [],
         "preferred_companies_industries": [],

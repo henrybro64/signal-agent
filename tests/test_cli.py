@@ -28,6 +28,7 @@ def test_signal_agent_console_script_lists_tasks() -> None:
     assert result.stdout.splitlines() == [
         "dummy",
         "fetch",
+        "job_research_agent",
         "job_search",
         "stock_watchlist",
         "tw_market_assistant",

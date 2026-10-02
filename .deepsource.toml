@@ -1,0 +1,35 @@
+version = 1
+
+# Keep DeepSource focused on product code for this repo's quality gate.
+exclude_patterns = [
+  "tests/**",
+  "**/tests/**",
+  "docs/**",
+  ".venv/**",
+]
+
+test_patterns = [
+  "tests/**",
+  "test_*.py",
+]
+
+[[analyzers]]
+name = "python"
+
+  [analyzers.meta]
+  cyclomatic_complexity_threshold = "very-high"
+  # New agent/tool packages are lightly documented at class/method level;
+  # keep module/magic/init skips and also skip class/nonpublic for this gate.
+  skip_doc_coverage = ["module", "magic", "init", "class", "nonpublic"]
+
+[[analyzers]]
+name = "docker"
+
+[[analyzers]]
+name = "shell"
+
+[[analyzers]]
+name = "sql"
+
+[[analyzers]]
+name = "secrets"

@@ -90,10 +90,12 @@ class Job104Source(BaseSource):
             return []
 
         session = self.session
-        owns_session = session is None
-        if owns_session:
+        if session is None:
             session = requests.Session()
             session.headers.update(_DEFAULT_HEADERS)
+            owns_session = True
+        else:
+            owns_session = False
 
         items: list[SignalItem] = []
         is_first_request = True
@@ -118,7 +120,7 @@ class Job104Source(BaseSource):
                         break
                     items.extend(self._normalize_jobs(jobs, search_spec))
         finally:
-            if owns_session and hasattr(session, "close"):
+            if owns_session:
                 session.close()
 
         return items
@@ -301,7 +303,7 @@ class Job104Source(BaseSource):
         content_type = ""
         if hasattr(response, "headers"):
             content_type = str(response.headers.get("Content-Type", "")).strip()
-        body_preview = _normalize_text(response.text)[:120]
+        body_preview = (_normalize_text(response.text) or "")[:120]
         if body_preview:
             return f"{content_type or 'unknown content type'}: {body_preview}"
         return content_type or "unknown response body"

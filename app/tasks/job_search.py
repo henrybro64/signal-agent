@@ -25,6 +25,7 @@ from app.core import (
     update_signal_evaluation,
     upsert_signal,
 )
+from app.core.db import SignalStatus
 from app.notifiers import build_telegram_notifier
 from app.scorers import (
     JobRuleScore,
@@ -125,14 +126,21 @@ class JobSearchTask(BaseTask):
             scorers_by_key: dict[str | None, JobScorePipeline] = {}
 
             for profile in profiles:
+                profile_name = profile.name
+
+                def _on_unknown(
+                    name: str,
+                    *,
+                    _profile_name: str = profile_name,
+                ) -> None:
+                    summary.unsupported_sources.append(
+                        f"{_profile_name}/{name}"
+                    )
+
                 sources = build_job_search_sources_for_profile(
                     config,
                     profile,
-                    on_unknown=lambda name, profile_name=profile.name: (
-                        summary.unsupported_sources.append(
-                            f"{profile_name}/{name}"
-                        )
-                    ),
+                    on_unknown=_on_unknown,
                 )
                 if not sources:
                     continue
@@ -468,7 +476,9 @@ class JobSearchTask(BaseTask):
     ) -> None:
         result = pipeline.score(item)
         score = result.score
-        status = "rejected" if score.recommendation == "reject" else "new"
+        status: SignalStatus = (
+            "rejected" if score.recommendation == "reject" else "new"
+        )
         update_signal_evaluation(
             signal_id,
             score=score.score,

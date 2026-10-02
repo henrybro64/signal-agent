@@ -5,6 +5,7 @@ from __future__ import annotations
 from .base import BaseTask
 from .dummy import DummyTask
 from .fetch import FetchTask
+from .job_research_agent import JobResearchAgentTask
 from .job_search import JobSearchTask
 from .stock_watchlist import StockWatchlistTask
 from .tw_market_assistant import TwMarketAssistantTask
@@ -13,6 +14,7 @@ from .tw_stock_movers import TwStockMoversTask
 TASKS: dict[str, type[BaseTask]] = {
     DummyTask.name: DummyTask,
     FetchTask.name: FetchTask,
+    JobResearchAgentTask.name: JobResearchAgentTask,
     JobSearchTask.name: JobSearchTask,
     StockWatchlistTask.name: StockWatchlistTask,
     TwMarketAssistantTask.name: TwMarketAssistantTask,
@@ -50,6 +52,7 @@ __all__ = [
     "BaseTask",
     "DummyTask",
     "FetchTask",
+    "JobResearchAgentTask",
     "JobSearchTask",
     "StockWatchlistTask",
     "TASKS",

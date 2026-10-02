@@ -204,13 +204,19 @@ class LinkedInEmailSource(BaseSource):
         )
         validate_linkedin_email_source_secrets(env)
 
+        host = self.imap_host
+        username = self.imap_username
+        password = self.imap_password
+        if host is None or username is None or password is None:
+            raise SecretError("LinkedIn email IMAP credentials are incomplete")
+
         since_text = (datetime.now(UTC) - timedelta(days=self.lookback_days)).strftime(
             "%d-%b-%Y"
         )
 
         try:
-            with imaplib.IMAP4_SSL(self.imap_host) as client:
-                client.login(self.imap_username, self.imap_password)
+            with imaplib.IMAP4_SSL(host) as client:
+                client.login(username, password)
                 client.select(self.imap_mailbox)
                 status, data = client.search(None, "SINCE", since_text)
                 if status != "OK":
@@ -380,11 +386,11 @@ def _extract_jobs_from_text(text: str) -> list[_ParsedJob]:
     if labeled_jobs:
         return labeled_jobs
 
-    lines = [
-        _normalize_text(line)
+    lines: list[str] = [
+        normalized
         for line in text.splitlines()
+        if (normalized := _normalize_text(line)) is not None
     ]
-    lines = [line for line in lines if line is not None]
     jobs: list[_ParsedJob] = []
 
     for index, line in enumerate(lines):

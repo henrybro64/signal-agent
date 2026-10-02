@@ -47,8 +47,16 @@ def build_tw_market_assistant_digest(
     research_candidates: list[ResearchCandidate],
     top_n: int,
     timezone_name: str,
+    notify_language: str = "zh-TW",
 ) -> str:
     """Build the research-oriented market assistant Telegram report."""
+
+    language = (notify_language or "zh-TW").strip()
+    if language.lower() not in {"zh-tw", "zh", "zh_tw", "zh-hant"}:
+        raise ValueError(
+            "tw_market_assistant currently supports notify_language zh-TW only "
+            f"(got {notify_language!r})"
+        )
 
     reported_count = sum(report.reported_count for report in market_reports)
     if reported_count == 0 and not summary.failed_sources:
@@ -174,7 +182,7 @@ def _build_risk_section(section_number: int) -> list[str]:
         "",
         f"{_section_prefix(section_number)}、風險提醒",
         "- 本訊息只做研究輔助，不是買賣建議",
-        "- 漲幅過大個股需避免追高",
+        "- 漲幅過大個股需留意流動性與基本面風險",
         "- 請自行確認基本面、月營收與題材是否屬實",
     ]
 

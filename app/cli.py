@@ -65,6 +65,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TEXT",
         help="Send a Telegram test message, optionally using custom text.",
     )
+    action_group.add_argument(
+        "--langchain-smoke",
+        action="store_true",
+        help=(
+            "List LangChain-adapted tools and run a deterministic fake-model "
+            "smoke (requires pip install -e '.[langchain]')."
+        ),
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -104,6 +112,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.telegram_test is not None:
             send_telegram_test_message(args.telegram_test)
             return 0
+
+        if args.langchain_smoke:
+            return run_langchain_smoke_command()
 
         if args.task is None:
             parser.print_help()
@@ -150,6 +161,29 @@ def send_telegram_test_message(text: str) -> None:
     )
     notifier.send_message(message)
     print("telegram test message sent")
+
+
+def run_langchain_smoke_command() -> int:
+    """Run the optional LangChain adapter smoke command."""
+
+    try:
+        from app.integrations.langchain import run_langchain_smoke
+    except ImportError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    try:
+        result = run_langchain_smoke()
+    except ImportError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    print("langchain tools:")
+    for name in result["tool_names"]:
+        print(f"- {name}")
+    print(f"model_reply: {result['model_reply']}")
+    print(f"langgraph_available: {result['langgraph_available']}")
+    return 0
 
 
 def run_task_with_failure_alerts(name: str, *, config_path: str) -> None:

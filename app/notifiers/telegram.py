@@ -38,9 +38,11 @@ class TelegramNotifier:
             raise ValueError("Telegram message text must not be empty")
 
         session = self.session
-        owns_session = session is None
-        if owns_session:
+        if session is None:
             session = requests.Session()
+            owns_session = True
+        else:
+            owns_session = False
 
         url = f"{self.api_base_url}/bot{self.bot_token}/sendMessage"
 

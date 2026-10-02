@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -31,7 +32,8 @@ stock_code = tw_stock_utils.stock_code_for_item
 
 
 class _NamedFetchSource(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def fetch(self) -> list[SignalItem]: ...
 
@@ -214,7 +216,7 @@ def complete_tw_stock_source_run(
 def collect_tw_stock_mover_summary(
     task: BaseTask,
     *,
-    sources: list[_NamedFetchSource],
+    sources: Sequence[_NamedFetchSource],
     db_path: Path,
 ) -> TwStockMoversSummary:
     """Fetch, persist, and summarize TWSE/TPEx mover quotes for one task run."""
