@@ -10,7 +10,7 @@ data:
     agent:
       timezone: Asia/Taipei
       digest_time: "20:00"
-
+    
     tasks:
       job_search:
         enabled: true
@@ -62,10 +62,19 @@ data:
       job_research_agent:
         enabled: true
         telegram_enabled: false
-        max_steps: 10
+        max_steps: 12
         max_tool_calls: 6
         max_llm_calls: 3
-
+        memory_namespace: job_research
+    
+    # Explicit Markdown/text documents for namespaced agent memory (#65).
+    # Paths are ingested at job_research start; never put .env/secrets here.
+    memory:
+      namespaces:
+        job_research:
+          documents:
+            - evals/fixtures/company-notes.md
+    
     investment:
       watchlist:
         - "2330"
@@ -97,19 +106,19 @@ data:
             - ASIC
             - CoWoS
             - HBM
-
+    
     notifiers:
       telegram:
         enabled: true
         failure_alerts_enabled: true
-
+    
     scoring:
       freshness_weight: 0.6
       priority_weight: 0.4
       llm_enabled: false
       # Kept in sync with llm.model (alias for older configs).
       llm_model: gpt-4o-mini
-
+    
     # Optional LLM gateway defaults (used when scoring.llm_enabled is true).
     # llm.model is the source of truth; provider "fake" is for offline tests;
     # "ollama" is reserved for later.
@@ -118,15 +127,16 @@ data:
       model: gpt-4o-mini
       timeout_seconds: 20
       temperature: 0.2
-
-    # Optional agent tool registry defaults (#62).
+    
+    # Optional agent tool registry defaults (#62). Telegram stays off the default
+    # allowlist; enable via include path / job_research_agent.telegram_enabled.
     tools:
       allowlist:
         - search_jobs
         - get_tw_stock_movers
         - query_recent_runs
       timeout_seconds: 30
-
+    
     # Optional source runtime tuning. Safe defaults apply when this section
     # (or any nested key) is omitted.
     sources:

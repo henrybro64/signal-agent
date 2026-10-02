@@ -1,0 +1,19 @@
+id: job-scoring-rule-reject
+suite: core
+version: 1
+kind: job_scoring
+description: Rule scorer rejects SLA-heavy support roles offline.
+inputs:
+  job:
+    source: eval
+    item_type: job
+    title: Helpdesk Support Engineer
+    content: SLA-heavy support and rotating on-call coverage.
+    metadata:
+      company: Example Support
+expectations:
+  expected_recommendation: reject
+  max_score: 24
+  prohibited_substrings:
+    - "sk-"
+    - "apply now"

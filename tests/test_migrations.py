@@ -177,7 +177,7 @@ def test_init_db_upgrades_legacy_unversioned_database(tmp_path: Path) -> None:
 
     init_db(db_path)
 
-    assert read_schema_version(db_path) == 1
+    assert read_schema_version(db_path) == latest_migration_version()
     with sqlite3.connect(db_path) as connection:
         tables = {
             row[0]
@@ -191,6 +191,7 @@ def test_init_db_upgrades_legacy_unversioned_database(tmp_path: Path) -> None:
         ).fetchone()
 
     assert "task_runs" in tables
+    assert "memory_documents" in tables
     assert row == ("Legacy job", "https://example.com/legacy-job")
 
     # Existing rows remain usable through the public DB API after upgrade.
@@ -243,7 +244,7 @@ def test_init_db_backfills_missing_content_column_before_versioning(
 
     init_db(db_path)
 
-    assert read_schema_version(db_path) == 1
+    assert read_schema_version(db_path) == latest_migration_version()
     with sqlite3.connect(db_path) as connection:
         columns = {
             row[1]

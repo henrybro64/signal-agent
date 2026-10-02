@@ -53,9 +53,18 @@ tasks:
   job_research_agent:
     enabled: true
     telegram_enabled: false
-    max_steps: 10
+    max_steps: 12
     max_tool_calls: 6
     max_llm_calls: 3
+    memory_namespace: job_research
+
+# Explicit Markdown/text documents for namespaced agent memory (#65).
+# Paths are ingested at job_research start; never put .env/secrets here.
+memory:
+  namespaces:
+    job_research:
+      documents:
+        - evals/fixtures/company-notes.md
 
 investment:
   watchlist:

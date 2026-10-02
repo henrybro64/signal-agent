@@ -84,9 +84,24 @@ class JobResearchAgentTaskConfig:
 
     enabled: bool = True
     telegram_enabled: bool = False
-    max_steps: int = 10
+    max_steps: int = 12
     max_tool_calls: int = 6
     max_llm_calls: int = 3
+    memory_namespace: str = "job_research"
+
+
+@dataclass(slots=True)
+class MemoryNamespaceConfig:
+    """Explicit documents for one memory namespace (#65)."""
+
+    documents: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class MemoryConfig:
+    """Namespaced durable memory ingest configuration (#65)."""
+
+    namespaces: dict[str, MemoryNamespaceConfig] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -234,6 +249,7 @@ class AppConfig:
     investment: InvestmentConfig = field(default_factory=InvestmentConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     @classmethod
     def from_dict(
@@ -287,6 +303,11 @@ class AppConfig:
         tools = _optional_mapping(
             data,
             "tools",
+            source_name=source_name,
+        )
+        memory = _optional_mapping(
+            data,
+            "memory",
             source_name=source_name,
         )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
@@ -447,6 +468,7 @@ class AppConfig:
             ),
             llm=llm_config,
             tools=_parse_tools_config(tools, source_name=source_name),
+            memory=_parse_memory_config(memory, source_name=source_name),
         )
 
 
@@ -521,7 +543,7 @@ def _parse_job_research_agent_config(
     max_steps = _optional_int(
         data,
         "max_steps",
-        default=10,
+        default=12,
         parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
         source_name=source_name,
     )
@@ -550,6 +572,19 @@ def _parse_job_research_agent_config(
             source_name=source_name,
         )
 
+    memory_namespace = _optional_str(
+        data,
+        "memory_namespace",
+        default="job_research",
+        parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+        source_name=source_name,
+    )
+    if not memory_namespace.strip():
+        raise ConfigError(
+            f"Invalid config at {_JOB_RESEARCH_AGENT_CONFIG_PATH}.memory_namespace "
+            f"in {source_name}: must be a non-empty string"
+        )
+
     return JobResearchAgentTaskConfig(
         enabled=_optional_bool(
             data,
@@ -568,7 +603,52 @@ def _parse_job_research_agent_config(
         max_steps=max_steps,
         max_tool_calls=max_tool_calls,
         max_llm_calls=max_llm_calls,
+        memory_namespace=memory_namespace.strip(),
     )
+
+
+def _parse_memory_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> MemoryConfig:
+    """Parse optional ``memory:`` namespaces; omit section for empty defaults."""
+
+    if not data:
+        return MemoryConfig()
+
+    parent = "memory"
+    namespaces_raw = _optional_mapping(
+        data,
+        "namespaces",
+        parent_path=parent,
+        source_name=source_name,
+    )
+    if not namespaces_raw:
+        return MemoryConfig()
+
+    namespaces: dict[str, MemoryNamespaceConfig] = {}
+    for name, raw in namespaces_raw.items():
+        namespace = str(name).strip()
+        if not namespace:
+            raise ConfigError(
+                f"Invalid config at {parent}.namespaces in {source_name}: "
+                "namespace names must be non-empty"
+            )
+        if not isinstance(raw, dict):
+            raise ConfigError(
+                f"Invalid config at {parent}.namespaces.{namespace} in "
+                f"{source_name}: expected a mapping"
+            )
+        documents = _optional_str_list(
+            raw,
+            "documents",
+            default=[],
+            parent_path=f"{parent}.namespaces.{namespace}",
+            source_name=source_name,
+        )
+        namespaces[namespace] = MemoryNamespaceConfig(documents=documents)
+    return MemoryConfig(namespaces=namespaces)
 
 
 def _parse_tools_config(

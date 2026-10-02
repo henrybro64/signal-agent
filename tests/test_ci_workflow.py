@@ -49,6 +49,7 @@ def test_ci_workflow_runs_pytest_ruff_and_package_smoke() -> None:
     assert any("pip install --upgrade pip==" in command for command in run_commands)
     assert any("make test" in command for command in run_commands)
     assert any("make lint" in command for command in run_commands)
+    assert any("make eval" in command for command in run_commands)
     assert any("make package-smoke" in command for command in run_commands)
     make_commands = [command for command in run_commands if command.startswith("make ")]
     assert all("PYTHON=python" in command for command in make_commands)
@@ -57,9 +58,10 @@ def test_ci_workflow_runs_pytest_ruff_and_package_smoke() -> None:
 def test_makefile_check_is_local_ci_equivalent() -> None:
     makefile = MAKEFILE.read_text(encoding="utf-8")
 
-    assert "check: test lint package-smoke" in makefile
+    assert "check: test lint eval package-smoke" in makefile
     assert "test:" in makefile
     assert "lint:" in makefile
+    assert "eval:" in makefile
     assert "package-smoke:" in makefile
     assert "signal-agent" in makefile
     assert "load_job_search_profile" in makefile

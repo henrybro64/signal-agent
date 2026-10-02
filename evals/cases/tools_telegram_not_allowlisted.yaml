@@ -1,0 +1,13 @@
+id: tools-telegram-not-allowlisted
+suite: core
+version: 1
+kind: tools
+description: Telegram tool stays out of the default allowlist.
+inputs:
+  tool: send_telegram_message
+  expect_ok: false
+  arguments:
+    text: hello
+expectations:
+  prohibited_substrings:
+    - "sk-"

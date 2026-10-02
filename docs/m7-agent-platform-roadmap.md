@@ -88,9 +88,9 @@ repo-wide rewrite.
 2. #62  Agent-callable tool protocol and registry — DONE (see `app/tools/`)
 3. #63  Optional LangChain adapters for LLMs and tools — DONE (`.[langchain]`)
 4. #64  Bounded LangGraph pilot: job_research_agent — DONE (`app/workflows/`)
-5. #65  Durable agent memory and optional RAG            (needs #57; after #61/#64)
-6. #66  Agent evaluation, tracing, and regression fixtures (needs #61/#62/#64; RAG cases after #65)
-7. #67  Optional MCP interoperability for selected tools (needs #62; prefer after #63/#66)
+5. #65  Durable agent memory and optional RAG            — DONE (local)
+6. #66  Agent evaluation, tracing, and regression fixtures — DONE (local)
+7. #67  Optional MCP interoperability for selected tools — DONE (local)
 ```
 
 `#61` and `#62` may proceed in parallel. Do not start `#63+` until both land.

@@ -1,0 +1,30 @@
+id: job-research-rag-citations
+suite: core
+version: 1
+kind: job_research
+description: Memory evidence with citations appears in the digest.
+inputs:
+  llm_mode: absent
+  memory_namespace: job_research
+  memory_docs:
+    - filename: company-notes.md
+      content: |
+        Cloud SDET notes for Example Security.
+        Prefer Python automation and Kubernetes experience.
+  jobs:
+    - source: dummy
+      item_type: job
+      title: Cloud SDET
+      observed_at: "2026-07-01T00:00:00+00:00"
+      content: Python automation with Kubernetes.
+      metadata:
+        company: Example Security
+expectations:
+  final_status_prefix: completed
+  required_substrings:
+    - "Evidence:"
+    - "company-notes.md"
+  require_citations: true
+  prohibited_substrings:
+    - "sk-"
+    - "apply now"

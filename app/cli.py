@@ -73,6 +73,41 @@ def build_parser() -> argparse.ArgumentParser:
             "smoke (requires pip install -e '.[langchain]')."
         ),
     )
+    action_group.add_argument(
+        "--eval",
+        nargs="?",
+        const="core",
+        metavar="SUITE",
+        help=(
+            "Run the offline evaluation suite (default: core). "
+            "No network or paid APIs."
+        ),
+    )
+    action_group.add_argument(
+        "--mcp-serve",
+        action="store_true",
+        help=(
+            "Serve allowlisted read-oriented tools over MCP on localhost "
+            "(requires pip install -e '.[mcp]')."
+        ),
+    )
+    parser.add_argument(
+        "--mcp-host",
+        default="127.0.0.1",
+        help="MCP bind host (localhost only). Default: %(default)s",
+    )
+    parser.add_argument(
+        "--mcp-port",
+        type=int,
+        default=8765,
+        help="MCP SSE port when using --mcp-transport sse. Default: %(default)s",
+    )
+    parser.add_argument(
+        "--mcp-transport",
+        choices=("stdio", "sse"),
+        default="stdio",
+        help="MCP transport. Default: %(default)s",
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -115,6 +150,16 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.langchain_smoke:
             return run_langchain_smoke_command()
+
+        if args.eval is not None:
+            return run_eval_command(suite=args.eval)
+
+        if args.mcp_serve:
+            return run_mcp_serve_command(
+                host=args.mcp_host,
+                port=args.mcp_port,
+                transport=args.mcp_transport,
+            )
 
         if args.task is None:
             parser.print_help()
@@ -183,6 +228,39 @@ def run_langchain_smoke_command() -> int:
         print(f"- {name}")
     print(f"model_reply: {result['model_reply']}")
     print(f"langgraph_available: {result['langgraph_available']}")
+    return 0
+
+
+def run_eval_command(*, suite: str) -> int:
+    """Run the offline evaluation suite (#66)."""
+
+    from app.evaluation.runner import main as eval_main
+
+    return eval_main(["--suite", suite])
+
+
+def run_mcp_serve_command(*, host: str, port: int, transport: str) -> int:
+    """Serve allowlisted tools over a localhost MCP adapter (#67)."""
+
+    try:
+        from app.integrations.mcp import McpServerConfig, serve_mcp
+    except ImportError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    try:
+        config = McpServerConfig(host=host, port=port, transport=transport)
+        print(
+            f"Starting MCP server transport={transport} host={host} port={port}",
+            file=sys.stderr,
+        )
+        serve_mcp(config=config)
+    except ImportError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     return 0
 
 
