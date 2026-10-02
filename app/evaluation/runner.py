@@ -28,9 +28,10 @@ from .models import (
 from .report import format_report_text, write_report_json
 from .trace import TraceCollector
 
-_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_CASES_DIR = _ROOT / "evals" / "cases"
+_DEFAULT_CASES_DIR = Path(__file__).resolve().parent / "cases"
 _LIVE_FLAG = "SIGNAL_AGENT_LIVE_EVAL"
+_SUPPORTED_KINDS = frozenset({"job_research", "tools", "job_scoring"})
+
 
 
 def _env_flag(name: str) -> bool:
@@ -43,51 +44,55 @@ def load_eval_cases(
     cases_dir: Path | None = None,
 ) -> list[EvalCase]:
     directory = cases_dir or _DEFAULT_CASES_DIR
+    if not directory.is_dir():
+        raise FileNotFoundError(f"Eval cases directory not found: {directory}")
     cases: list[EvalCase] = []
     for path in sorted(directory.glob("*.yaml")):
-        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        if not isinstance(payload, dict):
+        case = _case_from_yaml(path)
+        if suite and case.suite != suite:
             continue
-        case_suite = str(payload.get("suite") or "core")
-        if suite and case_suite != suite:
-            continue
-        expectations_raw = payload.get("expectations") or {}
-        if not isinstance(expectations_raw, dict):
-            expectations_raw = {}
-        cases.append(
-            EvalCase(
-                id=str(payload.get("id") or path.stem),
-                suite=case_suite,
-                description=str(payload.get("description") or ""),
-                version=int(payload.get("version") or 1),
-                kind=str(payload.get("kind") or "job_research"),
-                inputs=dict(payload.get("inputs") or {}),
-                expectations=EvalExpectation(
-                    final_status_prefix=expectations_raw.get("final_status_prefix"),
-                    required_tools=list(
-                        expectations_raw.get("required_tools") or []
-                    ),
-                    prohibited_substrings=list(
-                        expectations_raw.get("prohibited_substrings") or []
-                    ),
-                    required_substrings=list(
-                        expectations_raw.get("required_substrings") or []
-                    ),
-                    max_tool_calls=expectations_raw.get("max_tool_calls"),
-                    max_llm_calls=expectations_raw.get("max_llm_calls"),
-                    require_citations=bool(
-                        expectations_raw.get("require_citations") or False
-                    ),
-                    min_filtered=expectations_raw.get("min_filtered"),
-                    expected_recommendation=expectations_raw.get(
-                        "expected_recommendation"
-                    ),
-                    min_score=expectations_raw.get("min_score"),
-                    max_score=expectations_raw.get("max_score"),
-                ),
-            )
-        )
+        cases.append(case)
     return cases
+
+
+def _case_from_yaml(path: Path) -> EvalCase:
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(payload, dict):
+        raise ValueError(f"Eval case must be a mapping: {path}")
+    expectations_raw = payload.get("expectations") or {}
+    if not isinstance(expectations_raw, dict):
+        expectations_raw = {}
+    kind = str(payload.get("kind") or "job_research")
+    if kind not in _SUPPORTED_KINDS:
+        raise ValueError(
+            f"Unknown eval case kind {kind!r} in {path.name}; "
+            f"supported: {', '.join(sorted(_SUPPORTED_KINDS))}"
+        )
+    return EvalCase(
+        id=str(payload.get("id") or path.stem),
+        suite=str(payload.get("suite") or "core"),
+        description=str(payload.get("description") or ""),
+        version=int(payload.get("version") or 1),
+        kind=kind,
+        inputs=dict(payload.get("inputs") or {}),
+        expectations=_expectation_from_mapping(expectations_raw),
+    )
+
+
+def _expectation_from_mapping(raw: dict[str, Any]) -> EvalExpectation:
+    return EvalExpectation(
+        final_status_prefix=raw.get("final_status_prefix"),
+        required_tools=list(raw.get("required_tools") or []),
+        prohibited_substrings=list(raw.get("prohibited_substrings") or []),
+        required_substrings=list(raw.get("required_substrings") or []),
+        max_tool_calls=raw.get("max_tool_calls"),
+        max_llm_calls=raw.get("max_llm_calls"),
+        require_citations=bool(raw.get("require_citations") or False),
+        min_filtered=raw.get("min_filtered"),
+        expected_recommendation=raw.get("expected_recommendation"),
+        min_score=raw.get("min_score"),
+        max_score=raw.get("max_score"),
+    )
 
 
 def run_suite(
@@ -105,11 +110,19 @@ def run_suite(
 
     use_live = _env_flag(_LIVE_FLAG) if live is None else live
     cases = load_eval_cases(suite=suite, cases_dir=cases_dir)
+    if not cases:
+        raise ValueError(
+            f"No eval cases found for suite={suite!r} in "
+            f"{cases_dir or _DEFAULT_CASES_DIR}"
+        )
     results = [
         _run_case(case, traces_dir=traces_dir, live=use_live) for case in cases
     ]
-    passed = all(result.passed for result in results) if results else True
-    return EvalReport(suite=suite, passed=passed, results=results)
+    return EvalReport(
+        suite=suite,
+        passed=all(result.passed for result in results),
+        results=results,
+    )
 
 
 def _run_case(
@@ -127,8 +140,10 @@ def _run_case(
         result = _run_tools_case(case, collector)
     elif case.kind == "job_scoring":
         result = _run_job_scoring_case(case, collector)
-    else:
+    elif case.kind == "job_research":
         result = _run_job_research_case(case, collector, live=live)
+    else:
+        raise ValueError(f"Unsupported eval case kind: {case.kind}")
 
     if traces_dir is not None:
         traces_dir.mkdir(parents=True, exist_ok=True)
@@ -356,10 +371,6 @@ def _provider_for_case(case: EvalCase, *, live: bool) -> Any:
                 f"but provider setup failed: {exc}"
             ) from exc
 
-    if live and not allow_live:
-        # Live flag set globally but this case stays offline.
-        pass
-
     llm_mode = str(case.inputs.get("llm_mode") or "ok")
     if llm_mode == "absent":
         return None
@@ -415,6 +426,20 @@ def _score_expectations(
     evidence: list[dict[str, Any]],
 ) -> list[EvalCheckResult]:
     checks: list[EvalCheckResult] = []
+    checks.extend(_status_and_tool_checks(expectations, status, used_tools))
+    checks.extend(_substring_checks(expectations, digest))
+    checks.extend(_budget_checks(expectations, tool_calls, llm_calls))
+    checks.extend(_filtered_and_citation_checks(expectations, digest, evidence))
+    checks.extend(_safety_checks(digest))
+    return checks
+
+
+def _status_and_tool_checks(
+    expectations: EvalExpectation,
+    status: str,
+    used_tools: list[str],
+) -> list[EvalCheckResult]:
+    checks: list[EvalCheckResult] = []
     if expectations.final_status_prefix:
         checks.append(
             EvalCheckResult(
@@ -431,6 +456,14 @@ def _score_expectations(
                 detail=f"used={used_tools}",
             )
         )
+    return checks
+
+
+def _substring_checks(
+    expectations: EvalExpectation,
+    digest: str,
+) -> list[EvalCheckResult]:
+    checks: list[EvalCheckResult] = []
     for needle in expectations.required_substrings:
         checks.append(
             EvalCheckResult(
@@ -447,6 +480,15 @@ def _score_expectations(
                 detail="found in digest" if needle in digest else "",
             )
         )
+    return checks
+
+
+def _budget_checks(
+    expectations: EvalExpectation,
+    tool_calls: int,
+    llm_calls: int,
+) -> list[EvalCheckResult]:
+    checks: list[EvalCheckResult] = []
     if expectations.max_tool_calls is not None:
         checks.append(
             EvalCheckResult(
@@ -463,6 +505,15 @@ def _score_expectations(
                 detail=f"llm_calls={llm_calls}",
             )
         )
+    return checks
+
+
+def _filtered_and_citation_checks(
+    expectations: EvalExpectation,
+    digest: str,
+    evidence: list[dict[str, Any]],
+) -> list[EvalCheckResult]:
+    checks: list[EvalCheckResult] = []
     if expectations.min_filtered is not None:
         match = re.search(r"Filtered matches:\s*(\d+)", digest)
         count = int(match.group(1)) if match else -1
@@ -475,24 +526,34 @@ def _score_expectations(
         )
     if expectations.require_citations:
         has_citation = any(
-            isinstance(item, dict) and item.get("citation") for item in evidence
-        ) or "#" in digest
+            isinstance(item, dict) and bool(item.get("citation"))
+            for item in evidence
+        )
         checks.append(
             EvalCheckResult(
                 name="require_citations",
                 passed=has_citation,
-                detail="no citations found",
-            )
-        )
-    for banned in ("apply now", "submit application", "buy shares", "sell shares"):
-        checks.append(
-            EvalCheckResult(
-                name=f"safety:{banned}",
-                passed=banned not in digest.lower(),
-                detail="prohibited claim present",
+                detail="no structured evidence citations found",
             )
         )
     return checks
+
+
+def _safety_checks(digest: str) -> list[EvalCheckResult]:
+    lowered = digest.lower()
+    return [
+        EvalCheckResult(
+            name=f"safety:{banned}",
+            passed=banned not in lowered,
+            detail="prohibited claim present",
+        )
+        for banned in (
+            "apply now",
+            "submit application",
+            "buy shares",
+            "sell shares",
+        )
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -511,11 +572,15 @@ def main(argv: list[str] | None = None) -> int:
     if traces_dir is None and args.json_out:
         traces_dir = Path(args.json_out).resolve().parent / "traces"
 
-    report = run_suite(
-        args.suite,
-        cases_dir=Path(args.cases_dir),
-        traces_dir=traces_dir,
-    )
+    try:
+        report = run_suite(
+            args.suite,
+            cases_dir=Path(args.cases_dir),
+            traces_dir=traces_dir,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"eval error: {exc}", file=sys.stderr)
+        return 1
     print(format_report_text(report))
     if args.json_out:
         write_report_json(report, args.json_out)

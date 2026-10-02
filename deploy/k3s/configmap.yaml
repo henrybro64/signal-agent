@@ -69,11 +69,11 @@ data:
     
     # Explicit Markdown/text documents for namespaced agent memory (#65).
     # Paths are ingested at job_research start; never put .env/secrets here.
+    # Deployment-safe default is empty; mount documents explicitly if needed.
     memory:
       namespaces:
         job_research:
-          documents:
-            - evals/fixtures/company-notes.md
+          documents: []
     
     investment:
       watchlist:

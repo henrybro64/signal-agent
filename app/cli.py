@@ -159,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
                 host=args.mcp_host,
                 port=args.mcp_port,
                 transport=args.mcp_transport,
+                config_path=args.config,
             )
 
         if args.task is None:
@@ -239,26 +240,60 @@ def run_eval_command(*, suite: str) -> int:
     return eval_main(["--suite", suite])
 
 
-def run_mcp_serve_command(*, host: str, port: int, transport: str) -> int:
+def run_mcp_serve_command(
+    *,
+    host: str,
+    port: int,
+    transport: str,
+    config_path: str = DEFAULT_CONFIG_PATH,
+) -> int:
     """Serve allowlisted tools over a localhost MCP adapter (#67)."""
 
     try:
         from app.integrations.mcp import McpServerConfig, serve_mcp
+        from app.tools import ToolContext, build_tool_registry
     except ImportError as exc:
         print(exc, file=sys.stderr)
         return 1
 
     try:
-        config = McpServerConfig(host=host, port=port, transport=transport)
+        from app.core import load_config
+        from app.core.health import resolve_db_path
+        from app.core.logging import configure_logging
+
+        # stdio uses stdout for JSON-RPC; keep structured logs on stderr.
+        if transport == "stdio":
+            configure_logging(stream=sys.stderr, force=True)
+
+        app_config = load_config(config_path)
+        env = load_env_settings()
+        db_path = resolve_db_path()
+        secrets = tuple(
+            value
+            for value in (
+                env.openai_api_key,
+                env.telegram_bot_token,
+            )
+            if value
+        )
+        context = ToolContext(
+            config=app_config,
+            env=env,
+            db_path=db_path,
+            telegram_enabled=False,
+            secrets_to_redact=secrets,
+        )
+        mcp_config = McpServerConfig(host=host, port=port, transport=transport)
+        registry = build_tool_registry(allowlist=list(mcp_config.allowlist or ()))
         print(
             f"Starting MCP server transport={transport} host={host} port={port}",
             file=sys.stderr,
         )
-        serve_mcp(config=config)
+        serve_mcp(config=mcp_config, registry=registry, context=context)
     except ImportError as exc:
         print(exc, file=sys.stderr)
         return 1
-    except ValueError as exc:
+    except (ValueError, ConfigError, SecretError) as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0

@@ -247,8 +247,8 @@ signal-agent/
   SQLite DB under the `job_research` namespace, the digest can include cited
   evidence snippets.
 - `python main.py --eval` (or `make eval` / `signal-agent-eval`) runs the
-  offline CI evaluation suite under `evals/cases/` with fake LLM/tools and
-  redacted traces. No network or paid APIs.
+  offline CI evaluation suite packaged under `app/evaluation/cases/` with fake
+  LLM/tools and redacted traces. No network or paid APIs.
 - `python main.py --mcp-serve` exposes allowlisted read-only tools
   (`search_jobs`, `get_tw_stock_movers`, `query_recent_runs`) over MCP on
   localhost after `pip install -e '.[mcp]'`. Telegram is never exposed.
@@ -719,18 +719,21 @@ env = load_env_settings()
   `job_research_agent`. `pip install -e '.[mcp]'` adds the MCP SDK for
   `--mcp-serve`. The base install stays free of those packages.
 - Agent memory (`app/memory/`): configure explicit Markdown/text paths under
-  `memory.namespaces.<name>.documents` in `config.yaml` (see
-  `evals/fixtures/company-notes.md`). `job_research_agent` ingests those paths
-  into the shared SQLite DB (migration `002_agent_memory.sql`) under
+  `memory.namespaces.<name>.documents` in `config.yaml` (see the sample at
+  `app/evaluation/fixtures/company-notes.md`). Deployment defaults leave the
+  list empty so Compose/k3s images do not warn about missing files.
+  `job_research_agent` ingests configured paths into the shared SQLite DB
+  (migration `002_agent_memory.sql`) under
   `tasks.job_research_agent.memory_namespace` before retrieval. Keyword
   retrieval is default; embeddings are optional/fake in CI. Never ingest
-  `.env`, credentials, or secrets. Clear a namespace with
-  `SqliteMemoryStore(...).delete_namespace("job_research")`.
+  `.env`, credentials, or secrets (path and content checks). Clear a namespace
+  with `SqliteMemoryStore(...).delete_namespace("job_research")`.
 - Offline evaluation: `make eval` (also run in GitHub Actions CI) runs the
-  `core` suite. Cases live in `evals/cases/*.yaml`. Pass `--json-out` to write
-  a machine-readable report and redacted traces. Paid live-provider eval
-  requires both `SIGNAL_AGENT_LIVE_EVAL=1` and `inputs.allow_live: true` on a
-  case; it is never enabled in CI.
+  `core` suite. Cases ship inside the package at
+  `app/evaluation/cases/*.yaml`. Pass `--json-out` to write a machine-readable
+  report and redacted traces. An empty/misspelled suite fails. Paid
+  live-provider eval requires both `SIGNAL_AGENT_LIVE_EVAL=1` and
+  `inputs.allow_live: true` on a case; it is never enabled in CI.
 - MCP security limits: bind localhost only; expose read-oriented allowlisted
   tools; no public internet exposure, no shell/filesystem catch-alls, and no
   Telegram/side-effect tools by default.

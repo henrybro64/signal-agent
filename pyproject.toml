@@ -41,6 +41,7 @@ include = ["app*"]
 "app.profiles" = ["*.md"]
 "app.data" = ["*.yaml"]
 "app.sql" = ["migrations/*.sql"]
+"app.evaluation" = ["cases/*.yaml", "fixtures/*"]
 
 [tool.ruff]
 target-version = "py312"

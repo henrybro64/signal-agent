@@ -81,7 +81,10 @@ class SqliteMemoryStore:
                         meta_json,
                     ),
                 )
-                document_id = int(cursor.lastrowid)
+                raw_id = cursor.lastrowid
+                if raw_id is None:
+                    raise RuntimeError("SQLite insert did not return lastrowid")
+                document_id = int(raw_id)
                 created_at = now
             else:
                 document_id = int(existing["id"])

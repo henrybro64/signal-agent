@@ -35,6 +35,7 @@ package-smoke:
 	printf '%s\n' "$$list_output" | grep -Fx stock_watchlist >/dev/null; \
 	"$$venv_dir/bin/python" -c "from app.scorers import load_job_search_profile; profile = load_job_search_profile(); assert profile.target_roles"; \
 	"$$venv_dir/bin/python" -c "from datetime import date; from app.core import is_tw_market_holiday, load_tw_market_holiday_dates; assert date(2026, 1, 1) in load_tw_market_holiday_dates(); assert is_tw_market_holiday(date(2026, 1, 1))"; \
-	"$$venv_dir/bin/python" -c "from pathlib import Path; import tempfile; from app.core import init_db, read_schema_version; from app.core.migrations import latest_migration_version, list_migrations; assert list_migrations(); db=Path(tempfile.mkdtemp())/'db.sqlite3'; init_db(db); assert read_schema_version(db)==latest_migration_version()"
+	"$$venv_dir/bin/python" -c "from pathlib import Path; import tempfile; from app.core import init_db, read_schema_version; from app.core.migrations import latest_migration_version, list_migrations; assert list_migrations(); db=Path(tempfile.mkdtemp())/'db.sqlite3'; init_db(db); assert read_schema_version(db)==latest_migration_version()"; \
+	"$$venv_dir/bin/python" -c "from app.evaluation.runner import load_eval_cases; cases=load_eval_cases(suite='core'); assert cases, 'packaged eval cases missing'"
 
 check: test lint eval package-smoke

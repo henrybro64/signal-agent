@@ -270,7 +270,7 @@ Starting points (see also the M7 roadmap doc):
 | #63 | optional `.[langchain]`; `app/integrations/langchain/` — done |
 | #64 | `app/workflows/`, additive `app/tasks/job_research_agent.py` — done |
 | #65 | `app/memory/`, SQLite migrations, keyword retrieval before optional vectors — done |
-| #66 | `app/evaluation/`, `evals/`, offline CI subset — done |
+| #66 | `app/evaluation/` (+ packaged `cases/`/`fixtures/`), offline CI subset — done |
 | #67 | optional `.[mcp]`; `app/integrations/mcp/` (localhost + allowlist) — done |
 
 ## How to pick up work

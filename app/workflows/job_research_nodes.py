@@ -150,7 +150,11 @@ def retrieve_evidence_node(
                 namespace=state.memory_namespace,
                 paths=list(state.memory_document_paths),
             )
-            errors = [row.detail for row in results if row.status == "error"]
+            errors = [
+                row.detail
+                for row in results
+                if row.status == "error" and row.detail
+            ]
             if errors:
                 state.warnings.append(
                     "memory_ingest_errors:" + ";".join(errors[:3])
@@ -490,11 +494,14 @@ def store_operational_summary(
         from app.memory import SqliteMemoryStore
 
         store = SqliteMemoryStore(Path(db_path))
-        key = (
-            f"task-{state.task_run_id}"
-            if state.task_run_id is not None
-            else f"run-steps-{state.step_count}"
-        )
+        if state.task_run_id is not None:
+            key = f"task-{state.task_run_id}"
+        else:
+            from datetime import UTC, datetime
+            from uuid import uuid4
+
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+            key = f"run-{stamp}-{uuid4().hex[:8]}"
         store.put_operational(
             namespace=state.memory_namespace,
             kind="run_summary",

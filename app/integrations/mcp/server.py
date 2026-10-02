@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 
@@ -10,6 +11,15 @@ from app.tools import ToolContext, ToolRegistry
 from .config import McpServerConfig
 from .deps import require_mcp
 from .tools import McpToolGateway
+
+_JSON_TYPE_MAP: dict[str, type] = {
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
 
 
 def build_mcp_server(
@@ -44,14 +54,64 @@ def _register_tool(
 ) -> None:
     tool_name = str(descriptor["name"])
     description = str(descriptor.get("description") or tool_name)
+    schema = dict(descriptor.get("inputSchema") or {"type": "object", "properties": {}})
+    handler = _handler_from_schema(tool_name, description, schema, gateway)
+    server.add_tool(handler, name=tool_name, description=description)
+    # Preserve project-owned schema (descriptions, enums, bounds) for discovery.
+    registered = server._tool_manager._tools.get(tool_name)
+    if registered is not None:
+        registered.parameters = schema
 
-    def _handler(**kwargs: Any) -> str:
-        result = gateway.call_tool(tool_name, dict(kwargs))
+
+def _handler_from_schema(
+    tool_name: str,
+    description: str,
+    schema: dict[str, Any],
+    gateway: McpToolGateway,
+) -> Any:
+    """Build a FastMCP-callable whose signature mirrors ``inputSchema``."""
+
+    properties = dict(schema.get("properties") or {})
+    required = set(schema.get("required") or [])
+    parameters: list[inspect.Parameter] = []
+    annotations: dict[str, Any] = {}
+
+    for name, prop in properties.items():
+        json_type = str(prop.get("type") or "string")
+        py_type: Any = _JSON_TYPE_MAP.get(json_type, Any)
+        if name in required:
+            parameters.append(
+                inspect.Parameter(
+                    name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=py_type,
+                )
+            )
+            annotations[name] = py_type
+        else:
+            optional = py_type | None
+            parameters.append(
+                inspect.Parameter(
+                    name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=None,
+                    annotation=optional,
+                )
+            )
+            annotations[name] = optional
+
+    signature = inspect.Signature(parameters)
+
+    def handler(**kwargs: Any) -> str:
+        cleaned = {key: value for key, value in kwargs.items() if value is not None}
+        result = gateway.call_tool(tool_name, cleaned)
         return json.dumps(result.to_safe_dict(), ensure_ascii=False)
 
-    _handler.__name__ = tool_name
-    _handler.__doc__ = description
-    server.tool(name=tool_name, description=description)(_handler)
+    handler.__name__ = tool_name
+    handler.__doc__ = description
+    handler.__signature__ = signature  # type: ignore[attr-defined]
+    handler.__annotations__ = annotations
+    return handler
 
 
 def run_mcp_server(

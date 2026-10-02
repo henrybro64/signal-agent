@@ -60,11 +60,12 @@ tasks:
 
 # Explicit Markdown/text documents for namespaced agent memory (#65).
 # Paths are ingested at job_research start; never put .env/secrets here.
+# Leave empty in deployment-safe defaults; local runs can point at
+# app/evaluation/fixtures/company-notes.md when experimenting with RAG.
 memory:
   namespaces:
     job_research:
-      documents:
-        - evals/fixtures/company-notes.md
+      documents: []
 
 investment:
   watchlist:

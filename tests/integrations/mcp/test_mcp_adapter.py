@@ -31,6 +31,13 @@ def test_mcp_config_rejects_public_host_and_telegram() -> None:
         McpServerConfig(allowlist=("send_telegram_message",))
 
 
+def test_mcp_config_preserves_explicit_empty_allowlist() -> None:
+    config = McpServerConfig(allowlist=())
+    assert config.allowlist == ()
+    defaulted = McpServerConfig()
+    assert defaulted.allowlist == DEFAULT_MCP_ALLOWLIST
+
+
 def test_list_and_invoke_tools_offline() -> None:
     context = ToolContext(
         fetch_jobs=lambda **_: [
@@ -137,7 +144,16 @@ def test_require_mcp_message_when_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
 @pytest.mark.skipif(not mcp_available(), reason="mcp optional extra not installed")
 def test_build_mcp_server_when_installed() -> None:
+    import asyncio
+
     from app.integrations.mcp import build_mcp_server
 
     server = build_mcp_server(config=McpServerConfig(transport="stdio"))
     assert server is not None
+    tools = asyncio.run(server.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+    assert "query_recent_runs" in by_name
+    schema = by_name["query_recent_runs"].inputSchema
+    assert "properties" in schema
+    assert "limit" in schema["properties"]
+    assert "run_kind" in schema["properties"]

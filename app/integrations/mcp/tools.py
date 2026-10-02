@@ -22,7 +22,7 @@ def list_mcp_tool_descriptors(
 ) -> list[dict[str, Any]]:
     """Return MCP-oriented descriptors for allowlisted registry tools."""
 
-    names = allowlist or DEFAULT_MCP_ALLOWLIST
+    names = DEFAULT_MCP_ALLOWLIST if allowlist is None else allowlist
     tool_registry = registry or build_tool_registry(allowlist=names)
     descriptors: list[dict[str, Any]] = []
     for item in tool_registry.list_tools():

@@ -174,6 +174,42 @@ def test_ingest_paths_skips_errors(tmp_path: Path) -> None:
     assert "error" in statuses
 
 
+def test_ingest_rejects_secret_content_and_read_errors(tmp_path: Path) -> None:
+    store = SqliteMemoryStore(tmp_path / "db.sqlite3")
+    secret_doc = tmp_path / "notes.md"
+    secret_doc.write_text("api_key: sk-abcdefghijklmnop\n", encoding="utf-8")
+    with pytest.raises(MemoryIngestError, match="secret-bearing"):
+        ingest_document(store, namespace="job_research", path=secret_doc)
+
+    results = ingest_paths(
+        store,
+        namespace="job_research",
+        paths=[secret_doc],
+    )
+    assert results[0].status == "error"
+
+    unreadable = tmp_path / "broken.md"
+    unreadable.write_bytes(b"\xff\xfe not utf-8")
+    bad = ingest_paths(store, namespace="job_research", paths=[unreadable])
+    assert bad[0].status == "error"
+
+
+def test_cjk_keyword_retrieval_and_first_chunk_budget(tmp_path: Path) -> None:
+    store = SqliteMemoryStore(tmp_path / "db.sqlite3")
+    doc = tmp_path / "tw-jobs.md"
+    doc.write_text("雲端測試工程師，熟悉自動化與Kubernetes。", encoding="utf-8")
+    ingest_document(store, namespace="job_research", path=doc)
+    hits = KeywordRetriever(store).retrieve(
+        namespace="job_research",
+        query="雲端測試工程師",
+        limit=1,
+        max_chars=40,
+    )
+    assert hits
+    assert "雲端" in hits[0].content or "測試" in hits[0].content
+    assert len(hits[0].content) <= 41
+
+
 def test_chunk_text_splits_paragraphs() -> None:
     chunks = chunk_text("one\n\ntwo\n\nthree", chunk_chars=8)
     assert len(chunks) >= 2

@@ -9,17 +9,35 @@ from pathlib import Path
 
 from .sqlite_store import SqliteMemoryStore
 
-_FORBIDDEN_NAME_PARTS = (
+_FORBIDDEN_EXACT_PARTS = frozenset(
+    {
+        ".env",
+        "env",
+        "credentials",
+        "secret",
+        "secrets",
+        "passwd",
+        "password",
+        "id_rsa",
+        "id_ed25519",
+    }
+)
+_FORBIDDEN_PART_MARKERS = (
     ".env",
-    "credentials",
-    "secret",
-    "passwd",
-    "password",
     ".pem",
     "id_rsa",
+    "password",
+    "passwd",
+    "credential",
 )
 _DEFAULT_CHUNK_CHARS = 800
 _TOKEN_DIVISOR = 4
+_SECRET_CONTENT_PATTERNS = (
+    re.compile(r"(?i)\b(api[_-]?key|secret|password|passwd|token)\s*[:=]\s*\S+"),
+    re.compile(r"\bsk-[A-Za-z0-9]{8,}\b"),
+    re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----"),
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*\b"),
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -36,13 +54,36 @@ class MemoryIngestError(ValueError):
 
 
 def is_forbidden_path(path: Path) -> bool:
-    """Return True for secrets-like paths that must never be ingested."""
+    """Return True for secrets-like paths that must never be ingested.
 
-    lowered = str(path).lower()
-    name = path.name.lower()
-    if name.startswith(".env") or name == "env":
-        return True
-    return any(part in lowered for part in _FORBIDDEN_NAME_PARTS)
+    Checks individual path components (not the joined string) so temporary
+    directories whose names merely contain the word "secret" are not blocked.
+    """
+
+    for part in path.parts:
+        lowered = part.lower()
+        if lowered in _FORBIDDEN_EXACT_PARTS or lowered.startswith(".env"):
+            return True
+        if any(marker in lowered for marker in _FORBIDDEN_PART_MARKERS):
+            return True
+    return False
+
+
+def content_contains_secrets(
+    content: str,
+    *,
+    secrets_to_redact: tuple[str, ...] = (),
+) -> str | None:
+    """Return a short reason when content looks secret-bearing."""
+
+    for pattern in _SECRET_CONTENT_PATTERNS:
+        if pattern.search(content):
+            return f"matched credential pattern {pattern.pattern!r}"
+    for secret in secrets_to_redact:
+        value = (secret or "").strip()
+        if len(value) >= 8 and value in content:
+            return "matched configured secret value"
+    return None
 
 
 def chunk_text(text: str, *, chunk_chars: int = _DEFAULT_CHUNK_CHARS) -> list[str]:
@@ -89,6 +130,7 @@ def ingest_document(
     path: str | Path,
     title: str | None = None,
     chunk_chars: int = _DEFAULT_CHUNK_CHARS,
+    secrets_to_redact: tuple[str, ...] = (),
 ) -> IngestResult:
     """Ingest one explicitly configured document path."""
 
@@ -102,7 +144,22 @@ def ingest_document(
             f"Unsupported memory document type: {source.suffix or '(none)'}"
         )
 
-    content = source.read_text(encoding="utf-8")
+    try:
+        content = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise MemoryIngestError(
+            f"Unable to read memory document {source}: {exc}"
+        ) from exc
+
+    secret_reason = content_contains_secrets(
+        content,
+        secrets_to_redact=secrets_to_redact,
+    )
+    if secret_reason:
+        raise MemoryIngestError(
+            f"Refusing to ingest secret-bearing content in {source}: {secret_reason}"
+        )
+
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
     existing = store.get_document_hash(
         namespace=namespace,
@@ -142,6 +199,7 @@ def ingest_paths(
     *,
     namespace: str,
     paths: list[str | Path],
+    secrets_to_redact: tuple[str, ...] = (),
 ) -> list[IngestResult]:
     """Ingest many explicit paths; skip/forbid individually without aborting."""
 
@@ -149,9 +207,14 @@ def ingest_paths(
     for path in paths:
         try:
             results.append(
-                ingest_document(store, namespace=namespace, path=path)
+                ingest_document(
+                    store,
+                    namespace=namespace,
+                    path=path,
+                    secrets_to_redact=secrets_to_redact,
+                )
             )
-        except MemoryIngestError as exc:
+        except (MemoryIngestError, OSError, UnicodeDecodeError) as exc:
             results.append(
                 IngestResult(
                     source_path=str(path),

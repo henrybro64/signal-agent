@@ -82,3 +82,52 @@ def test_happy_path_records_real_tools_used() -> None:
     )
     assert happy.passed
     assert "search_jobs" in (happy.summary.get("tools_used") or [])
+
+
+def test_empty_suite_and_unknown_kind_fail(tmp_path: Path) -> None:
+    import pytest
+    import yaml
+
+    from app.evaluation.runner import load_eval_cases, run_suite
+
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    with pytest.raises(ValueError, match="No eval cases"):
+        run_suite("core", cases_dir=empty_dir)
+
+    with pytest.raises(ValueError, match="No eval cases"):
+        run_suite("does-not-exist")
+
+    bad = tmp_path / "cases"
+    bad.mkdir()
+    (bad / "bad.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "bad-kind",
+                "suite": "core",
+                "kind": "not_a_real_kind",
+                "inputs": {},
+                "expectations": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Unknown eval case kind"):
+        load_eval_cases(cases_dir=bad)
+
+
+def test_require_citations_ignores_hash_in_digest() -> None:
+    from app.evaluation.models import EvalExpectation
+    from app.evaluation.runner import _score_expectations
+
+    checks = _score_expectations(
+        EvalExpectation(require_citations=True),
+        digest="Looking for a C# Developer role",
+        status="completed",
+        tool_calls=0,
+        llm_calls=0,
+        used_tools=[],
+        evidence=[],
+    )
+    citation = next(check for check in checks if check.name == "require_citations")
+    assert not citation.passed

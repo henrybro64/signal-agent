@@ -10,11 +10,24 @@ from .embeddings import EmbeddingProvider, FakeEmbeddingProvider
 from .models import MemoryChunk, RetrievedEvidence
 from .sqlite_store import SqliteMemoryStore
 
-_TOKEN_RE = re.compile(r"[a-z0-9_]+", re.IGNORECASE)
+_LATIN_TOKEN_RE = re.compile(r"[a-z0-9_]+", re.IGNORECASE)
+_CJK_RUN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
 
 
 def _tokenize(text: str) -> list[str]:
-    return [token.lower() for token in _TOKEN_RE.findall(text) if len(token) > 1]
+    """Tokenize Latin words and CJK character runs (bigrams + short phrases)."""
+
+    tokens: list[str] = [
+        token.lower() for token in _LATIN_TOKEN_RE.findall(text) if len(token) > 1
+    ]
+    for run in _CJK_RUN_RE.findall(text):
+        if len(run) == 1:
+            tokens.append(run)
+            continue
+        tokens.extend(run[index : index + 2] for index in range(len(run) - 1))
+        if len(run) <= 4:
+            tokens.append(run)
+    return tokens
 
 
 class KeywordRetriever:
@@ -59,10 +72,13 @@ class KeywordRetriever:
         for score, chunk in scored:
             if len(evidence) >= limit:
                 break
+            remaining = max_chars - used_chars
+            if remaining <= 0:
+                break
             content = chunk.content
-            if used_chars + len(content) > max_chars and evidence:
-                remaining = max_chars - used_chars
-                if remaining < 80:
+            if len(content) > remaining:
+                # Honor the budget for the first chunk as well as later ones.
+                if remaining < 80 and evidence:
                     break
                 content = content[:remaining] + "…"
             evidence.append(

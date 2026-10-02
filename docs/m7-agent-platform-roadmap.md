@@ -108,7 +108,7 @@ creates them; rename only with an explicit follow-up that updates this map):
 | #63 | optional `.[langchain]` extra; `app/integrations/langchain/`; no LangChain imports in domain packages |
 | #64 | `app/workflows/` + additive `app/tasks/job_research_agent.py`; keep `job_search` unchanged |
 | #65 | `app/memory/`; SQLite migrations for memory metadata; keyword retrieval before optional vectors |
-| #66 | `app/evaluation/` + `evals/`; offline CI subset; redacted traces |
+| #66 | `app/evaluation/` (+ packaged cases/fixtures); offline CI subset; redacted traces |
 | #67 | optional `.[mcp]` extra; `app/integrations/mcp/`; localhost + allowlisted read tools by default |
 
 ## Implementation principles
