@@ -23,46 +23,73 @@ def validate_tool_arguments(
     property constraints (minimum/maximum/minItems/maxItems/enum).
     """
 
+    _assert_object_schema(schema, tool_name=tool_name)
+    _assert_object_arguments(arguments, tool_name=tool_name)
+    properties = _schema_properties(schema)
+    _reject_unknown_arguments(arguments, properties, schema, tool_name=tool_name)
+    _require_arguments(arguments, schema, tool_name=tool_name)
+    for key, value in arguments.items():
+        prop_schema = properties.get(key)
+        if not isinstance(prop_schema, dict):
+            continue
+        _validate_typed_value(value, prop_schema, path=f"{tool_name}.{key}")
+
+
+def _assert_object_schema(schema: dict[str, Any], *, tool_name: str) -> None:
     if schema.get("type", "object") != "object":
         raise ToolError(
             f"Tool {tool_name!r} schema must describe an object",
             code="invalid_schema",
         )
+
+
+def _assert_object_arguments(arguments: Any, *, tool_name: str) -> None:
     if not isinstance(arguments, dict):
         raise ToolError(
             f"Tool {tool_name!r} arguments must be an object",
             code="invalid_argument",
         )
 
+
+def _schema_properties(schema: dict[str, Any]) -> dict[str, Any]:
     properties = schema.get("properties") or {}
-    if not isinstance(properties, dict):
-        properties = {}
+    return properties if isinstance(properties, dict) else {}
 
-    additional = schema.get("additionalProperties", True)
-    if additional is False:
-        unknown = sorted(set(arguments) - set(properties))
-        if unknown:
-            raise ToolError(
-                f"Tool {tool_name!r} rejected unknown arguments: "
-                + ", ".join(unknown),
-                code="invalid_argument",
-            )
 
+def _reject_unknown_arguments(
+    arguments: dict[str, Any],
+    properties: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    tool_name: str,
+) -> None:
+    if schema.get("additionalProperties", True) is not False:
+        return
+    unknown = sorted(set(arguments) - set(properties))
+    if unknown:
+        raise ToolError(
+            f"Tool {tool_name!r} rejected unknown arguments: "
+            + ", ".join(unknown),
+            code="invalid_argument",
+        )
+
+
+def _require_arguments(
+    arguments: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    tool_name: str,
+) -> None:
     required = schema.get("required") or []
-    if isinstance(required, list):
-        missing = [key for key in required if key not in arguments]
-        if missing:
-            raise ToolError(
-                f"Tool {tool_name!r} missing required arguments: "
-                + ", ".join(str(key) for key in missing),
-                code="invalid_argument",
-            )
-
-    for key, value in arguments.items():
-        prop_schema = properties.get(key)
-        if not isinstance(prop_schema, dict):
-            continue
-        _validate_typed_value(value, prop_schema, path=f"{tool_name}.{key}")
+    if not isinstance(required, list):
+        return
+    missing = [key for key in required if key not in arguments]
+    if missing:
+        raise ToolError(
+            f"Tool {tool_name!r} missing required arguments: "
+            + ", ".join(str(key) for key in missing),
+            code="invalid_argument",
+        )
 
 
 def _validate_typed_value(value: Any, schema: dict[str, Any], *, path: str) -> None:

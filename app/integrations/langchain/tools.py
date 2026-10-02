@@ -59,18 +59,7 @@ def _json_schema_to_args_model(tool_name: str, schema: dict[str, Any]) -> Any:
     for key, prop in properties.items():
         if not isinstance(prop, dict):
             continue
-        py_type: Any = Any
-        prop_type = prop.get("type")
-        if prop_type == "string":
-            py_type = str
-        elif prop_type == "integer":
-            py_type = int
-        elif prop_type == "number":
-            py_type = float
-        elif prop_type == "boolean":
-            py_type = bool
-        elif prop_type == "array":
-            py_type = list
+        py_type = _json_type_to_python(prop.get("type"))
         description = prop.get("description") or ""
         if key in required:
             fields[key] = (py_type, Field(description=description))
@@ -81,3 +70,14 @@ def _json_schema_to_args_model(tool_name: str, schema: dict[str, Any]) -> Any:
     if not fields:
         return create_model(model_name)
     return create_model(model_name, **fields)
+
+
+def _json_type_to_python(prop_type: Any) -> Any:
+    mapping = {
+        "string": str,
+        "integer": int,
+        "number": float,
+        "boolean": bool,
+        "array": list,
+    }
+    return mapping.get(prop_type, Any)

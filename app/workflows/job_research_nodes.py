@@ -55,16 +55,7 @@ def fetch_candidates_node(
         state.errors.append("search_jobs_bad_payload")
         return state
     state.candidates = [item for item in items if isinstance(item, dict)]
-    failed = result.metadata.get("failed_sources") or []
-    source_count = int(result.metadata.get("source_count") or 0)
-    if failed and source_count > 0 and not state.candidates:
-        # Total outage: every configured source failed and nothing was returned.
-        state.errors.append(
-            "all_job_sources_failed:" + ",".join(map(str, failed))
-        )
-        state.warnings.append(f"all_source_failure:{','.join(map(str, failed))}")
-    elif failed:
-        state.warnings.append(f"partial_source_failure:{','.join(map(str, failed))}")
+    _record_source_failures(state, result.metadata)
     log_event(
         _LOGGER,
         event="job_research_node",
@@ -74,6 +65,19 @@ def fetch_candidates_node(
         candidate_count=len(state.candidates),
     )
     return state
+
+
+def _record_source_failures(state: JobResearchState, metadata: dict[str, Any]) -> None:
+    failed = metadata.get("failed_sources") or []
+    source_count = int(metadata.get("source_count") or 0)
+    if not failed:
+        return
+    joined = ",".join(map(str, failed))
+    if source_count > 0 and not state.candidates:
+        state.errors.append(f"all_job_sources_failed:{joined}")
+        state.warnings.append(f"all_source_failure:{joined}")
+        return
+    state.warnings.append(f"partial_source_failure:{joined}")
 
 
 def rule_score_node(state: JobResearchState) -> JobResearchState:
@@ -169,32 +173,8 @@ def prepare_digest_node(state: JobResearchState) -> JobResearchState:
         f"Candidates fetched: {len(state.candidates)}",
         f"Filtered matches: {len(state.filtered)}",
     ]
-    if not state.candidates:
-        lines.append("No candidates fetched from job sources.")
-    elif not state.filtered:
-        lines.append("No plausible matches after rule scoring.")
-    else:
-        lines.append("Top matches:")
-        for item in state.filtered[:10]:
-            title = item.get("title") or "Untitled"
-            score = item.get("rule_score")
-            company = ""
-            metadata = item.get("metadata")
-            if isinstance(metadata, dict):
-                company = str(metadata.get("company") or "")
-            suffix = f" ({company})" if company else ""
-            score_bit = f" [rule={score}]" if score is not None else ""
-            lines.append(f"- {title}{suffix}{score_bit}")
-
-    llm_notes = [
-        str(row["llm_note"])
-        for row in state.scoring_summaries
-        if isinstance(row, dict) and row.get("llm_note")
-    ]
-    if llm_notes:
-        lines.append("LLM notes:")
-        lines.extend(f"- {note}" for note in llm_notes)
-
+    lines.extend(_digest_match_lines(state))
+    lines.extend(_digest_llm_lines(state))
     if state.warnings:
         lines.append("Warnings: " + "; ".join(state.warnings))
     if state.fallback_used:
@@ -203,6 +183,40 @@ def prepare_digest_node(state: JobResearchState) -> JobResearchState:
     state.digest_text = "\n".join(lines)
     state.status = "digest_ready"
     return state
+
+
+def _digest_match_lines(state: JobResearchState) -> list[str]:
+    if not state.candidates:
+        return ["No candidates fetched from job sources."]
+    if not state.filtered:
+        return ["No plausible matches after rule scoring."]
+    lines = ["Top matches:"]
+    for item in state.filtered[:10]:
+        lines.append(_format_match_line(item))
+    return lines
+
+
+def _format_match_line(item: dict[str, Any]) -> str:
+    title = item.get("title") or "Untitled"
+    score = item.get("rule_score")
+    company = ""
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict):
+        company = str(metadata.get("company") or "")
+    suffix = f" ({company})" if company else ""
+    score_bit = f" [rule={score}]" if score is not None else ""
+    return f"- {title}{suffix}{score_bit}"
+
+
+def _digest_llm_lines(state: JobResearchState) -> list[str]:
+    llm_notes = [
+        str(row["llm_note"])
+        for row in state.scoring_summaries
+        if isinstance(row, dict) and row.get("llm_note")
+    ]
+    if not llm_notes:
+        return []
+    return ["LLM notes:", *[f"- {note}" for note in llm_notes]]
 
 
 def persist_results_node(
@@ -370,36 +384,36 @@ def finalize_node(state: JobResearchState) -> JobResearchState:
 
 
 def _dict_to_signal_item(raw: dict[str, Any]):
-    from datetime import UTC, datetime
-
     from app.core.models import SignalItem
-
-    observed = raw.get("observed_at")
-    if isinstance(observed, str):
-        try:
-            observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00"))
-        except ValueError:
-            observed_at = datetime.now(UTC)
-    elif isinstance(observed, datetime):
-        observed_at = observed
-    else:
-        observed_at = datetime.now(UTC)
 
     metadata = raw.get("metadata")
     return SignalItem(
         source=str(raw.get("source") or "tool"),
         item_type=str(raw.get("item_type") or "job"),
         title=str(raw.get("title") or "Untitled"),
-        observed_at=observed_at,
-        url=raw.get("url") if isinstance(raw.get("url"), str) else None,
-        external_id=(
-            raw.get("external_id")
-            if isinstance(raw.get("external_id"), str)
-            else None
-        ),
-        content=raw.get("content") if isinstance(raw.get("content"), str) else None,
+        observed_at=_coerce_observed_at(raw.get("observed_at")),
+        url=_optional_str(raw.get("url")),
+        external_id=_optional_str(raw.get("external_id")),
+        content=_optional_str(raw.get("content")),
         metadata=dict(metadata) if isinstance(metadata, dict) else {},
     )
+
+
+def _optional_str(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _coerce_observed_at(observed: Any):
+    from datetime import UTC, datetime
+
+    if isinstance(observed, str):
+        try:
+            return datetime.fromisoformat(observed.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.now(UTC)
+    if isinstance(observed, datetime):
+        return observed
+    return datetime.now(UTC)
 
 
 def _scorer_profile_for_item(raw: dict[str, Any]) -> str | None:

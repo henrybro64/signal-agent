@@ -4,9 +4,8 @@ version = 1
 name = "python"
 
   [analyzers.meta]
-  # Flag only very-high/critical complexity; high (16-25) is reviewed in PR
-  # discussion rather than treated as a merge blocker for thin wrappers.
-  cyclomatic_complexity_threshold = "high"
+  # Only raise complexity issues for very-high/critical functions.
+  cyclomatic_complexity_threshold = "very-high"
 
 [[analyzers]]
 name = "docker"

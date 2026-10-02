@@ -266,36 +266,43 @@ def _dict_to_state(
     template: JobResearchState | None = None,
 ) -> JobResearchState:
     base = template or JobResearchState()
+    persist_error = data.get("persist_error")
     return JobResearchState(
-        profile_name=str(data.get("profile_name") or base.profile_name),
+        profile_name=_str_or(data, "profile_name", base.profile_name),
         task_run_id=data.get("task_run_id", base.task_run_id),
-        config_path=str(data.get("config_path") or base.config_path),
-        candidates=list(data.get("candidates") or []),
-        filtered=list(data.get("filtered") or []),
-        scoring_summaries=list(data.get("scoring_summaries") or []),
-        tool_calls=int(data.get("tool_calls") or 0),
-        llm_calls=int(data.get("llm_calls") or 0),
-        step_count=int(data.get("step_count") or 0),
-        warnings=list(data.get("warnings") or []),
-        errors=list(data.get("errors") or []),
-        digest_text=str(data.get("digest_text") or ""),
-        notification_status=str(
-            data.get("notification_status") or base.notification_status
+        config_path=_str_or(data, "config_path", base.config_path),
+        candidates=_list_or(data, "candidates"),
+        filtered=_list_or(data, "filtered"),
+        scoring_summaries=_list_or(data, "scoring_summaries"),
+        tool_calls=_int_or(data, "tool_calls"),
+        llm_calls=_int_or(data, "llm_calls"),
+        step_count=_int_or(data, "step_count"),
+        warnings=_list_or(data, "warnings"),
+        errors=_list_or(data, "errors"),
+        digest_text=_str_or(data, "digest_text", ""),
+        notification_status=_str_or(
+            data, "notification_status", base.notification_status
         ),
         fallback_used=bool(data.get("fallback_used", False)),
-        status=str(data.get("status") or base.status),
-        max_steps=int(data.get("max_steps") or base.max_steps),
-        max_tool_calls=int(data.get("max_tool_calls") or base.max_tool_calls),
-        max_llm_calls=int(data.get("max_llm_calls") or base.max_llm_calls),
-        telegram_enabled=bool(
-            data.get("telegram_enabled", base.telegram_enabled)
-        ),
-        persisted_count=int(data.get("persisted_count") or 0),
-        persist_error=(
-            None
-            if data.get("persist_error") in (None, "")
-            else str(data.get("persist_error"))
-        ),
-        new_candidate_count=int(data.get("new_candidate_count") or 0),
-        new_filtered=list(data.get("new_filtered") or []),
+        status=_str_or(data, "status", base.status),
+        max_steps=_int_or(data, "max_steps", base.max_steps),
+        max_tool_calls=_int_or(data, "max_tool_calls", base.max_tool_calls),
+        max_llm_calls=_int_or(data, "max_llm_calls", base.max_llm_calls),
+        telegram_enabled=bool(data.get("telegram_enabled", base.telegram_enabled)),
+        persisted_count=_int_or(data, "persisted_count"),
+        persist_error=None if persist_error in (None, "") else str(persist_error),
+        new_candidate_count=_int_or(data, "new_candidate_count"),
+        new_filtered=_list_or(data, "new_filtered"),
     )
+
+
+def _str_or(data: dict[str, Any], key: str, default: str) -> str:
+    return str(data.get(key) or default)
+
+
+def _int_or(data: dict[str, Any], key: str, default: int = 0) -> int:
+    return int(data.get(key) or default)
+
+
+def _list_or(data: dict[str, Any], key: str) -> list[Any]:
+    return list(data.get(key) or [])
