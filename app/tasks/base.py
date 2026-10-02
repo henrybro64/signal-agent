@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, ClassVar
 
-from app.core.db import finish_task_run, init_db, start_task_run
+from app.core.db import TaskRunStatus, finish_task_run, init_db, start_task_run
 from app.core.logging import configure_logging, get_logger, log_event
 
 
@@ -62,7 +62,7 @@ class BaseTask(ABC):
         self,
         *,
         db_path: Path,
-        status: str,
+        status: TaskRunStatus,
         fetched_count: int = 0,
         new_count: int = 0,
         skipped_count: int = 0,

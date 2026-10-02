@@ -55,12 +55,14 @@ def _gateway_chat_model_class() -> type[Any]:
         SystemMessage,
     )
     from langchain_core.outputs import ChatGeneration, ChatResult
+    from pydantic import PrivateAttr
 
     class GatewayChatModel(BaseChatModel):
         """LangChain chat model wrapping the project-owned ``LLMProvider``."""
 
         model_name: str = "gpt-4o-mini"
         temperature: float = 0.2
+        _provider: Any = PrivateAttr()
 
         def __init__(
             self,
@@ -70,12 +72,12 @@ def _gateway_chat_model_class() -> type[Any]:
             temperature: float = 0.2,
             **kwargs: Any,
         ) -> None:
-            super().__init__(
+            super().__init__(  # type: ignore[call-arg]
                 model_name=model_name,
                 temperature=temperature,
                 **kwargs,
             )
-            object.__setattr__(self, "_provider", provider)
+            self._provider = provider
 
         @property
         def _llm_type(self) -> str:

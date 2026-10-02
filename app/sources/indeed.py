@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import unescape
@@ -98,10 +98,12 @@ class IndeedSource(BaseSource):
             return []
 
         session = self.session
-        owns_session = session is None
-        if owns_session:
+        if session is None:
             session = requests.Session()
             session.headers.update(_DEFAULT_HEADERS)
+            owns_session = True
+        else:
+            owns_session = False
 
         items: list[SignalItem] = []
         is_first_request = True
@@ -123,7 +125,7 @@ class IndeedSource(BaseSource):
                         break
                     items.extend(self._normalize_jobs(jobs, search_spec))
         finally:
-            if owns_session and hasattr(session, "close"):
+            if owns_session:
                 session.close()
 
         return items
@@ -380,7 +382,7 @@ def _compact_metadata(metadata: dict[str, str | None]) -> dict[str, str]:
 
 def _describe_text_response(
     text: str,
-    headers: dict[str, str] | None,
+    headers: Mapping[str, str] | None,
 ) -> str:
     content_type = ""
     if headers is not None:

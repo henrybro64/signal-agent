@@ -172,7 +172,7 @@ def upsert_signal(
                     None,
                 ),
             )
-            return UpsertResult(signal_id=int(cursor.lastrowid), action="inserted")
+            return UpsertResult(signal_id=int(cursor.lastrowid or 0), action="inserted")
 
         first_seen_at = min(
             _parse_timestamp(existing_row["first_seen_at"]),
@@ -482,7 +482,7 @@ def start_signal_run(
             """,
             (source, started_at_text, "running"),
         )
-        return int(cursor.lastrowid)
+        return int(cursor.lastrowid or 0)
 
 
 def finish_signal_run(
@@ -554,7 +554,7 @@ def start_task_run(
             """,
             (task_name, started_at_text, "running"),
         )
-        return int(cursor.lastrowid)
+        return int(cursor.lastrowid or 0)
 
 
 def finish_task_run(

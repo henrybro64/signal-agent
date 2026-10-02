@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Final
+from typing import Any, Final
 
 import requests
 
@@ -60,7 +60,7 @@ class OpenAIProvider:
             else request.timeout_seconds
         )
         instructions, user_input = _resolve_prompt_parts(request)
-        payload: dict[str, object] = {
+        payload: dict[str, Any] = {
             "model": model,
             "instructions": instructions,
             "input": user_input,

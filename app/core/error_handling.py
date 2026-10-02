@@ -292,7 +292,7 @@ def _format_failure_time(
         zone = ZoneInfo(timezone_name)
         label = timezone_name
     except ZoneInfoNotFoundError:
-        zone = UTC
+        zone = ZoneInfo("UTC")
         label = "UTC"
 
     localized = timestamp.astimezone(zone)
