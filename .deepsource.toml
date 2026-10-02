@@ -1,10 +1,16 @@
 version = 1
 
+# Keep DeepSource focused on product code for this repo's quality gate.
+exclude_patterns = [
+  "tests/**",
+  "docs/**",
+  ".venv/**",
+]
+
 [[analyzers]]
 name = "python"
 
   [analyzers.meta]
-  # Only raise complexity issues for very-high/critical functions.
   cyclomatic_complexity_threshold = "very-high"
 
 [[analyzers]]
