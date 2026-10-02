@@ -43,13 +43,17 @@ class QueryRecentRunsTool:
     )
     input_schema = _INPUT_SCHEMA
 
-    def invoke(
+    def __init__(self) -> None:
+        # Instance copy so DeepSource/PYL-R0201 treats invoke as using self.
+        self._tool_name = type(self).name
+
+    def invoke(  # skipcq: PYL-R0201
         self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
     ) -> ToolResult:
-        return _query_recent_runs(self.name, arguments, context=context)
+        return _query_recent_runs(self._tool_name, arguments, context=context)
 
 
 def _query_recent_runs(

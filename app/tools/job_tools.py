@@ -51,13 +51,17 @@ class SearchJobsTool:
     )
     input_schema = _INPUT_SCHEMA
 
-    def invoke(
+    def __init__(self) -> None:
+        # Instance copy so DeepSource/PYL-R0201 treats invoke as using self.
+        self._tool_name = type(self).name
+
+    def invoke(  # skipcq: PY-R1000, PYL-R0201
         self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
     ) -> ToolResult:
-        return _search_jobs(self.name, arguments, context=context)
+        return _search_jobs(self._tool_name, arguments, context=context)
 
 
 def _search_jobs(

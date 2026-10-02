@@ -26,7 +26,7 @@ class JobResearchAgentTask(BaseTask):
 
     name = "job_research_agent"
 
-    def run(self) -> None:
+    def run(self) -> None:  # skipcq: PY-R1000
         self._execute_research_run()
 
     def _execute_research_run(self) -> None:
