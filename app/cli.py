@@ -284,7 +284,7 @@ def run_mcp_serve_command(
             secrets_to_redact=secrets,
         )
         mcp_config = McpServerConfig(host=host, port=port, transport=transport)
-        registry = build_tool_registry(allowlist=list(mcp_config.allowlist or ()))
+        registry = build_tool_registry(allowlist=list(mcp_config.allowlist))
         print(
             f"Starting MCP server transport={transport} host={host} port={port}",
             file=sys.stderr,
@@ -293,7 +293,7 @@ def run_mcp_serve_command(
     except ImportError as exc:
         print(exc, file=sys.stderr)
         return 1
-    except (ValueError, ConfigError, SecretError) as exc:
+    except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0

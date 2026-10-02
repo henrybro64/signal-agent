@@ -12,13 +12,9 @@ _LOCALHOST_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _SUPPORTED_TRANSPORTS = frozenset({"stdio", "sse"})
 
 
-def _normalize_allowlist(
-    allowlist: tuple[str, ...] | None,
-) -> tuple[str, ...]:
-    """Return a cleaned allowlist; ``None`` means the read-only default."""
+def _normalize_allowlist(allowlist: tuple[str, ...]) -> tuple[str, ...]:
+    """Return a cleaned allowlist; an explicit empty tuple stays empty."""
 
-    if allowlist is None:
-        return DEFAULT_MCP_ALLOWLIST
     cleaned = tuple(name.strip() for name in allowlist if str(name).strip())
     forbidden = [name for name in cleaned if name == "send_telegram_message"]
     if forbidden:
@@ -31,7 +27,6 @@ def _normalize_allowlist(
             "MCP allowlist may only include read-oriented tools: "
             + ", ".join(sorted(unknown))
         )
-    # Explicit empty tuple stays empty (do not broaden to the default).
     return cleaned
 
 
@@ -61,8 +56,8 @@ class McpServerConfig:
     host: str = "127.0.0.1"
     port: int = 8765
     transport: str = "stdio"  # stdio | sse
-    # None → default read-only allowlist; () → expose nothing.
-    allowlist: tuple[str, ...] | None = field(default=None)
+    # Default is the read-only set; pass allowlist=() to expose nothing.
+    allowlist: tuple[str, ...] = field(default_factory=lambda: DEFAULT_MCP_ALLOWLIST)
     max_requests: int = 100
     request_timeout_seconds: float = 30.0
     include_telegram: bool = False

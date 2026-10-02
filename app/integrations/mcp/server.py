@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from app.tools import ToolContext, ToolRegistry
 
@@ -57,10 +57,32 @@ def _register_tool(
     schema = dict(descriptor.get("inputSchema") or {"type": "object", "properties": {}})
     handler = _handler_from_schema(tool_name, description, schema, gateway)
     server.add_tool(handler, name=tool_name, description=description)
-    # Preserve project-owned schema (descriptions, enums, bounds) for discovery.
-    registered = server._tool_manager._tools.get(tool_name)
-    if registered is not None:
-        registered.parameters = schema
+
+
+def _python_type_for_property(prop: dict[str, Any]) -> Any:
+    enum_values = prop.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        # Build Literal[…] dynamically so FastMCP exposes the enum in discovery.
+        return Literal.__getitem__(tuple(enum_values))
+
+    json_type = str(prop.get("type") or "string")
+    return _JSON_TYPE_MAP.get(json_type, Any)
+
+
+def _annotation_for_property(prop: dict[str, Any]) -> Any:
+    """Build a typing annotation that preserves schema constraints for FastMCP."""
+
+    from pydantic import Field
+
+    py_type = _python_type_for_property(prop)
+    field_kwargs: dict[str, Any] = {}
+    if prop.get("description"):
+        field_kwargs["description"] = str(prop["description"])
+    if "minimum" in prop:
+        field_kwargs["ge"] = prop["minimum"]
+    if "maximum" in prop:
+        field_kwargs["le"] = prop["maximum"]
+    return Annotated[py_type | None, Field(default=None, **field_kwargs)]
 
 
 def _handler_from_schema(
@@ -72,33 +94,21 @@ def _handler_from_schema(
     """Build a FastMCP-callable whose signature mirrors ``inputSchema``."""
 
     properties = dict(schema.get("properties") or {})
-    required = set(schema.get("required") or [])
     parameters: list[inspect.Parameter] = []
     annotations: dict[str, Any] = {}
 
     for name, prop in properties.items():
-        json_type = str(prop.get("type") or "string")
-        py_type: Any = _JSON_TYPE_MAP.get(json_type, Any)
-        if name in required:
-            parameters.append(
-                inspect.Parameter(
-                    name,
-                    inspect.Parameter.KEYWORD_ONLY,
-                    annotation=py_type,
-                )
+        prop_dict = prop if isinstance(prop, dict) else {}
+        annotation = _annotation_for_property(prop_dict)
+        annotations[name] = annotation
+        parameters.append(
+            inspect.Parameter(
+                name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=annotation,
             )
-            annotations[name] = py_type
-        else:
-            optional = py_type | None
-            parameters.append(
-                inspect.Parameter(
-                    name,
-                    inspect.Parameter.KEYWORD_ONLY,
-                    default=None,
-                    annotation=optional,
-                )
-            )
-            annotations[name] = optional
+        )
 
     signature = inspect.Signature(parameters)
 
