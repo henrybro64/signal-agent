@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from .models import ToolError
+
+_Validator = Callable[..., None]
 
 
 def validate_tool_arguments(
@@ -64,14 +67,9 @@ def validate_tool_arguments(
 
 def _validate_value(value: Any, schema: dict[str, Any], *, path: str) -> None:
     expected = schema.get("type")
-    if expected == "integer":
-        _validate_integer(value, schema, path=path)
-    elif expected == "string":
-        _validate_string(value, schema, path=path)
-    elif expected == "boolean":
-        _validate_boolean(value, path=path)
-    elif expected == "array":
-        _validate_array(value, schema, path=path)
+    validator = _TYPE_VALIDATORS.get(expected) if isinstance(expected, str) else None
+    if validator is not None:
+        validator(value, schema, path=path)
 
 
 def _validate_integer(value: Any, schema: dict[str, Any], *, path: str) -> None:
@@ -120,7 +118,8 @@ def _validate_string(value: Any, schema: dict[str, Any], *, path: str) -> None:
         )
 
 
-def _validate_boolean(value: Any, *, path: str) -> None:
+def _validate_boolean(value: Any, schema: dict[str, Any], *, path: str) -> None:
+    _ = schema
     if not isinstance(value, bool):
         raise ToolError(
             f"'{path}' must be a boolean",
@@ -150,3 +149,11 @@ def _validate_array(value: Any, schema: dict[str, Any], *, path: str) -> None:
     if isinstance(item_schema, dict):
         for index, item in enumerate(value):
             _validate_value(item, item_schema, path=f"{path}[{index}]")
+
+
+_TYPE_VALIDATORS: dict[str, _Validator] = {
+    "integer": _validate_integer,
+    "string": _validate_string,
+    "boolean": _validate_boolean,
+    "array": _validate_array,
+}

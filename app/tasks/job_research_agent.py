@@ -6,6 +6,7 @@ Does not replace the deterministic ``job_search`` task.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from app.core import load_config, load_env_settings
 from app.core.db import TaskRunStatus, finish_task_run, init_db, start_task_run
@@ -26,6 +27,39 @@ class JobResearchAgentTask(BaseTask):
     name = "job_research_agent"
 
     def run(self) -> None:
+        prepared = self._prepare()
+        run_id = prepared["run_id"]
+        db_path = prepared["db_path"]
+        try:
+            registry, context, provider = self._build_runtime(
+                config=prepared["config"],
+                env=prepared["env"],
+                db_path=db_path,
+                telegram_enabled=prepared["telegram_enabled"],
+                allowlist=prepared["allowlist"],
+            )
+            state = JobResearchState(
+                profile_name="default",
+                task_run_id=run_id,
+                config_path=self.config_path,
+                telegram_enabled=prepared["telegram_enabled"],
+                max_steps=prepared["task_cfg"].max_steps,
+                max_tool_calls=prepared["task_cfg"].max_tool_calls,
+                max_llm_calls=prepared["task_cfg"].max_llm_calls,
+            )
+            final = run_job_research(
+                state,
+                registry=registry,
+                context=context,
+                provider=provider,
+                use_langgraph=None,
+            )
+            self._finish_success(run_id=run_id, db_path=db_path, final=final)
+        except Exception as exc:
+            self._finish_failed(run_id=run_id, db_path=db_path, error=exc)
+            raise
+
+    def _prepare(self) -> dict[str, Any]:
         config = load_config(self.config_path)
         task_cfg = config.tasks.job_research_agent
         if not task_cfg.enabled:
@@ -50,54 +84,25 @@ class JobResearchAgentTask(BaseTask):
             task_run_id=run_id,
             db_path=str(db_path),
         )
-
-        try:
-            registry, context, provider = self._build_runtime(
-                config=config,
-                env=env,
-                db_path=db_path,
-                telegram_enabled=telegram_enabled,
-                allowlist=allowlist,
-            )
-            state = JobResearchState(
-                profile_name="default",
-                task_run_id=run_id,
-                config_path=self.config_path,
-                telegram_enabled=telegram_enabled,
-                max_steps=task_cfg.max_steps,
-                max_tool_calls=task_cfg.max_tool_calls,
-                max_llm_calls=task_cfg.max_llm_calls,
-            )
-            final = run_job_research(
-                state,
-                registry=registry,
-                context=context,
-                provider=provider,
-                use_langgraph=None,
-            )
-            self._finish_success(run_id=run_id, db_path=db_path, final=final)
-        except Exception as exc:
-            finish_task_run(
-                run_id,
-                status="failed",
-                fetched_count=0,
-                new_count=0,
-                skipped_count=0,
-                notified_count=0,
-                error_message=str(exc)[:500],
-                db_path=db_path,
-            )
-            raise
+        return {
+            "config": config,
+            "task_cfg": task_cfg,
+            "env": env,
+            "db_path": db_path,
+            "telegram_enabled": telegram_enabled,
+            "allowlist": allowlist,
+            "run_id": run_id,
+        }
 
     @staticmethod
     def _build_runtime(
         *,
-        config,
-        env,
+        config: Any,
+        env: Any,
         db_path: Path,
         telegram_enabled: bool,
         allowlist: list[str],
-    ):
+    ) -> tuple[Any, ToolContext, Any]:
         registry = build_tool_registry(
             allowlist=allowlist,
             include_telegram=telegram_enabled,
@@ -137,7 +142,7 @@ class JobResearchAgentTask(BaseTask):
         return registry, context, provider
 
     @staticmethod
-    def _finish_success(*, run_id: int, db_path: Path, final) -> None:
+    def _finish_success(*, run_id: int, db_path: Path, final: Any) -> None:
         notified = 1 if final.notification_status == "sent" else 0
         run_status: TaskRunStatus = (
             "success" if final.status == "completed" else "failed"
@@ -171,3 +176,16 @@ class JobResearchAgentTask(BaseTask):
         )
         if final.digest_text:
             print(final.digest_text)
+
+    @staticmethod
+    def _finish_failed(*, run_id: int, db_path: Path, error: Exception) -> None:
+        finish_task_run(
+            run_id,
+            status="failed",
+            fetched_count=0,
+            new_count=0,
+            skipped_count=0,
+            notified_count=0,
+            error_message=str(error)[:500],
+            db_path=db_path,
+        )

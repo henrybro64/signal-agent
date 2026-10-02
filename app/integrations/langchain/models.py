@@ -8,7 +8,8 @@ from app.llm import LLMProvider, LLMRequest, create_llm_provider
 
 from .deps import require_langchain
 
-_GATEWAY_CHAT_MODEL_CLS: type[Any] | None = None
+# Mutable cache avoids a module-level ``global`` statement.
+_GATEWAY_CHAT_MODEL_CACHE: dict[str, type[Any]] = {}
 
 
 def build_langchain_chat_model(
@@ -41,9 +42,9 @@ def build_langchain_chat_model(
 def _gateway_chat_model_class() -> type[Any]:
     """Return a cached ``BaseChatModel`` subclass (requires langchain)."""
 
-    global _GATEWAY_CHAT_MODEL_CLS
-    if _GATEWAY_CHAT_MODEL_CLS is not None:
-        return _GATEWAY_CHAT_MODEL_CLS
+    cached = _GATEWAY_CHAT_MODEL_CACHE.get("cls")
+    if cached is not None:
+        return cached
 
     require_langchain()
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -118,7 +119,7 @@ def _gateway_chat_model_class() -> type[Any]:
 
     GatewayChatModel.__name__ = "GatewayChatModel"
     GatewayChatModel.__qualname__ = "GatewayChatModel"
-    _GATEWAY_CHAT_MODEL_CLS = GatewayChatModel
+    _GATEWAY_CHAT_MODEL_CACHE["cls"] = GatewayChatModel
     return GatewayChatModel
 
 

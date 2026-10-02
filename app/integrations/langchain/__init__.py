@@ -5,7 +5,7 @@ LangChain must not be imported by ``app.core``, ``app.sources``, ``app.scorers``
 optional CLI paths, workflows, or tests.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .deps import (
     langchain_available,
@@ -19,6 +19,9 @@ from .factory import (
     run_langchain_smoke,
 )
 from .tools import to_langchain_tools
+
+if TYPE_CHECKING:
+    from .models import GatewayChatModel as GatewayChatModel
 
 __all__ = [
     "GatewayChatModel",
@@ -35,7 +38,7 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     if name == "GatewayChatModel":
-        from .models import GatewayChatModel
+        from .models import GatewayChatModel as gateway_chat_model_cls
 
-        return GatewayChatModel
+        return gateway_chat_model_cls
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
