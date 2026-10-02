@@ -3,9 +3,12 @@
 LangChain must not be imported by ``app.core``, ``app.sources``, ``app.scorers``,
 ``app.notifiers``, or deterministic tasks. Import this package only from
 optional CLI paths, workflows, or tests.
+
+``GatewayChatModel`` is available via lazy ``__getattr__`` (not listed in
+``__all__``) so importing this package does not require the LangChain extra.
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .deps import (
     langchain_available,
@@ -20,11 +23,7 @@ from .factory import (
 )
 from .tools import to_langchain_tools
 
-if TYPE_CHECKING:
-    from .models import GatewayChatModel as GatewayChatModel
-
 __all__ = [
-    "GatewayChatModel",
     "build_langchain_bundle",
     "build_langchain_chat_model",
     "langchain_available",
