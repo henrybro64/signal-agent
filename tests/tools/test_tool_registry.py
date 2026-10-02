@@ -265,7 +265,7 @@ def test_stock_movers_ranks_by_change_percent(monkeypatch: pytest.MonkeyPatch) -
 
     from app.core.config import load_config
 
-    result = GetTwStockMoversTool.invoke(
+    result = GetTwStockMoversTool().invoke(
         {"limit": 2},
         context=ToolContext(config=load_config("config.yaml")),
     )

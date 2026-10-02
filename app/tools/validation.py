@@ -62,10 +62,10 @@ def validate_tool_arguments(
         prop_schema = properties.get(key)
         if not isinstance(prop_schema, dict):
             continue
-        _validate_value(value, prop_schema, path=f"{tool_name}.{key}")
+        _validate_typed_value(value, prop_schema, path=f"{tool_name}.{key}")
 
 
-def _validate_value(value: Any, schema: dict[str, Any], *, path: str) -> None:
+def _validate_typed_value(value: Any, schema: dict[str, Any], *, path: str) -> None:
     expected = schema.get("type")
     validator = _TYPE_VALIDATORS.get(expected) if isinstance(expected, str) else None
     if validator is not None:
@@ -148,7 +148,7 @@ def _validate_array(value: Any, schema: dict[str, Any], *, path: str) -> None:
     item_schema = schema.get("items")
     if isinstance(item_schema, dict):
         for index, item in enumerate(value):
-            _validate_value(item, item_schema, path=f"{path}[{index}]")
+            _validate_typed_value(item, item_schema, path=f"{path}[{index}]")
 
 
 _TYPE_VALIDATORS: dict[str, _Validator] = {

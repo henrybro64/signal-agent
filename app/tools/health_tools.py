@@ -43,73 +43,87 @@ class QueryRecentRunsTool:
     )
     input_schema = _INPUT_SCHEMA
 
-    @staticmethod
     def invoke(
+        self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
     ) -> ToolResult:
-        limit = optional_int(arguments, "limit", default=20, minimum=1, maximum=100)
-        run_kind = str(arguments.get("run_kind") or "task").strip().lower()
-        if run_kind not in {"task", "signal"}:
-            raise ToolError(
-                "'run_kind' must be 'task' or 'signal'",
-                code="invalid_argument",
-            )
+        return _query_recent_runs(self.name, arguments, context=context)
 
-        if context.query_runs is not None:
-            rows = context.query_runs(limit=limit, run_kind=run_kind)
-            return ToolResult(
-                ok=True,
-                data={"count": len(rows), "runs": rows[:limit], "run_kind": run_kind},
-                metadata={"mode": "injected"},
-            )
 
-        db_path = resolve_db_path(context.db_path)
-        runs: list[dict[str, Any]]
-        if run_kind == "signal":
-            signal_records = get_recent_signal_runs(limit=limit, db_path=db_path)
-            runs = [
-                {
-                    "id": row.id,
-                    "source": row.source,
-                    "status": row.status,
-                    "started_at": row.started_at.isoformat(),
-                    "finished_at": (
-                        None
-                        if row.finished_at is None
-                        else row.finished_at.isoformat()
-                    ),
-                    "fetched_count": row.fetched_count,
-                    "inserted_count": row.inserted_count,
-                    "updated_count": row.updated_count,
-                    "error": row.error,
-                }
-                for row in signal_records
-            ]
-        else:
-            task_records = get_recent_task_runs(limit=limit, db_path=db_path)
-            runs = [
-                {
-                    "id": row.id,
-                    "task_name": row.task_name,
-                    "status": row.status,
-                    "started_at": row.started_at.isoformat(),
-                    "finished_at": (
-                        None
-                        if row.finished_at is None
-                        else row.finished_at.isoformat()
-                    ),
-                    "fetched_count": row.fetched_count,
-                    "new_count": row.new_count,
-                    "skipped_count": row.skipped_count,
-                    "notified_count": row.notified_count,
-                    "error_message": row.error_message,
-                }
-                for row in task_records
-            ]
+def _query_recent_runs(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    context: ToolContext,
+) -> ToolResult:
+    limit = optional_int(arguments, "limit", default=20, minimum=1, maximum=100)
+    run_kind = str(arguments.get("run_kind") or "task").strip().lower()
+    if run_kind not in {"task", "signal"}:
+        raise ToolError(
+            f"{tool_name}: 'run_kind' must be 'task' or 'signal'",
+            code="invalid_argument",
+        )
+
+    if context.query_runs is not None:
+        rows = context.query_runs(limit=limit, run_kind=run_kind)
         return ToolResult(
             ok=True,
-            data={"count": len(runs), "runs": runs, "run_kind": run_kind},
-            metadata={"mode": "live"},
+            data={"count": len(rows), "runs": rows[:limit], "run_kind": run_kind},
+            metadata={"mode": "injected"},
         )
+
+    db_path = resolve_db_path(context.db_path)
+    if run_kind == "signal":
+        runs = _serialize_signal_runs(
+            get_recent_signal_runs(limit=limit, db_path=db_path)
+        )
+    else:
+        runs = _serialize_task_runs(
+            get_recent_task_runs(limit=limit, db_path=db_path)
+        )
+    return ToolResult(
+        ok=True,
+        data={"count": len(runs), "runs": runs, "run_kind": run_kind},
+        metadata={"mode": "live"},
+    )
+
+
+def _serialize_signal_runs(records: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": row.id,
+            "source": row.source,
+            "status": row.status,
+            "started_at": row.started_at.isoformat(),
+            "finished_at": (
+                None if row.finished_at is None else row.finished_at.isoformat()
+            ),
+            "fetched_count": row.fetched_count,
+            "inserted_count": row.inserted_count,
+            "updated_count": row.updated_count,
+            "error": row.error,
+        }
+        for row in records
+    ]
+
+
+def _serialize_task_runs(records: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": row.id,
+            "task_name": row.task_name,
+            "status": row.status,
+            "started_at": row.started_at.isoformat(),
+            "finished_at": (
+                None if row.finished_at is None else row.finished_at.isoformat()
+            ),
+            "fetched_count": row.fetched_count,
+            "new_count": row.new_count,
+            "skipped_count": row.skipped_count,
+            "notified_count": row.notified_count,
+            "error_message": row.error_message,
+        }
+        for row in records
+    ]

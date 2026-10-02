@@ -51,65 +51,74 @@ class SearchJobsTool:
     )
     input_schema = _INPUT_SCHEMA
 
-    @staticmethod
     def invoke(
+        self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
     ) -> ToolResult:
-        limit = optional_int(
-            arguments, "limit", default=context.max_items, minimum=1, maximum=50
-        )
-        if context.fetch_jobs is not None:
-            items = context.fetch_jobs(limit=limit, arguments=arguments)
-            return ToolResult(
-                ok=True,
-                data={"count": len(items), "items": items[:limit]},
-                metadata={"mode": "injected"},
-            )
+        return _search_jobs(self.name, arguments, context=context)
 
-        config = context.config
-        if config is None:
-            raise ToolError(
-                "search_jobs requires config in ToolContext",
-                code="missing_config",
-            )
 
-        source_filter = arguments.get("sources")
-        failed: list[str] = []
-        if isinstance(source_filter, list) and source_filter:
-            collected_items, source_count = _fetch_named_sources(
-                config, source_filter, failed=failed
-            )
-        else:
-            collected_items, source_count = _fetch_configured_sources(
-                config, context=context, failed=failed
-            )
-
-        if source_count > 0 and not collected_items and _all_sources_failed(
-            failed, source_count=source_count
-        ):
-            return ToolResult(
-                ok=False,
-                error="all_job_sources_failed:" + ",".join(failed),
-                data={"count": 0, "items": []},
-                metadata={
-                    "mode": "live",
-                    "failed_sources": failed,
-                    "source_count": source_count,
-                },
-            )
-
-        payload = [signal_item_to_dict(item) for item in collected_items[:limit]]
+def _search_jobs(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    context: ToolContext,
+) -> ToolResult:
+    limit = optional_int(
+        arguments, "limit", default=context.max_items, minimum=1, maximum=50
+    )
+    if context.fetch_jobs is not None:
+        items = context.fetch_jobs(limit=limit, arguments=arguments)
         return ToolResult(
             ok=True,
-            data={"count": len(payload), "items": payload},
+            data={"count": len(items), "items": items[:limit]},
+            metadata={"mode": "injected"},
+        )
+
+    config = context.config
+    if config is None:
+        raise ToolError(
+            f"{tool_name} requires config in ToolContext",
+            code="missing_config",
+        )
+
+    source_filter = arguments.get("sources")
+    failed: list[str] = []
+    if isinstance(source_filter, list) and source_filter:
+        collected_items, source_count = _fetch_named_sources(
+            config, source_filter, failed=failed
+        )
+    else:
+        collected_items, source_count = _fetch_configured_sources(
+            config, context=context, failed=failed
+        )
+
+    if source_count > 0 and not collected_items and _all_sources_failed(
+        failed, source_count=source_count
+    ):
+        return ToolResult(
+            ok=False,
+            error="all_job_sources_failed:" + ",".join(failed),
+            data={"count": 0, "items": []},
             metadata={
                 "mode": "live",
                 "failed_sources": failed,
                 "source_count": source_count,
             },
         )
+
+    payload = [signal_item_to_dict(item) for item in collected_items[:limit]]
+    return ToolResult(
+        ok=True,
+        data={"count": len(payload), "items": payload},
+        metadata={
+            "mode": "live",
+            "failed_sources": failed,
+            "source_count": source_count,
+        },
+    )
 
 
 def _fetch_named_sources(

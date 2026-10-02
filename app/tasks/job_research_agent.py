@@ -27,6 +27,9 @@ class JobResearchAgentTask(BaseTask):
     name = "job_research_agent"
 
     def run(self) -> None:
+        self._execute_research_run()
+
+    def _execute_research_run(self) -> None:
         prepared = self._prepare()
         run_id = prepared["run_id"]
         db_path = prepared["db_path"]
