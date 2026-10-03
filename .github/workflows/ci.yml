@@ -32,5 +32,8 @@ jobs:
       - name: Run lint
         run: make lint PYTHON=python
 
+      - name: Run offline evaluation suite
+        run: make eval PYTHON=python
+
       - name: Run package smoke test
         run: make package-smoke PYTHON=python

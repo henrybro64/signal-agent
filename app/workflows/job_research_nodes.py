@@ -44,7 +44,7 @@ def fetch_candidates_node(
         return state
 
     result = registry.invoke("search_jobs", {"limit": 20}, context=context)
-    state.tool_calls += 1
+    state.record_tool("search_jobs")
     if not result.ok:
         state.errors.append(result.error or "search_jobs_failed")
         state.warnings.append("fetch_failed")
@@ -126,6 +126,87 @@ def rule_score_node(state: JobResearchState) -> JobResearchState:
     return state
 
 
+def _resolve_memory_retriever(
+    state: JobResearchState,
+    *,
+    db_path: Any | None,
+) -> Any | None:
+    """Build a keyword retriever, ingesting configured docs when present."""
+
+    if db_path is None:
+        state.warnings.append("memory_retriever_absent")
+        return None
+
+    from pathlib import Path
+
+    from app.memory import SqliteMemoryStore, build_retriever, ingest_paths
+
+    store = SqliteMemoryStore(Path(db_path))
+    if state.memory_document_paths:
+        results = ingest_paths(
+            store,
+            namespace=state.memory_namespace,
+            paths=list(state.memory_document_paths),
+        )
+        errors: list[str] = []
+        for row in results:
+            if row.status == "error" and row.detail is not None:
+                errors.append(row.detail)
+        if errors:
+            state.warnings.append(
+                "memory_ingest_errors:" + ";".join(errors[:3])
+            )
+    return build_retriever(store, use_embeddings=False)
+
+
+def _evidence_query(state: JobResearchState) -> str:
+    titles = [
+        str(item.get("title") or "")
+        for item in (state.filtered or state.candidates)[:8]
+    ]
+    return " ".join(part for part in titles if part).strip() or state.profile_name
+
+
+def retrieve_evidence_node(
+    state: JobResearchState,
+    *,
+    db_path: Any | None = None,
+    retriever: Any | None = None,
+) -> JobResearchState:
+    """Ingest configured docs (if any) and retrieve namespaced evidence (#65)."""
+
+    state.bump_step()
+    active_retriever = retriever
+    if active_retriever is None:
+        active_retriever = _resolve_memory_retriever(state, db_path=db_path)
+        if active_retriever is None:
+            return state
+
+    query = _evidence_query(state)
+    try:
+        evidence = active_retriever.retrieve(
+            namespace=state.memory_namespace,
+            query=query,
+            limit=5,
+            max_chars=1500,
+        )
+    except Exception as exc:  # noqa: BLE001 - memory must not abort research
+        state.warnings.append(f"memory_retrieve_failed:{type(exc).__name__}")
+        return state
+
+    state.evidence = [item.to_dict() for item in evidence]
+    log_event(
+        _LOGGER,
+        event="job_research_node",
+        message="retrieved memory evidence",
+        node="retrieve_evidence",
+        step=state.step_count,
+        evidence_count=len(state.evidence),
+        namespace=state.memory_namespace,
+    )
+    return state
+
+
 def optional_llm_node(
     state: JobResearchState,
     *,
@@ -142,14 +223,27 @@ def optional_llm_node(
         return state
 
     titles = ", ".join(str(item.get("title") or "?") for item in state.filtered[:5])
+    evidence_lines = []
+    for item in state.evidence[:5]:
+        citation = item.get("citation") or item.get("source_path") or "?"
+        snippet = str(item.get("content") or "").strip().replace("\n", " ")
+        if len(snippet) > 120:
+            snippet = snippet[:120] + "…"
+        evidence_lines.append(f"- [{citation}] {snippet}")
+    evidence_block = (
+        "Evidence citations:\n" + "\n".join(evidence_lines)
+        if evidence_lines
+        else "Evidence citations: none"
+    )
     try:
         response = provider.generate(
             LLMRequest(
                 instructions=(
                     "Summarize job-research candidates briefly for a digest. "
+                    "Use provided evidence citations when relevant. "
                     "Do not invent employers. Keep under 500 characters."
                 ),
-                input=f"Candidates: {titles}",
+                input=f"Candidates: {titles}\n{evidence_block}",
                 temperature=0.2,
             )
         )
@@ -174,6 +268,7 @@ def prepare_digest_node(state: JobResearchState) -> JobResearchState:
         f"Filtered matches: {len(state.filtered)}",
     ]
     lines.extend(_digest_match_lines(state))
+    lines.extend(_digest_evidence_lines(state))
     lines.extend(_digest_llm_lines(state))
     if state.warnings:
         lines.append("Warnings: " + "; ".join(state.warnings))
@@ -183,6 +278,19 @@ def prepare_digest_node(state: JobResearchState) -> JobResearchState:
     state.digest_text = "\n".join(lines)
     state.status = "digest_ready"
     return state
+
+
+def _digest_evidence_lines(state: JobResearchState) -> list[str]:
+    if not state.evidence:
+        return []
+    lines = ["Evidence:"]
+    for item in state.evidence[:5]:
+        citation = item.get("citation") or item.get("source_path") or "?"
+        snippet = str(item.get("content") or "").strip().replace("\n", " ")
+        if len(snippet) > 160:
+            snippet = snippet[:160] + "…"
+        lines.append(f"- [{citation}] {snippet}")
+    return lines
 
 
 def _digest_match_lines(state: JobResearchState) -> list[str]:
@@ -348,7 +456,7 @@ def notify_node(
         {"text": state.digest_text or "Job research digest (empty)"},
         context=context,
     )
-    state.tool_calls += 1
+    state.record_tool("send_telegram_message")
     if result.ok:
         state.notification_status = "sent"
     else:
@@ -359,7 +467,11 @@ def notify_node(
     return state
 
 
-def finalize_node(state: JobResearchState) -> JobResearchState:
+def finalize_node(
+    state: JobResearchState,
+    *,
+    db_path: Any | None = None,
+) -> JobResearchState:
     state.bump_step()
     if state.errors and not state.digest_text:
         state.digest_text = (
@@ -370,6 +482,7 @@ def finalize_node(state: JobResearchState) -> JobResearchState:
         )
         state.fallback_used = True
     state.status = "completed" if not state.errors else "completed_with_errors"
+    _store_operational_summary(state, db_path=db_path)
     log_event(
         _LOGGER,
         event="job_research_completed",
@@ -381,6 +494,58 @@ def finalize_node(state: JobResearchState) -> JobResearchState:
         fallback_used=state.fallback_used,
     )
     return state
+
+
+def store_operational_summary(
+    state: JobResearchState,
+    *,
+    db_path: Any | None,
+) -> None:
+    """Persist a redacted run summary into operational memory (#65)."""
+
+    if db_path is None:
+        return
+    try:
+        from pathlib import Path
+
+        from app.memory import SqliteMemoryStore
+
+        store = SqliteMemoryStore(Path(db_path))
+        if state.task_run_id is not None:
+            key = f"task-{state.task_run_id}"
+        else:
+            from datetime import UTC, datetime
+            from uuid import uuid4
+
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+            key = f"run-{stamp}-{uuid4().hex[:8]}"
+        store.put_operational(
+            namespace=state.memory_namespace,
+            kind="run_summary",
+            key=key,
+            payload={
+                "status": state.status,
+                "tool_calls": state.tool_calls,
+                "tools_used": list(state.tools_used),
+                "llm_calls": state.llm_calls,
+                "filtered_count": len(state.filtered),
+                "evidence_count": len(state.evidence),
+                "fallback_used": state.fallback_used,
+                "task_run_id": state.task_run_id,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - never abort on memory write
+        state.warnings.append(
+            f"operational_memory_write_failed:{type(exc).__name__}"
+        )
+
+
+def _store_operational_summary(
+    state: JobResearchState,
+    *,
+    db_path: Any | None,
+) -> None:
+    store_operational_summary(state, db_path=db_path)
 
 
 def _dict_to_signal_item(raw: dict[str, Any]):

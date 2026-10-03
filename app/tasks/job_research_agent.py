@@ -49,6 +49,8 @@ class JobResearchAgentTask(BaseTask):
                 max_steps=prepared["task_cfg"].max_steps,
                 max_tool_calls=prepared["task_cfg"].max_tool_calls,
                 max_llm_calls=prepared["task_cfg"].max_llm_calls,
+                memory_namespace=prepared["task_cfg"].memory_namespace,
+                memory_document_paths=list(prepared["memory_documents"]),
             )
             final = run_job_research(
                 state,
@@ -87,6 +89,9 @@ class JobResearchAgentTask(BaseTask):
             task_run_id=run_id,
             db_path=str(db_path),
         )
+        namespace = task_cfg.memory_namespace
+        memory_ns = config.memory.namespaces.get(namespace)
+        memory_documents = list(memory_ns.documents) if memory_ns else []
         return {
             "config": config,
             "task_cfg": task_cfg,
@@ -95,6 +100,7 @@ class JobResearchAgentTask(BaseTask):
             "telegram_enabled": telegram_enabled,
             "allowlist": allowlist,
             "run_id": run_id,
+            "memory_documents": memory_documents,
         }
 
     @staticmethod

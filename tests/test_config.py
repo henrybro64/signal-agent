@@ -40,6 +40,11 @@ def test_load_config_reads_sample_file() -> None:
     }
     assert config.tasks.tw_market_assistant.enabled is False
     assert config.tasks.tw_market_assistant.top_n == 20
+    assert config.tasks.job_research_agent.enabled is True
+    assert config.tasks.job_research_agent.memory_namespace == "job_research"
+    assert config.tasks.job_research_agent.max_steps == 12
+    assert "job_research" in config.memory.namespaces
+    assert config.memory.namespaces["job_research"].documents == []
     assert config.investment.watchlist == ["2330", "2454"]
     assert config.investment.theme_mappings["cpo_optical"].label == "CPO / 光通訊"
     assert "CPO" in config.investment.theme_mappings["cpo_optical"].keywords

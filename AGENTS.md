@@ -25,7 +25,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
 | M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
-| M7 | LangChain-ready platform evolution #60–#67 | **In progress** — #61–#64 done locally; #65–#67 next |
+| M7 | LangChain-ready platform evolution #60–#67 | **In progress** — #61–#67 implemented locally; push/PR pending |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -91,8 +91,11 @@ signal-agent/
 │   │   ├── fake_provider.py
 │   │   └── factory.py
 │   ├── tools/              # agent-callable tool protocol + registry (#62)
-│   ├── integrations/       # optional framework adapters (#63+)
-│   │   └── langchain/      # LangChain/LangGraph extras only
+│   ├── memory/             # durable namespaced memory + keyword RAG (#65)
+│   ├── evaluation/         # offline eval runner + redacted traces (#66)
+│   ├── integrations/       # optional framework adapters (#63/#67)
+│   │   ├── langchain/      # LangChain/LangGraph extras only
+│   │   └── mcp/            # localhost MCP adapter over tool registry
 │   ├── workflows/          # bounded agent workflows (#64)
 │   ├── formatters/
 │   │   └── tw_market_digest.py  # Traditional Chinese assistant digest text
@@ -127,6 +130,8 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 | `scorers` | Ranking / filtering / research classification | Fetching remote data; provider SDKs |
 | `llm` | Framework-neutral LLM gateway (OpenAI/fake; Ollama reserved) | Business scoring rules; LangChain |
 | `tools` | Allowlisted agent-callable capabilities wrapping existing code | Unrestricted shell/SQL/HTTP |
+| `memory` | Namespaced SQLite memory + keyword (optional embedding) retrieval | Auto-crawl repo/web; secret ingest |
+| `evaluation` | Offline eval cases, redacted traces, pass/fail reports | Paid live-provider runs in CI |
 | `integrations` | Optional LangChain/MCP adapters | Own business rules or live in domain packages |
 | `workflows` | Bounded multi-step agent pilots | Replace deterministic tasks |
 | `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |
@@ -244,9 +249,9 @@ in parallel):
 2. #62  Agent-callable tool protocol and registry — DONE
 3. #63  Optional LangChain adapters for LLMs and tools — DONE
 4. #64  Bounded LangGraph pilot workflow (job_research_agent) — DONE
-5. #65  Durable agent memory and optional RAG retrieval
-6. #66  Agent evaluation, tracing, and regression fixtures
-7. #67  Optional MCP interoperability for selected tools
+5. #65  Durable agent memory and optional RAG retrieval — DONE (local)
+6. #66  Agent evaluation, tracing, and regression fixtures — DONE (local)
+7. #67  Optional MCP interoperability for selected tools — DONE (local)
 ```
 
 Do **not** treat #60 as a request to rewrite M0–M6 domain logic. Framework
@@ -264,9 +269,9 @@ Starting points (see also the M7 roadmap doc):
 | #62 | `app/tools/` protocol + allowlisted registry wrappers — done |
 | #63 | optional `.[langchain]`; `app/integrations/langchain/` — done |
 | #64 | `app/workflows/`, additive `app/tasks/job_research_agent.py` — done |
-| #65 | `app/memory/`, SQLite migrations, keyword retrieval before optional vectors |
-| #66 | `app/evaluation/`, `evals/`, offline CI subset |
-| #67 | optional `.[mcp]`; `app/integrations/mcp/` (localhost + allowlist) |
+| #65 | `app/memory/`, SQLite migrations, keyword retrieval before optional vectors — done |
+| #66 | `app/evaluation/` (+ packaged `cases/`/`fixtures/`), offline CI subset — done |
+| #67 | optional `.[mcp]`; `app/integrations/mcp/` (localhost + allowlist) — done |
 
 ## How to pick up work
 

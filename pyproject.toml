@@ -26,9 +26,13 @@ langchain = [
     "langgraph>=0.2,<2",
     "pydantic>=2,<3",
 ]
+mcp = [
+    "mcp>=1.0,<2",
+]
 
 [project.scripts]
 signal-agent = "app.cli:main"
+signal-agent-eval = "app.evaluation.runner:main"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
@@ -37,6 +41,7 @@ include = ["app*"]
 "app.profiles" = ["*.md"]
 "app.data" = ["*.yaml"]
 "app.sql" = ["migrations/*.sql"]
+"app.evaluation" = ["cases/*.yaml", "fixtures/*"]
 
 [tool.ruff]
 target-version = "py312"

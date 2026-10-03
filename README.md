@@ -243,7 +243,16 @@ signal-agent/
   stays off unless `tasks.job_research_agent.telegram_enabled: true`. The
   LangGraph path uses the optional install for graph orchestration; #63
   ChatModel/tool adapters are available separately and are not required for
-  the fixed pilot graph.
+  the fixed pilot graph. When memory documents are ingested into the shared
+  SQLite DB under the `job_research` namespace, the digest can include cited
+  evidence snippets.
+- `python main.py --eval` (or `make eval` / `signal-agent-eval`) runs the
+  offline CI evaluation suite packaged under `app/evaluation/cases/` with fake
+  LLM/tools and redacted traces. No network or paid APIs.
+- `python main.py --mcp-serve` exposes allowlisted read-only tools
+  (`search_jobs`, `get_tw_stock_movers`, `query_recent_runs`) over MCP on
+  localhost after `pip install -e '.[mcp]'`. Telegram is never exposed.
+  Prefer `--mcp-transport stdio` locally; SSE binds `127.0.0.1` only.
 - `python main.py --task tw_stock_movers` runs the Taiwan stock-mover task
   during market hours, persists `tw_stock_mover` signals, and reports separate
   top gainers and losers for TWSE listed (上市) and TPEx OTC (上櫃) stocks.
@@ -707,7 +716,27 @@ env = load_env_settings()
   timeout, and temperature.
 - Optional agent extras: `pip install -e '.[langchain]'` adds `langchain-core`
   and `langgraph` for `--langchain-smoke` and the LangGraph path inside
-  `job_research_agent`. The base install stays free of those packages.
+  `job_research_agent`. `pip install -e '.[mcp]'` adds the MCP SDK for
+  `--mcp-serve`. The base install stays free of those packages.
+- Agent memory (`app/memory/`): configure explicit Markdown/text paths under
+  `memory.namespaces.<name>.documents` in `config.yaml` (see the sample at
+  `app/evaluation/fixtures/company-notes.md`). Deployment defaults leave the
+  list empty so Compose/k3s images do not warn about missing files.
+  `job_research_agent` ingests configured paths into the shared SQLite DB
+  (migration `002_agent_memory.sql`) under
+  `tasks.job_research_agent.memory_namespace` before retrieval. Keyword
+  retrieval is default; embeddings are optional/fake in CI. Never ingest
+  `.env`, credentials, or secrets (path and content checks). Clear a namespace
+  with `SqliteMemoryStore(...).delete_namespace("job_research")`.
+- Offline evaluation: `make eval` (also run in GitHub Actions CI) runs the
+  `core` suite. Cases ship inside the package at
+  `app/evaluation/cases/*.yaml`. Pass `--json-out` to write a machine-readable
+  report and redacted traces. An empty/misspelled suite fails. Paid
+  live-provider eval requires both `SIGNAL_AGENT_LIVE_EVAL=1` and
+  `inputs.allow_live: true` on a case; it is never enabled in CI.
+- MCP security limits: bind localhost only; expose read-oriented allowlisted
+  tools; no public internet exposure, no shell/filesystem catch-alls, and no
+  Telegram/side-effect tools by default.
 - Two-stage scoring: rule score always runs first; LLM runs only when enabled,
   the rule score is at or above `scoring.llm_min_rule_score`, and
   `scoring.llm_max_jobs_per_run` has not been reached. Stored reasons are
@@ -798,10 +827,11 @@ workflow installs Python 3.12, then runs the same checks as local development:
 
 - `make test` (`pytest`)
 - `make lint` (`ruff check .`)
+- `make eval` (offline `core` evaluation suite; no network/API tokens)
 - `make package-smoke` (build wheel, install it, verify `signal-agent --list-tasks`
   and bundled profile data)
 
-Use `make check` locally before opening a PR; it runs all three targets in
+Use `make check` locally before opening a PR; it runs all four targets in
 order.
 
 Use either the documented commands directly or the `Makefile` targets:
@@ -810,6 +840,7 @@ Use either the documented commands directly or the `Makefile` targets:
 make install-dev
 make test
 make lint
+make eval
 make format
 make check
 ```
@@ -820,6 +851,7 @@ Equivalent direct commands:
 python3 -m pip install -e '.[dev]'
 python3 -m pytest
 python3 -m ruff check .
+python3 -m app.evaluation --suite core
 python3 -m ruff format .
 ```
 

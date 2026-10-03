@@ -1,0 +1,21 @@
+id: job-research-llm-fallback
+suite: core
+version: 1
+kind: job_research
+description: LLM failure should fall back without aborting the digest.
+inputs:
+  llm_mode: error
+  jobs:
+    - source: dummy
+      item_type: job
+      title: Cloud SDET
+      observed_at: "2026-07-01T00:00:00+00:00"
+      content: Python automation with Kubernetes.
+      metadata:
+        company: Example Security
+expectations:
+  final_status_prefix: completed
+  required_substrings:
+    - "Job research digest"
+    - "Fallback"
+  max_llm_calls: 1

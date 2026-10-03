@@ -49,33 +49,58 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
-class CurrentStdoutHandler(logging.Handler):
-    """Write records to the current stdout stream at emit time."""
+class CurrentStreamHandler(logging.Handler):
+    """Write records to a live stream getter at emit time."""
 
     terminator = "\n"
+
+    def __init__(self, stream_getter=None) -> None:
+        super().__init__()
+        self._stream_getter = stream_getter or (lambda: sys.stdout)
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             message = self.format(record)
-            stream = sys.stdout
+            stream = self._stream_getter()
             stream.write(message + self.terminator)
             stream.flush()
         except Exception:
             self.handleError(record)
 
 
-def configure_logging(*, level: int | str = logging.INFO) -> logging.Logger:
-    """Configure the shared stdout logger once and return it."""
+# Backward-compatible alias used by older imports/tests.
+CurrentStdoutHandler = CurrentStreamHandler
+
+
+def configure_logging(
+    *,
+    level: int | str = logging.INFO,
+    stream=None,
+    force: bool = False,
+) -> logging.Logger:
+    """Configure the shared structured logger once and return it.
+
+    Defaults to stdout. Pass ``stream=sys.stderr`` (and ``force=True`` when
+    reconfiguring) so MCP stdio JSON-RPC is not interleaved with log lines.
+    """
 
     global _LOGGING_CONFIGURED
 
     logger = logging.getLogger(_ROOT_LOGGER_NAME)
     logger.setLevel(level)
 
-    if _LOGGING_CONFIGURED:
+    if _LOGGING_CONFIGURED and not force:
         return logger
 
-    handler = CurrentStdoutHandler()
+    if stream is sys.stderr:
+        stream_getter = lambda: sys.stderr  # noqa: E731
+    elif stream is None or stream is sys.stdout:
+        stream_getter = lambda: sys.stdout  # noqa: E731
+    else:
+        captured = stream
+        stream_getter = lambda: captured  # noqa: E731
+
+    handler = CurrentStreamHandler(stream_getter)
     handler.setFormatter(JsonLogFormatter())
 
     logger.handlers.clear()

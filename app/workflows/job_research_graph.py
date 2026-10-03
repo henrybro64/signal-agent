@@ -64,6 +64,9 @@ def run_job_research(
                 telegram_enabled=False,
                 warnings=list(current.warnings),
                 fallback_used=True,
+                memory_namespace=current.memory_namespace,
+                memory_document_paths=list(current.memory_document_paths),
+                tools_used=list(current.tools_used),
             )
             return run_job_research_python(
                 reset,
@@ -100,14 +103,15 @@ def run_job_research_python(
             state = nodes.prepare_digest_node(state)
             state = nodes.persist_results_node(state, db_path=db_path)
             state = nodes.notify_node(state, registry=registry, context=context)
-            return nodes.finalize_node(state)
+            return nodes.finalize_node(state, db_path=db_path)
 
         state = nodes.rule_score_node(state)
+        state = nodes.retrieve_evidence_node(state, db_path=db_path)
         state = nodes.optional_llm_node(state, provider=provider)
         state = nodes.prepare_digest_node(state)
         state = nodes.persist_results_node(state, db_path=db_path)
         state = nodes.notify_node(state, registry=registry, context=context)
-        return nodes.finalize_node(state)
+        return nodes.finalize_node(state, db_path=db_path)
     except RuntimeError as exc:
         state.errors.append(str(exc))
         state.fallback_used = True
@@ -119,6 +123,7 @@ def run_job_research_python(
                 "Errors: " + "; ".join(state.errors)
             )
         state.status = "completed_with_errors"
+        nodes.store_operational_summary(state, db_path=db_path)
         return state
 
 
@@ -175,6 +180,11 @@ def build_job_research_graph(
     def rule_score(data: dict[str, Any]) -> dict[str, Any]:
         return _state_to_dict(nodes.rule_score_node(_dict_to_state(data)))
 
+    def retrieve_evidence(data: dict[str, Any]) -> dict[str, Any]:
+        return _state_to_dict(
+            nodes.retrieve_evidence_node(_dict_to_state(data), db_path=db_path)
+        )
+
     def optional_llm(data: dict[str, Any]) -> dict[str, Any]:
         return _state_to_dict(
             nodes.optional_llm_node(_dict_to_state(data), provider=provider)
@@ -195,11 +205,14 @@ def build_job_research_graph(
         )
 
     def finalize(data: dict[str, Any]) -> dict[str, Any]:
-        return _state_to_dict(nodes.finalize_node(_dict_to_state(data)))
+        return _state_to_dict(
+            nodes.finalize_node(_dict_to_state(data), db_path=db_path)
+        )
 
     workflow.add_node("load_profile", load_profile)
     workflow.add_node("fetch_candidates", fetch_candidates)
     workflow.add_node("rule_score", rule_score)
+    workflow.add_node("retrieve_evidence", retrieve_evidence)
     workflow.add_node("optional_llm", optional_llm)
     workflow.add_node("prepare_digest", prepare_digest)
     workflow.add_node("persist_results", persist_results)
@@ -223,7 +236,8 @@ def build_job_research_graph(
             "prepare_digest": "prepare_digest",
         },
     )
-    workflow.add_edge("rule_score", "optional_llm")
+    workflow.add_edge("rule_score", "retrieve_evidence")
+    workflow.add_edge("retrieve_evidence", "optional_llm")
     workflow.add_edge("optional_llm", "prepare_digest")
     workflow.add_edge("prepare_digest", "persist_results")
     workflow.add_edge("persist_results", "notify")
@@ -257,6 +271,10 @@ def _state_to_dict(state: JobResearchState) -> dict[str, Any]:
         "persist_error": state.persist_error,
         "new_candidate_count": state.new_candidate_count,
         "new_filtered": list(state.new_filtered),
+        "evidence": list(state.evidence),
+        "memory_namespace": state.memory_namespace,
+        "memory_document_paths": list(state.memory_document_paths),
+        "tools_used": list(state.tools_used),
     }
 
 
@@ -293,6 +311,14 @@ def _dict_to_state(
         persist_error=None if persist_error in (None, "") else str(persist_error),
         new_candidate_count=_int_or(data, "new_candidate_count"),
         new_filtered=_list_or(data, "new_filtered"),
+        evidence=_list_or(data, "evidence"),
+        memory_namespace=_str_or(
+            data, "memory_namespace", base.memory_namespace
+        ),
+        memory_document_paths=_list_or(
+            data, "memory_document_paths", base.memory_document_paths
+        ),
+        tools_used=_list_or(data, "tools_used", base.tools_used),
     )
 
 
@@ -304,5 +330,11 @@ def _int_or(data: dict[str, Any], key: str, default: int = 0) -> int:
     return int(data.get(key) or default)
 
 
-def _list_or(data: dict[str, Any], key: str) -> list[Any]:
-    return list(data.get(key) or [])
+def _list_or(
+    data: dict[str, Any],
+    key: str,
+    default: list[Any] | None = None,
+) -> list[Any]:
+    if key in data:
+        return list(data.get(key) or [])
+    return list(default or [])

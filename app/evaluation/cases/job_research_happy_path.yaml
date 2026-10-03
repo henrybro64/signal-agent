@@ -1,0 +1,34 @@
+id: job-research-happy-path
+suite: core
+version: 1
+kind: job_research
+description: Happy-path job research with fake LLM and injected jobs.
+inputs:
+  llm_mode: ok
+  llm_text: Focus on Cloud SDET.
+  jobs:
+    - source: dummy
+      item_type: job
+      title: Cloud SDET
+      observed_at: "2026-07-01T00:00:00+00:00"
+      content: Python automation with Kubernetes.
+      metadata:
+        company: Example Security
+    - source: dummy
+      item_type: job
+      title: Helpdesk Support Engineer
+      observed_at: "2026-07-01T00:00:00+00:00"
+      content: SLA-heavy support and rotating on-call coverage.
+      metadata:
+        company: Example Support
+expectations:
+  final_status_prefix: completed
+  required_tools: [search_jobs]
+  required_substrings:
+    - "Job research digest"
+    - "Cloud SDET"
+  prohibited_substrings:
+    - "sk-"
+  max_tool_calls: 3
+  max_llm_calls: 2
+  min_filtered: 1

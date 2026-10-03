@@ -1,0 +1,15 @@
+id: tools-query-recent-runs
+suite: core
+version: 1
+kind: tools
+description: query_recent_runs succeeds with injected rows.
+inputs:
+  tool: query_recent_runs
+  expect_ok: true
+  arguments:
+    limit: 1
+  runs:
+    - id: 1
+      source: job104
+      status: success
+expectations: {}

@@ -25,7 +25,7 @@ class JobResearchState:
     notification_status: str = "not_attempted"
     fallback_used: bool = False
     status: str = "running"
-    max_steps: int = 10
+    max_steps: int = 12
     max_tool_calls: int = 6
     max_llm_calls: int = 3
     telegram_enabled: bool = False
@@ -33,6 +33,10 @@ class JobResearchState:
     persist_error: str | None = None
     new_candidate_count: int = 0
     new_filtered: list[dict[str, Any]] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
+    memory_namespace: str = "job_research"
+    memory_document_paths: list[str] = field(default_factory=list)
+    tools_used: list[str] = field(default_factory=list)
 
     def bump_step(self) -> None:
         self.step_count += 1
@@ -41,6 +45,10 @@ class JobResearchState:
                 f"job_research step limit exceeded ({self.max_steps})"
             )
 
+    def record_tool(self, name: str) -> None:
+        self.tool_calls += 1
+        self.tools_used.append(name)
+
     def to_summary(self) -> dict[str, Any]:
         return {
             "profile_name": self.profile_name,
@@ -48,6 +56,7 @@ class JobResearchState:
             "candidate_count": len(self.candidates),
             "filtered_count": len(self.filtered),
             "tool_calls": self.tool_calls,
+            "tools_used": list(self.tools_used),
             "llm_calls": self.llm_calls,
             "step_count": self.step_count,
             "warnings": list(self.warnings),
@@ -55,4 +64,6 @@ class JobResearchState:
             "notification_status": self.notification_status,
             "fallback_used": self.fallback_used,
             "digest_text": self.digest_text,
+            "evidence_count": len(self.evidence),
+            "task_run_id": self.task_run_id,
         }

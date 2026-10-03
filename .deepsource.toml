@@ -8,11 +8,6 @@ exclude_patterns = [
   ".venv/**",
 ]
 
-test_patterns = [
-  "tests/**",
-  "test_*.py",
-]
-
 [[analyzers]]
 name = "python"
 
