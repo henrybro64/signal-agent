@@ -97,9 +97,9 @@ class PermissionPolicy:
     def side_effect_count(self) -> int:
         return self._side_effect_count
 
+    @staticmethod
     def classify_tool(
-        self,
-        tool_name: str,
+        _tool_name: str,
         tool: Any | None = None,
     ) -> PermissionClass | None:
         """Return the tool's permission class, or None for default-deny.
@@ -182,19 +182,21 @@ class PermissionPolicy:
             self._audit(tool_name, args, decision, safe_summary)
             return decision
 
-        if permission != PermissionClass.READ:
-            if self._side_effect_count >= self.config.max_side_effect_actions:
-                decision = PermissionDecision(
-                    allowed=False,
-                    action=action,
-                    permission=permission,
-                    reason=(
-                        "side-effect action limit reached "
-                        f"({self.config.max_side_effect_actions})"
-                    ),
-                )
-                self._audit(tool_name, args, decision, safe_summary)
-                return decision
+        if (
+            permission != PermissionClass.READ
+            and self._side_effect_count >= self.config.max_side_effect_actions
+        ):
+            decision = PermissionDecision(
+                allowed=False,
+                action=action,
+                permission=permission,
+                reason=(
+                    "side-effect action limit reached "
+                    f"({self.config.max_side_effect_actions})"
+                ),
+            )
+            self._audit(tool_name, args, decision, safe_summary)
+            return decision
 
         if action == PolicyAction.ALLOW:
             decision = PermissionDecision(
@@ -243,21 +245,20 @@ class PermissionPolicy:
         summary: str,
     ) -> None:
         safe_args = redact_mapping(arguments, secrets=self.secrets)
-        payload = {
-            "tool_name": tool_name,
-            "allowed": decision.allowed,
-            "action": decision.action.value,
-            "permission": (decision.permission.value if decision.permission else None),
-            "reason": decision.reason,
-            "summary": summary,
-            "arg_keys": sorted(safe_args),
-        }
+        permission_value = decision.permission.value if decision.permission else None
+        arg_keys = sorted(safe_args)
         log_event(
             _LOGGER,
             event="tool_permission_decision",
             message=f"permission {decision.action.value} for {tool_name}",
             level=20 if decision.allowed else 30,
-            **payload,
+            tool_name=tool_name,
+            allowed=decision.allowed,
+            action=decision.action.value,
+            permission=permission_value,
+            reason=decision.reason,
+            summary=summary,
+            arg_keys=arg_keys,
         )
         audit_path = self.config.audit_log_path
         if not audit_path:
@@ -266,7 +267,13 @@ class PermissionPolicy:
         path.parent.mkdir(parents=True, exist_ok=True)
         row = {
             "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            **payload,
+            "tool_name": tool_name,
+            "allowed": decision.allowed,
+            "action": decision.action.value,
+            "permission": permission_value,
+            "reason": decision.reason,
+            "summary": summary,
+            "arg_keys": arg_keys,
         }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")

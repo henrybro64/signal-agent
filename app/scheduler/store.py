@@ -234,7 +234,10 @@ class ScheduleStore:
                 """,
                 (schedule_id, run_id, now, attempt, 1 if dry_run else 0),
             )
-            row_id = int(cursor.lastrowid)
+            raw_row_id = cursor.lastrowid
+            if raw_row_id is None:
+                raise RuntimeError("schedule_runs insert did not return lastrowid")
+            row_id = int(raw_row_id)
             connection.commit()
         return ScheduleRun(
             id=row_id,

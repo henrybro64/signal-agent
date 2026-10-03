@@ -140,28 +140,39 @@ def classify_provider_failure(exc: BaseException | None) -> str:
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, LLMAuthError):
-            return "auth"
-        if isinstance(current, LLMRateLimitError):
-            return "rate_limit"
-        if isinstance(current, LLMTimeoutError):
-            return "timeout"
-        if isinstance(current, LLMNetworkError):
-            return "network"
-        text = str(current).lower()
-        if (
-            "unsupported" in text
-            or "invalid model" in text
-            or ("model" in text and "not" in text and "found" in text)
-        ):
-            return "unsupported_model"
-        if "network" in text or "connection" in text:
-            return "network"
+        labeled = _failure_class_for_exception(current)
+        if labeled is not None:
+            return labeled
         current = current.__cause__ or current.__context__
 
     if isinstance(exc, LLMProviderError):
         return "provider"
     return "unknown"
+
+
+def _failure_class_for_exception(exc: BaseException) -> str | None:
+    typed = (
+        (LLMAuthError, "auth"),
+        (LLMRateLimitError, "rate_limit"),
+        (LLMTimeoutError, "timeout"),
+        (LLMNetworkError, "network"),
+    )
+    for exc_type, label in typed:
+        if isinstance(exc, exc_type):
+            return label
+    return _failure_class_from_message(str(exc).lower())
+
+
+def _failure_class_from_message(text: str) -> str | None:
+    if (
+        "unsupported" in text
+        or "invalid model" in text
+        or ("model" in text and "not" in text and "found" in text)
+    ):
+        return "unsupported_model"
+    if "network" in text or "connection" in text:
+        return "network"
+    return None
 
 
 def _retryable(exc: LLMError) -> bool:

@@ -143,7 +143,7 @@ def _bootstrap_chat_runtime(
 
     policy_box: dict[str, Any] = {}
 
-    def _policy_approve(name: str, args: dict, summary: str) -> bool:
+    def _policy_approve(name: str, _args: dict, summary: str) -> bool:
         permission = None
         active = policy_box.get("policy")
         if active is not None:

@@ -179,107 +179,150 @@ def _run_one(
         return "skipped_overlap"
 
     policy = build_unattended_permission_policy(root=root, config_path=config_path)
+    denied = _permission_preflight(store, schedule, policy=policy)
+    if denied is not None:
+        return denied
+
+    dry_run = schedule.dry_run if dry_run_override is None else dry_run_override
+    policy_token = push_permission_policy(policy)
+    try:
+        return _execute_with_retries(
+            store,
+            schedule,
+            config_path=config_path,
+            runner=runner,
+            dry_run=dry_run,
+        )
+    finally:
+        reset_permission_policy(policy_token)
+
+
+def _permission_preflight(
+    store: ScheduleStore,
+    schedule: Schedule,
+    *,
+    policy: Any,
+) -> str | None:
     tools_catalog = builtin_tools()
     for tool_name in schedule.metadata.get("require_tools") or []:
         tool = tools_catalog.get(str(tool_name))
         decision = policy.decide(str(tool_name), {}, tool=tool)
-        if not decision.allowed:
-            run_id = str(uuid.uuid4())
-            store.mark_started(
-                schedule.id,
-                run_id=run_id,
-                attempt=1,
-                dry_run=bool(schedule.dry_run),
-            )
-            current = store.get(schedule.id) or schedule
-            store.mark_finished(
-                current,
-                run_id=run_id,
-                status="permission_denied",
-                error=decision.reason[:300],
-            )
-            log_event(
-                _LOGGER,
-                event="schedule_permission_denied",
-                message="schedule blocked by permission policy",
-                level=30,
-                schedule_id=schedule.id,
-                run_id=run_id,
-                tool_name=str(tool_name),
-                reason=decision.reason,
-            )
-            return "skipped_permission"
+        if decision.allowed:
+            continue
+        run_id = str(uuid.uuid4())
+        store.mark_started(
+            schedule.id,
+            run_id=run_id,
+            attempt=1,
+            dry_run=bool(schedule.dry_run),
+        )
+        current = store.get(schedule.id) or schedule
+        store.mark_finished(
+            current,
+            run_id=run_id,
+            status="permission_denied",
+            error=decision.reason[:300],
+        )
+        log_event(
+            _LOGGER,
+            event="schedule_permission_denied",
+            message="schedule blocked by permission policy",
+            level=30,
+            schedule_id=schedule.id,
+            run_id=run_id,
+            tool_name=str(tool_name),
+            reason=decision.reason,
+        )
+        return "skipped_permission"
+    return None
 
-    dry_run = schedule.dry_run if dry_run_override is None else dry_run_override
+
+def _execute_with_retries(
+    store: ScheduleStore,
+    schedule: Schedule,
+    *,
+    config_path: str,
+    runner: Any,
+    dry_run: bool,
+) -> str:
     attempt = 1
-    # Install unattended policy for nested tool invokes during this run.
-    policy_token = push_permission_policy(policy)
-    try:
-        while attempt <= max(1, schedule.max_retries + 1):
-            run_id = str(uuid.uuid4())
-            store.mark_started(
-                schedule.id,
-                run_id=run_id,
-                attempt=attempt,
-                dry_run=dry_run,
-            )
+    max_attempts = max(1, schedule.max_retries + 1)
+    while attempt <= max_attempts:
+        run_id = str(uuid.uuid4())
+        store.mark_started(
+            schedule.id,
+            run_id=run_id,
+            attempt=attempt,
+            dry_run=dry_run,
+        )
+        log_event(
+            _LOGGER,
+            event="schedule_run_started",
+            message="schedule run started",
+            schedule_id=schedule.id,
+            run_id=run_id,
+            task_name=schedule.task_name,
+            attempt=attempt,
+            dry_run=dry_run,
+        )
+        try:
+            if not dry_run:
+                runner(schedule.task_name, config_path=config_path)
+            current = store.get(schedule.id) or schedule
+            store.mark_finished(current, run_id=run_id, status="success")
             log_event(
                 _LOGGER,
-                event="schedule_run_started",
-                message="schedule run started",
+                event="schedule_run_finished",
+                message="schedule run finished",
                 schedule_id=schedule.id,
                 run_id=run_id,
-                task_name=schedule.task_name,
-                attempt=attempt,
-                dry_run=dry_run,
+                status="success",
             )
-            try:
-                if dry_run:
-                    status = "success"
-                else:
-                    runner(schedule.task_name, config_path=config_path)
-                    status = "success"
-                # Refresh schedule row so next_run uses latest cron/timezone.
-                current = store.get(schedule.id) or schedule
-                store.mark_finished(current, run_id=run_id, status=status)
-                log_event(
-                    _LOGGER,
-                    event="schedule_run_finished",
-                    message="schedule run finished",
-                    schedule_id=schedule.id,
-                    run_id=run_id,
-                    status=status,
-                )
-                return "started_ok"
-            except Exception as exc:  # noqa: BLE001
-                last_error = f"{type(exc).__name__}: {exc}"[:300]
-                transient = _is_transient(exc)
-                final_attempt = attempt > schedule.max_retries or not transient
-                current = store.get(schedule.id) or schedule
-                store.mark_finished(
-                    current,
-                    run_id=run_id,
-                    status="failed",
-                    error=last_error,
-                    schedule_next=final_attempt,
-                )
-                log_event(
-                    _LOGGER,
-                    event="schedule_run_failed",
-                    message="schedule run failed",
-                    level=40,
-                    schedule_id=schedule.id,
-                    run_id=run_id,
-                    attempt=attempt,
-                    error=last_error,
-                )
-                if final_attempt:
-                    return "started_failed"
-                time.sleep(max(0.0, schedule.backoff_seconds))
-                attempt += 1
-        return "started_failed"
-    finally:
-        reset_permission_policy(policy_token)
+            return "started_ok"
+        except Exception as exc:  # noqa: BLE001
+            outcome = _finish_failed_attempt(
+                store,
+                schedule,
+                run_id=run_id,
+                attempt=attempt,
+                exc=exc,
+            )
+            if outcome == "started_failed":
+                return outcome
+            time.sleep(max(0.0, schedule.backoff_seconds))
+            attempt += 1
+    return "started_failed"
+
+
+def _finish_failed_attempt(
+    store: ScheduleStore,
+    schedule: Schedule,
+    *,
+    run_id: str,
+    attempt: int,
+    exc: BaseException,
+) -> str:
+    last_error = f"{type(exc).__name__}: {exc}"[:300]
+    final_attempt = attempt > schedule.max_retries or not _is_transient(exc)
+    current = store.get(schedule.id) or schedule
+    store.mark_finished(
+        current,
+        run_id=run_id,
+        status="failed",
+        error=last_error,
+        schedule_next=final_attempt,
+    )
+    log_event(
+        _LOGGER,
+        event="schedule_run_failed",
+        message="schedule run failed",
+        level=40,
+        schedule_id=schedule.id,
+        run_id=run_id,
+        attempt=attempt,
+        error=last_error,
+    )
+    return "started_failed" if final_attempt else "retry"
 
 
 def _default_task_runner(task_name: str, *, config_path: str) -> None:

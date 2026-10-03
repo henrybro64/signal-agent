@@ -147,7 +147,7 @@ class JobResearchAgentTask(BaseTask):
             permission_policy=policy,
         )
 
-        provider = None
+        provider: Any = None
         llm_cfg = config.llm
         if task_cfg.llm_provider or task_cfg.llm_model:
             llm_cfg = replace(
