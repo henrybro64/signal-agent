@@ -1,0 +1,311 @@
+"""Command-line entrypoint for signal-agent (#81/#82/#83)."""
+
+from __future__ import annotations
+
+import sys
+import time
+from typing import Any
+
+from app.cli.legacy import (
+    DEFAULT_CONFIG_PATH,
+    print_health_report,
+    print_recent_runs,
+    run_eval_command,
+    run_langchain_smoke_command,
+    run_mcp_serve_command,
+    run_task_with_failure_alerts,
+    send_telegram_test_message,
+)
+from app.cli.parser import build_parser
+from app.config import ConfigError, SecretError
+from app.core.health import HealthError
+from app.notifiers import TelegramNotifierError
+from app.tasks import build_task, list_tasks
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Dispatch subcommands or legacy flags; return a process exit code."""
+
+    parser = build_parser()
+    # Global options (`--config`, `--root`) should appear before the subcommand.
+    args = parser.parse_args(argv)
+
+    try:
+        if args.command:
+            return _dispatch_command(args)
+
+        # Legacy flag path for backward compatibility.
+        if args.list_tasks:
+            print("\n".join(list_tasks()))
+            return 0
+        if args.health:
+            print_health_report()
+            return 0
+        if args.recent_runs:
+            print_recent_runs(limit=args.limit)
+            return 0
+        if args.telegram_test is not None:
+            send_telegram_test_message(args.telegram_test)
+            return 0
+        if args.langchain_smoke:
+            return run_langchain_smoke_command()
+        if args.eval is not None:
+            return run_eval_command(suite=args.eval)
+        if args.mcp_serve:
+            return run_mcp_serve_command(
+                host=args.mcp_host,
+                port=args.mcp_port,
+                transport=args.mcp_transport,
+                config_path=args.config,
+            )
+        if args.task is not None:
+            run_task_with_failure_alerts(args.task, config_path=args.config)
+            return 0
+
+        parser.print_help()
+        return 0
+    except (
+        FileNotFoundError,
+        ConfigError,
+        HealthError,
+        SecretError,
+        TelegramNotifierError,
+        ValueError,
+    ) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+
+def _dispatch_command(args: Any) -> int:
+    command = args.command
+    if command == "setup":
+        return _cmd_setup(args)
+    if command == "config":
+        return _cmd_config(args)
+    if command == "doctor":
+        return _cmd_doctor(args)
+    if command == "start":
+        return _cmd_start(args)
+    if command == "stop":
+        return _cmd_stop(args)
+    if command == "restart":
+        return _cmd_restart(args)
+    if command == "status":
+        return _cmd_status(args)
+    if command == "chat":
+        return _cmd_chat(args)
+    if command == "run":
+        return _cmd_run(args)
+    if command == "tasks":
+        print("\n".join(list_tasks()))
+        return 0
+    if command == "models":
+        return _cmd_models(args)
+    if command == "tools":
+        return _cmd_tools(args)
+    if command == "logs":
+        return _cmd_logs(args)
+    print(f"Unknown command: {command}", file=sys.stderr)
+    return 2
+
+
+def _cmd_setup(args: Any) -> int:
+    from app.setup import (
+        SetupOptions,
+        format_validation_report,
+        redact_setup_text,
+        run_setup,
+    )
+
+    options = SetupOptions(
+        provider=args.provider,
+        model=args.model,
+        llm_enabled=bool(args.llm_enabled),
+        openai_api_key=args.openai_api_key,
+        telegram_enabled=bool(args.telegram_enabled),
+        telegram_bot_token=args.telegram_bot_token,
+        telegram_chat_id=args.telegram_chat_id,
+        non_interactive=bool(args.non_interactive),
+        force=bool(args.force),
+    )
+    result = run_setup(root=args.root, options=options)
+    print(redact_setup_text(f"config: {result.config_path}"))
+    print(redact_setup_text(f"env: {result.env_path}"))
+    print(redact_setup_text(f"database: {result.db_path}"))
+    print(redact_setup_text(f"browser: {result.browser_detail}"))
+    print(redact_setup_text(format_validation_report(result.validation)))
+    return 0 if result.validation.ok else 1
+
+
+def _cmd_config(args: Any) -> int:
+    from app.setup import redact_setup_text, show_config_redacted
+
+    if args.config_command != "show":
+        print("Usage: signal-agent config show", file=sys.stderr)
+        return 2
+    print(
+        redact_setup_text(
+            show_config_redacted(root=args.root, config_path=args.config)
+        )
+    )
+    return 0
+
+
+def _cmd_doctor(args: Any) -> int:
+    from app.runtime import collect_status, format_status_report
+    from app.setup import (
+        format_validation_report,
+        redact_setup_text,
+        validate_local_setup,
+    )
+
+    report = validate_local_setup(root=args.root, config_path=args.config)
+    status = collect_status(root=args.root, config_path=args.config)
+    print(redact_setup_text(format_validation_report(report)))
+    print()
+    print(redact_setup_text(format_status_report(status)))
+    return 0 if report.ok else 1
+
+
+def _cmd_start(args: Any) -> int:
+    from app.runtime import RuntimeLifecycleError, start_runtime
+
+    try:
+        info = start_runtime(root=args.root, config_path=args.config, detach=True)
+    except RuntimeLifecycleError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"Runtime started pid={info.pid}")
+    return 0
+
+
+def _cmd_stop(args: Any) -> int:
+    from app.runtime import stop_runtime
+
+    info = stop_runtime(root=args.root)
+    print(f"Runtime {info.detail}")
+    return 0
+
+
+def _cmd_restart(args: Any) -> int:
+    from app.runtime import RuntimeLifecycleError, restart_runtime
+
+    try:
+        info = restart_runtime(root=args.root, config_path=args.config)
+    except RuntimeLifecycleError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"Runtime restarted pid={info.pid}")
+    return 0
+
+
+def _cmd_status(args: Any) -> int:
+    from app.runtime import collect_status, format_status_report
+
+    print(format_status_report(collect_status(root=args.root, config_path=args.config)))
+    return 0
+
+
+def _cmd_chat(args: Any) -> int:
+    from app.chat import ChatBudgets, run_chat_repl
+
+    token_budget = args.max_estimated_tokens or None
+    return run_chat_repl(
+        root=args.root,
+        config_path=args.config,
+        session_id=args.session or None,
+        budgets=ChatBudgets(
+            max_session_turns=args.max_turns,
+            max_steps_per_turn=args.max_steps,
+            max_tool_calls=args.max_tool_calls,
+            max_estimated_tokens=token_budget,
+        ),
+    )
+
+
+def _cmd_run(args: Any) -> int:
+    run_task_with_failure_alerts(args.task_name, config_path=args.config)
+    return 0
+
+
+def _cmd_models(args: Any) -> int:
+    from app.core.config import load_config
+    from app.llm import supported_llm_providers
+
+    providers = ", ".join(sorted(supported_llm_providers()))
+    print(f"supported_providers: {providers}")
+    try:
+        config = load_config(args.config)
+        print(f"configured: provider={config.llm.provider} model={config.llm.model}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"configured: unavailable ({type(exc).__name__})")
+    return 0
+
+
+def _cmd_tools(args: Any) -> int:
+    from app.core.config import load_config
+    from app.tools import DEFAULT_TOOL_ALLOWLIST, build_tool_registry
+
+    try:
+        config = load_config(args.config)
+        allowlist = list(config.tools.allowlist or DEFAULT_TOOL_ALLOWLIST)
+    except Exception:  # noqa: BLE001
+        allowlist = list(DEFAULT_TOOL_ALLOWLIST)
+    registry = build_tool_registry(allowlist=allowlist)
+    for item in registry.list_tools():
+        print(f"{item['name']}: {item['description']}")
+    return 0
+
+
+def _cmd_logs(args: Any) -> int:
+    from app.runtime import format_log_lines, read_log_tail
+    from app.runtime.paths import log_path
+
+    if args.lines < 0:
+        raise ValueError("--lines must be non-negative")
+    if not args.follow:
+        print(format_log_lines(read_log_tail(root=args.root, lines=args.lines)))
+        return 0
+
+    path = log_path(args.root)
+    print(format_log_lines(read_log_tail(root=args.root, lines=args.lines)))
+    offset = path.stat().st_size if path.is_file() else 0
+    try:
+        while True:
+            time.sleep(0.5)
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+            if size < offset:
+                offset = 0
+            if size == offset:
+                continue
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(offset)
+                chunk = handle.read()
+                offset = handle.tell()
+            from app.runtime.logs import collect_secrets
+            from app.tools.redaction import redact_value
+
+            secrets = collect_secrets(args.root)
+            sys.stdout.write(redact_value(chunk, secrets))
+            sys.stdout.flush()
+    except KeyboardInterrupt:
+        print("", file=sys.stderr)
+        return 0
+
+
+# Re-exports used by older tests/monkeypatches.
+__all__ = [
+    "DEFAULT_CONFIG_PATH",
+    "build_parser",
+    "build_task",
+    "main",
+    "print_health_report",
+    "print_recent_runs",
+    "run_eval_command",
+    "run_langchain_smoke_command",
+    "run_mcp_serve_command",
+    "run_task_with_failure_alerts",
+    "send_telegram_test_message",
+]

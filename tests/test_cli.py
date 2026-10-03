@@ -47,7 +47,7 @@ def test_cli_telegram_test_uses_default_message(
             sent_messages.append(text)
 
     monkeypatch.setattr(
-        "app.cli.load_env_settings",
+        "app.cli.legacy.load_env_settings",
         lambda: EnvSettings(
             openai_api_key=None,
             telegram_bot_token="token-123",
@@ -56,7 +56,7 @@ def test_cli_telegram_test_uses_default_message(
         ),
     )
     monkeypatch.setattr(
-        "app.cli.build_telegram_notifier",
+        "app.cli.legacy.build_telegram_notifier",
         lambda *, env: FakeNotifier(),
     )
 
@@ -80,7 +80,7 @@ def test_cli_telegram_test_uses_custom_message(
             sent_messages.append(text)
 
     monkeypatch.setattr(
-        "app.cli.load_env_settings",
+        "app.cli.legacy.load_env_settings",
         lambda: EnvSettings(
             openai_api_key=None,
             telegram_bot_token="token-123",
@@ -89,7 +89,7 @@ def test_cli_telegram_test_uses_custom_message(
         ),
     )
     monkeypatch.setattr(
-        "app.cli.build_telegram_notifier",
+        "app.cli.legacy.build_telegram_notifier",
         lambda *, env: FakeNotifier(),
     )
 
@@ -104,7 +104,7 @@ def test_cli_telegram_test_missing_credentials_returns_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "app.cli.load_env_settings",
+        "app.cli.legacy.load_env_settings",
         lambda: EnvSettings(
             openai_api_key=None,
             telegram_bot_token=None,
@@ -133,11 +133,11 @@ def test_cli_failed_task_triggers_failure_alert(
             raise ValueError("TWSE timeout")
 
     monkeypatch.setattr(
-        "app.cli.build_task",
+        "app.cli.legacy.build_task",
         lambda name, *, config_path: FailingTask(),
     )
     monkeypatch.setattr(
-        "app.cli.notify_task_failure",
+        "app.cli.legacy.notify_task_failure",
         lambda **kwargs: recorded_calls.append(kwargs),
     )
 
@@ -164,7 +164,7 @@ def test_cli_failure_alert_errors_do_not_mask_task_failure(
             raise ValueError("market data timeout")
 
     monkeypatch.setattr(
-        "app.cli.build_task",
+        "app.cli.legacy.build_task",
         lambda name, *, config_path: FailingTask(),
     )
 
@@ -172,7 +172,7 @@ def test_cli_failure_alert_errors_do_not_mask_task_failure(
         raise RuntimeError("telegram outage")
 
     monkeypatch.setattr(
-        "app.cli.notify_task_failure",
+        "app.cli.legacy.notify_task_failure",
         raise_alert_error,
     )
 

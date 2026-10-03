@@ -13,9 +13,9 @@ Operator docs stay in this README.
 ## Status
 
 MVP workflows for job search and Taiwan stock movers are implemented, with
-Docker Compose and k3s CronJob deployment paths. M6 hardening (#49–#57) is
-complete on `main`. Open platform work is M7 (#60–#67); see `AGENTS.md` and
-the M7 roadmap.
+Docker Compose and k3s CronJob deployment paths. M6 hardening (#49–#57) and
+M7 agent platform pieces (#60–#67) are on `main`. M8 adds an OpenClaw-like
+local product CLI (`setup`, runtime lifecycle, and `chat`); see `AGENTS.md`.
 
 It now includes early best-effort job collectors for `job104`, `indeed`,
 `glassdoor`, and `linkedin_email`. Some live runs can still be blocked by
@@ -29,22 +29,29 @@ aborting the whole run.
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-cp .env.example .env
-python main.py --help
+
+# First-run wizard (writes config.yaml + .env, initializes SQLite)
+signal-agent setup --non-interactive --provider fake
+signal-agent doctor
+signal-agent config show
+
+# Unified CLI (`--root` / `--config` work before or after the subcommand)
+signal-agent tasks
+signal-agent run dummy
+signal-agent status
+signal-agent chat
+signal-agent start   # long-running worker (survives individual tick failures)
+signal-agent stop
+
+# Legacy flags still work during migration
 python main.py --list-tasks
-python main.py --health
-python main.py --recent-runs --limit 5
-python main.py --task dummy
-python main.py --task fetch
 python main.py --task job_search
-python main.py --task job_research_agent
-python main.py --task tw_stock_movers
-python main.py --telegram-test
-# Optional: pip install -e '.[langchain]' then:
-# python main.py --langchain-smoke
-signal-agent --help
-python -m pytest
+python main.py --health
 ```
+
+`setup` never prints API keys. Re-running setup keeps existing `.env` secrets
+and comments unless you pass `--force` (which writes a `.bak` backup first).
+Optional Telegram/browser/MCP integrations can stay disabled.
 
 ## Docker Compose
 
