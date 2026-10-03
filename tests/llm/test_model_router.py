@@ -72,9 +72,7 @@ def test_routed_provider_fallback_success_and_all_failed() -> None:
         primary=ModelRef("fake", "primary"),
         fallbacks=[ModelRef("fake", "backup")],
         max_retries=0,
-        provider_factory=lambda **_: _FailThenOk(
-            fail_with=LLMRateLimitError("429")
-        ),
+        provider_factory=lambda **_: _FailThenOk(fail_with=LLMRateLimitError("429")),
     )
     with pytest.raises(LLMProviderError, match="All providers"):
         broken.generate(LLMRequest(instructions="x", input="y"))
@@ -171,6 +169,47 @@ def test_auth_failure_health_does_not_leak_credentials(tmp_path: Path) -> None:
     assert result["ok"] is False
     assert result["failure_class"] == "auth"
     assert "sk-should-not-appear" not in result["error"]
+
+
+def test_network_failures_are_retryable_and_providers_are_cached() -> None:
+    attempts = {"n": 0}
+
+    class FlakyNetwork:
+        name = "fake"
+
+        def generate(self, request: LLMRequest) -> LLMResponse:
+            del request
+            attempts["n"] += 1
+            if attempts["n"] < 2:
+                raise LLMNetworkError("connection reset")
+            return LLMResponse(text="ok", model="m", raw={})
+
+    factory_calls = {"n": 0}
+
+    def factory(**kwargs):
+        del kwargs
+        factory_calls["n"] += 1
+        return FlakyNetwork()
+
+    router = RoutedLLMProvider(
+        primary=ModelRef("fake", "primary"),
+        max_retries=1,
+        provider_factory=factory,
+    )
+    response = router.generate(LLMRequest(instructions="x", input="y"))
+    assert response.text == "ok"
+    assert attempts["n"] == 2
+    assert factory_calls["n"] == 1
+
+    auth_router = RoutedLLMProvider(
+        primary=ModelRef("fake", "primary"),
+        max_retries=2,
+        provider_factory=lambda **_: _FailThenOk(fail_with=LLMAuthError("401")),
+    )
+    with pytest.raises(LLMAuthError):
+        auth_router.generate(LLMRequest(instructions="x", input="y"))
+    # Auth is terminal: one attempt only despite max_retries=2.
+    assert auth_router._providers  # cached provider exists
 
 
 def test_models_set_rejects_unknown_provider(tmp_path: Path) -> None:

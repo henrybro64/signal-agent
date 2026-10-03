@@ -138,9 +138,7 @@ class ToolsConfig:
         ]
     )
     timeout_seconds: float = 30.0
-    permissions: ToolsPermissionsConfig = field(
-        default_factory=ToolsPermissionsConfig
-    )
+    permissions: ToolsPermissionsConfig = field(default_factory=ToolsPermissionsConfig)
 
 
 @dataclass(slots=True)
@@ -153,7 +151,6 @@ class ThemeMappingConfig:
 class InvestmentConfig:
     watchlist: list[str] = field(default_factory=list)
     theme_mappings: dict[str, ThemeMappingConfig] = field(default_factory=dict)
-
 
 
 @dataclass(slots=True)
@@ -511,8 +508,6 @@ _DEFAULT_STOCK_WATCHLIST_SOURCES: tuple[str, ...] = ("twse", "tpex")
 _SUPPORTED_STOCK_WATCHLIST_SOURCES = frozenset(_DEFAULT_STOCK_WATCHLIST_SOURCES)
 
 
-
-
 def _parse_tw_market_assistant_config(
     data: dict[str, Any] | None,
     *,
@@ -740,8 +735,13 @@ def _parse_tools_config(
     else:
         allowlist = [item.strip() for item in allowlist_raw]
 
+    permissions_raw = data.get("permissions")
+    if permissions_raw is not None and not isinstance(permissions_raw, dict):
+        raise ConfigError(
+            f"Config value '{parent}.permissions' must be a mapping in {source_name}"
+        )
     permissions = _parse_tools_permissions_config(
-        data.get("permissions") if isinstance(data.get("permissions"), dict) else None,
+        permissions_raw,
         source_name=source_name,
     )
     return ToolsConfig(
@@ -862,6 +862,26 @@ _SUPPORTED_LLM_PROVIDERS = frozenset({"openai", "fake"})
 _LLM_CONFIG_PATH = "llm"
 
 
+def _validate_llm_fallback_provider(
+    provider: str,
+    *,
+    index: int,
+    source_name: str,
+) -> None:
+    if provider not in _SUPPORTED_LLM_PROVIDERS and provider != "ollama":
+        supported = ", ".join(sorted(_SUPPORTED_LLM_PROVIDERS))
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}].provider' "
+            f"must be one of {supported} in {source_name}"
+        )
+    if provider == "ollama":
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}].provider' "
+            f"value 'ollama' is reserved but not implemented yet "
+            f"in {source_name}"
+        )
+
+
 def _parse_llm_config(
     data: dict[str, Any] | None,
     *,
@@ -872,13 +892,17 @@ def _parse_llm_config(
     if not data:
         return LlmConfig()
 
-    provider = _optional_str(
-        data,
-        "provider",
-        default="openai",
-        parent_path=_LLM_CONFIG_PATH,
-        source_name=source_name,
-    ).strip().lower()
+    provider = (
+        _optional_str(
+            data,
+            "provider",
+            default="openai",
+            parent_path=_LLM_CONFIG_PATH,
+            source_name=source_name,
+        )
+        .strip()
+        .lower()
+    )
     if provider == "ollama":
         raise ConfigError(
             f"Config value '{_LLM_CONFIG_PATH}.provider' value 'ollama' is "
@@ -941,16 +965,20 @@ def _parse_llm_config(
         for index, item in enumerate(fallbacks_raw):
             if isinstance(item, str):
                 provider_name, _, model_name = item.partition("/")
+                provider_name = provider_name.strip().lower()
+                model_name = model_name.strip()
                 if not provider_name or not model_name:
                     raise ConfigError(
                         f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}]' "
                         f"must look like provider/model in {source_name}"
                     )
+                _validate_llm_fallback_provider(
+                    provider_name,
+                    index=index,
+                    source_name=source_name,
+                )
                 fallbacks.append(
-                    LlmFallbackConfig(
-                        provider=provider_name.strip().lower(),
-                        model=model_name.strip(),
-                    )
+                    LlmFallbackConfig(provider=provider_name, model=model_name)
                 )
                 continue
             if not isinstance(item, dict):
@@ -958,30 +986,27 @@ def _parse_llm_config(
                     f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}]' "
                     f"must be a string or mapping in {source_name}"
                 )
-            fb_provider = _require_str(
-                item,
-                "provider",
-                parent_path=f"{_LLM_CONFIG_PATH}.fallbacks[{index}]",
-                source_name=source_name,
-            ).strip().lower()
+            fb_provider = (
+                _require_str(
+                    item,
+                    "provider",
+                    parent_path=f"{_LLM_CONFIG_PATH}.fallbacks[{index}]",
+                    source_name=source_name,
+                )
+                .strip()
+                .lower()
+            )
             fb_model = _require_str(
                 item,
                 "model",
                 parent_path=f"{_LLM_CONFIG_PATH}.fallbacks[{index}]",
                 source_name=source_name,
             )
-            if fb_provider not in _SUPPORTED_LLM_PROVIDERS and fb_provider != "ollama":
-                supported = ", ".join(sorted(_SUPPORTED_LLM_PROVIDERS))
-                raise ConfigError(
-                    f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}].provider' "
-                    f"must be one of {supported} in {source_name}"
-                )
-            if fb_provider == "ollama":
-                raise ConfigError(
-                    f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}].provider' "
-                    f"value 'ollama' is reserved but not implemented yet "
-                    f"in {source_name}"
-                )
+            _validate_llm_fallback_provider(
+                fb_provider,
+                index=index,
+                source_name=source_name,
+            )
             fallbacks.append(LlmFallbackConfig(provider=fb_provider, model=fb_model))
 
     return LlmConfig(
@@ -1018,11 +1043,7 @@ def _reconcile_llm_model_settings(
     scoring_model_explicit = "llm_model" in scoring_raw
     llm_model_explicit = isinstance(llm_raw, dict) and "model" in llm_raw
 
-    if (
-        scoring_model_explicit
-        and llm_model_explicit
-        and scoring.llm_model != llm.model
-    ):
+    if scoring_model_explicit and llm_model_explicit and scoring.llm_model != llm.model:
         raise ConfigError(
             f"Config values 'scoring.llm_model' ({scoring.llm_model!r}) and "
             f"'llm.model' ({llm.model!r}) must match in {source_name}; "
@@ -1121,11 +1142,7 @@ def _parse_stock_watchlist_sources(
         sources = list(_DEFAULT_STOCK_WATCHLIST_SOURCES)
 
     unsupported = sorted(
-        {
-            name
-            for name in sources
-            if name not in _SUPPORTED_STOCK_WATCHLIST_SOURCES
-        }
+        {name for name in sources if name not in _SUPPORTED_STOCK_WATCHLIST_SOURCES}
     )
     if unsupported:
         supported = ", ".join(sorted(_SUPPORTED_STOCK_WATCHLIST_SOURCES))
@@ -1165,13 +1182,11 @@ def _parse_stock_watchlist_symbols(
         ).strip()
         if not code:
             raise ConfigError(
-                f"Config value '{entry_path}.code' must not be blank "
-                f"in {source_name}"
+                f"Config value '{entry_path}.code' must not be blank in {source_name}"
             )
         if code in seen_codes:
             raise ConfigError(
-                f"Duplicate stock_watchlist symbol code '{code}' in "
-                f"{source_name}"
+                f"Duplicate stock_watchlist symbol code '{code}' in {source_name}"
             )
         seen_codes.add(code)
 
@@ -1326,9 +1341,7 @@ def _parse_job_search_task_config(
                 f"one profile in {source_name}"
             )
         sources = _unique_preserve_order(
-            source
-            for profile in profiles
-            for source in profile.sources
+            source for profile in profiles for source in profile.sources
         )
         # Keep legacy top-level fields populated for fetch/helpers that still
         # read tasks.job_search.sources/keywords/locations.
@@ -1415,12 +1428,15 @@ def _parse_job_search_profiles(
         seen_names.add(name)
         scorer_profile = None
         if "scorer_profile" in entry:
-            scorer_profile = _require_str(
-                entry,
-                "scorer_profile",
-                parent_path=entry_path,
-                source_name=source_name,
-            ).strip() or None
+            scorer_profile = (
+                _require_str(
+                    entry,
+                    "scorer_profile",
+                    parent_path=entry_path,
+                    source_name=source_name,
+                ).strip()
+                or None
+            )
         profiles.append(
             JobSearchProfileConfig(
                 name=name,
@@ -1562,15 +1578,13 @@ def _parse_job_http_source_config(
     source_name: str,
 ) -> JobHttpSourceConfig:
     defaults = JobHttpSourceConfig()
-    timeout_seconds, max_retries, request_delay_seconds = (
-        _parse_http_runtime_settings(
-            data,
-            parent_path=parent_path,
-            source_name=source_name,
-            timeout_seconds=defaults.timeout_seconds,
-            max_retries=defaults.max_retries,
-            request_delay_seconds=defaults.request_delay_seconds,
-        )
+    timeout_seconds, max_retries, request_delay_seconds = _parse_http_runtime_settings(
+        data,
+        parent_path=parent_path,
+        source_name=source_name,
+        timeout_seconds=defaults.timeout_seconds,
+        max_retries=defaults.max_retries,
+        request_delay_seconds=defaults.request_delay_seconds,
     )
     page_limit = _optional_int(
         data,
@@ -1636,15 +1650,13 @@ def _parse_tw_stock_http_source_config(
     source_name: str,
 ) -> TwStockHttpSourceConfig:
     defaults = TwStockHttpSourceConfig()
-    timeout_seconds, max_retries, request_delay_seconds = (
-        _parse_http_runtime_settings(
-            data,
-            parent_path=parent_path,
-            source_name=source_name,
-            timeout_seconds=defaults.timeout_seconds,
-            max_retries=defaults.max_retries,
-            request_delay_seconds=defaults.request_delay_seconds,
-        )
+    timeout_seconds, max_retries, request_delay_seconds = _parse_http_runtime_settings(
+        data,
+        parent_path=parent_path,
+        source_name=source_name,
+        timeout_seconds=defaults.timeout_seconds,
+        max_retries=defaults.max_retries,
+        request_delay_seconds=defaults.request_delay_seconds,
     )
     batch_size = _optional_int(
         data,
@@ -1727,8 +1739,7 @@ def _require_positive_number(
 ) -> None:
     if value <= 0:
         raise ConfigError(
-            f"Config value '{config_path}' must be greater than zero "
-            f"in {source_name}"
+            f"Config value '{config_path}' must be greater than zero in {source_name}"
         )
 
 
@@ -1740,8 +1751,7 @@ def _require_non_negative_number(
 ) -> None:
     if value < 0:
         raise ConfigError(
-            f"Config value '{config_path}' must be zero or greater "
-            f"in {source_name}"
+            f"Config value '{config_path}' must be zero or greater in {source_name}"
         )
 
 
@@ -1753,8 +1763,7 @@ def _require_positive_int(
 ) -> None:
     if value <= 0:
         raise ConfigError(
-            f"Config value '{config_path}' must be greater than zero "
-            f"in {source_name}"
+            f"Config value '{config_path}' must be greater than zero in {source_name}"
         )
 
 
@@ -1766,8 +1775,7 @@ def _require_non_negative_int(
 ) -> None:
     if value < 0:
         raise ConfigError(
-            f"Config value '{config_path}' must be zero or greater "
-            f"in {source_name}"
+            f"Config value '{config_path}' must be zero or greater in {source_name}"
         )
 
 

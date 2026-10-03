@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -64,11 +65,13 @@ def run_schedule_tick(
     due = store.due(now=moment)
     result.due = len(due)
     runner = task_runner or _default_task_runner
+    resolved_db = Path(db_path or runtime_paths.db_path(base))
     for schedule in due:
         outcome = _run_one(
             store,
             schedule,
             root=base,
+            db_path=resolved_db,
             config_path=str(config_path or runtime_paths.config_path(base)),
             runner=runner,
         )
@@ -107,7 +110,8 @@ def run_schedule_now(
     """Manually run one schedule; return final status."""
 
     base = runtime_paths.project_root(root)
-    store = ScheduleStore(db_path or runtime_paths.db_path(base))
+    resolved_db = Path(db_path or runtime_paths.db_path(base))
+    store = ScheduleStore(resolved_db)
     schedule = store.get(schedule_id)
     if schedule is None:
         raise KeyError(schedule_id)
@@ -115,6 +119,7 @@ def run_schedule_now(
         store,
         schedule,
         root=base,
+        db_path=resolved_db,
         config_path=str(config_path or runtime_paths.config_path(base)),
         runner=task_runner or _default_task_runner,
         force=True,
@@ -168,6 +173,7 @@ def _run_one(
     schedule: Schedule,
     *,
     root: Path,
+    db_path: Path,
     config_path: str,
     runner: Any,
     force: bool = False,
@@ -179,7 +185,12 @@ def _run_one(
         return "skipped_overlap"
 
     policy = build_unattended_permission_policy(root=root, config_path=config_path)
-    denied = _permission_preflight(store, schedule, policy=policy)
+    denied = _permission_preflight(
+        store,
+        schedule,
+        policy=policy,
+        force=force,
+    )
     if denied is not None:
         return denied
 
@@ -189,9 +200,12 @@ def _run_one(
         return _execute_with_retries(
             store,
             schedule,
+            root=root,
+            db_path=db_path,
             config_path=config_path,
             runner=runner,
             dry_run=dry_run,
+            force=force,
         )
     finally:
         reset_permission_policy(policy_token)
@@ -202,6 +216,7 @@ def _permission_preflight(
     schedule: Schedule,
     *,
     policy: Any,
+    force: bool,
 ) -> str | None:
     tools_catalog = builtin_tools()
     for tool_name in schedule.metadata.get("require_tools") or []:
@@ -210,12 +225,17 @@ def _permission_preflight(
         if decision.allowed:
             continue
         run_id = str(uuid.uuid4())
-        store.mark_started(
+        claimed = store.mark_started(
             schedule.id,
             run_id=run_id,
             attempt=1,
             dry_run=bool(schedule.dry_run),
+            expected_next_run_at=schedule.next_run_at,
+            force=force,
+            exclusive=not schedule.allow_overlap,
         )
+        if claimed is None:
+            return "skipped_overlap"
         current = store.get(schedule.id) or schedule
         store.mark_finished(
             current,
@@ -241,20 +261,30 @@ def _execute_with_retries(
     store: ScheduleStore,
     schedule: Schedule,
     *,
+    root: Path,
+    db_path: Path,
     config_path: str,
     runner: Any,
     dry_run: bool,
+    force: bool,
 ) -> str:
     attempt = 1
     max_attempts = max(1, schedule.max_retries + 1)
+    claimed_next = schedule.next_run_at
     while attempt <= max_attempts:
         run_id = str(uuid.uuid4())
-        store.mark_started(
+        claimed = store.mark_started(
             schedule.id,
             run_id=run_id,
             attempt=attempt,
             dry_run=dry_run,
+            expected_next_run_at=claimed_next if attempt == 1 else None,
+            resume_retry=attempt > 1,
+            force=force and attempt == 1,
+            exclusive=not schedule.allow_overlap,
         )
+        if claimed is None:
+            return "skipped_overlap"
         log_event(
             _LOGGER,
             event="schedule_run_started",
@@ -267,7 +297,12 @@ def _execute_with_retries(
         )
         try:
             if not dry_run:
-                runner(schedule.task_name, config_path=config_path)
+                runner(
+                    schedule.task_name,
+                    config_path=config_path,
+                    root=root,
+                    db_path=db_path,
+                )
             current = store.get(schedule.id) or schedule
             store.mark_finished(current, run_id=run_id, status="success")
             log_event(
@@ -325,10 +360,28 @@ def _finish_failed_attempt(
     return "started_failed" if final_attempt else "retry"
 
 
-def _default_task_runner(task_name: str, *, config_path: str) -> None:
+def _default_task_runner(
+    task_name: str,
+    *,
+    config_path: str,
+    root: Path | None = None,
+    db_path: Path | None = None,
+) -> None:
+    from app.core.health import DB_PATH_ENV_VAR
     from app.tasks import build_task
 
-    build_task(task_name, config_path=config_path).run()
+    del root  # reserved for future task context plumbing
+    previous = os.environ.get(DB_PATH_ENV_VAR)
+    if db_path is not None:
+        os.environ[DB_PATH_ENV_VAR] = str(db_path)
+    try:
+        build_task(task_name, config_path=config_path).run()
+    finally:
+        if db_path is not None:
+            if previous is None:
+                os.environ.pop(DB_PATH_ENV_VAR, None)
+            else:
+                os.environ[DB_PATH_ENV_VAR] = previous
 
 
 def _is_transient(exc: BaseException) -> bool:

@@ -62,9 +62,7 @@ def test_cron_every_and_timezone_explicit(tmp_path: Path) -> None:
 def test_overlap_prevention_restart_and_disabled(tmp_path: Path) -> None:
     db = _prepare(tmp_path)
     store = ScheduleStore(db)
-    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace(
-        "+00:00", "Z"
-    )
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
     schedule = store.add(
         name="once",
         task_name="dummy",
@@ -83,7 +81,7 @@ def test_overlap_prevention_restart_and_disabled(tmp_path: Path) -> None:
 
     calls: list[str] = []
 
-    def runner(task_name: str, *, config_path: str) -> None:
+    def runner(task_name: str, *, config_path: str, **_kwargs) -> None:
         calls.append(task_name)
         # Simulate overlap: leave a running row if allow_overlap is false by
         # inserting a stuck run before the second tick would start.
@@ -158,9 +156,7 @@ def test_overlap_prevention_restart_and_disabled(tmp_path: Path) -> None:
 def test_transient_retry_and_permission_rejection(tmp_path: Path) -> None:
     db = _prepare(tmp_path)
     store = ScheduleStore(db)
-    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace(
-        "+00:00", "Z"
-    )
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
     flaky = store.add(
         name="flaky",
         task_name="dummy",
@@ -178,7 +174,7 @@ def test_transient_retry_and_permission_rejection(tmp_path: Path) -> None:
 
     attempts = {"n": 0}
 
-    def flaky_runner(task_name: str, *, config_path: str) -> None:
+    def flaky_runner(task_name: str, *, config_path: str, **_kwargs) -> None:
         del task_name, config_path
         attempts["n"] += 1
         if attempts["n"] < 3:
@@ -233,7 +229,7 @@ def test_mid_retry_preserves_next_run_and_stale_reclaim(tmp_path: Path) -> None:
     original_next = schedule.next_run_at
     assert original_next is not None
 
-    # Mid-retry must not null out an existing next_run_at (#85).
+    # Mid-retry without a prior claim must not null an existing next_run_at.
     store.mark_finished(
         schedule,
         run_id="attempt-1",
@@ -246,21 +242,27 @@ def test_mid_retry_preserves_next_run_and_stale_reclaim(tmp_path: Path) -> None:
     assert mid.next_run_at == original_next
     assert mid.last_status == "retrying"
 
-    # Claim clears next_run; crash recovery via reclaim restores cadence.
-    past = (datetime.now(UTC) - timedelta(hours=2)).isoformat().replace(
-        "+00:00", "Z"
-    )
-    store.mark_started(
-        schedule.id, run_id="stuck-run", attempt=1, dry_run=False
-    )
+    # Realistic claim → mid-retry path leaves next_run NULL until final finish;
+    # crash recovery via reclaim restores cadence.
+    past = (datetime.now(UTC) - timedelta(hours=2)).isoformat().replace("+00:00", "Z")
     with store._connect() as connection:
         connection.execute(
-            "UPDATE schedules SET last_started_at = ? WHERE id = ?",
-            (past, schedule.id),
+            "UPDATE schedules SET next_run_at = ?, last_status = 'retrying' "
+            "WHERE id = ?",
+            (None, schedule.id),
         )
         connection.execute(
-            "UPDATE schedule_runs SET started_at = ? WHERE run_id = ?",
-            (past, "stuck-run"),
+            """
+            INSERT INTO schedule_runs (
+                schedule_id, run_id, status, started_at, attempt, dry_run
+            ) VALUES (?, 'stuck-run', 'running', ?, 1, 0)
+            """,
+            (schedule.id, past),
+        )
+        connection.execute(
+            "UPDATE schedules SET last_started_at = ?, last_status = 'running' "
+            "WHERE id = ?",
+            (past, schedule.id),
         )
         connection.commit()
     claimed = store.get(schedule.id)
@@ -275,6 +277,100 @@ def test_mid_retry_preserves_next_run_and_stale_reclaim(tmp_path: Path) -> None:
     assert recovered.next_run_at is not None
     assert recovered.last_status == "failed"
     assert store.has_running(schedule.id) is False
+
+
+def test_atomic_claim_prevents_double_start(tmp_path: Path) -> None:
+    db = _prepare(tmp_path)
+    store = ScheduleStore(db)
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+    schedule = store.add(
+        name="race",
+        task_name="dummy",
+        timezone="Asia/Taipei",
+        cron="every:15",
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE schedules SET next_run_at = ? WHERE id = ?",
+            (past, schedule.id),
+        )
+        connection.commit()
+    first = store.mark_started(
+        schedule.id,
+        run_id="a",
+        attempt=1,
+        dry_run=False,
+        expected_next_run_at=past,
+    )
+    second = store.mark_started(
+        schedule.id,
+        run_id="b",
+        attempt=1,
+        dry_run=False,
+        expected_next_run_at=past,
+    )
+    assert first is not None
+    assert second is None
+
+
+def test_cron_dst_gap_and_leap_day_horizon() -> None:
+    tz = ZoneInfo("America/New_York")
+    after_gap = datetime(2026, 3, 8, 1, 30, tzinfo=tz)
+    nxt = compute_next_run(
+        cron="0 2 * * *",
+        after=after_gap,
+        timezone_name="America/New_York",
+    )
+    assert nxt is not None
+    local = nxt.astimezone(tz)
+    assert local.hour == 2
+    assert local.day == 9  # skip nonexistent 2026-03-08 02:00
+
+    after_leap = datetime(2025, 3, 1, 12, 0, tzinfo=UTC)
+    leap = compute_next_run(
+        cron="0 9 29 2 *",
+        after=after_leap,
+        timezone_name="UTC",
+    )
+    assert leap is not None
+    assert (leap.year, leap.month, leap.day, leap.hour) == (2028, 2, 29, 9)
+
+
+def test_schedule_cli_rejects_unknown_task_and_id(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare(tmp_path)
+    code = main(
+        [
+            "--root",
+            str(tmp_path),
+            "schedule",
+            "add",
+            "--name",
+            "bad",
+            "--task",
+            "not_a_real_task",
+            "--timezone",
+            "Asia/Taipei",
+            "--cron",
+            "every:5",
+        ]
+    )
+    assert code == 1
+    assert "Unknown task" in capsys.readouterr().err
+
+    code = main(
+        [
+            "--root",
+            str(tmp_path),
+            "schedule",
+            "enable",
+            "missing-id",
+        ]
+    )
+    assert code == 1
+    assert "Unknown schedule id" in capsys.readouterr().err
 
 
 def test_schedule_cli_list_add_history(

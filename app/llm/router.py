@@ -50,12 +50,28 @@ class RoutedLLMProvider:
     provider_factory: Any = create_llm_provider
     last_served: ModelRef | None = None
     last_failure_class: str | None = None
+    _providers: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def name(self) -> str:
         # Surface the configured primary provider so existing call sites that
         # assert on provider name keep working when no fallback is used.
         return self.primary.provider
+
+    def _provider_for(self, ref: ModelRef) -> Any:
+        key = str(ref)
+        cached = self._providers.get(key)
+        if cached is not None:
+            return cached
+        provider = self.provider_factory(
+            provider=ref.provider,
+            api_key=self.api_key,
+            model=ref.model,
+            timeout_seconds=self.timeout_seconds,
+            temperature=self.temperature,
+        )
+        self._providers[key] = provider
+        return provider
 
     def generate(self, request: LLMRequest) -> LLMResponse:
         chain = [self.primary, *self.fallbacks]
@@ -65,13 +81,7 @@ class RoutedLLMProvider:
             attempts = max(1, self.max_retries + 1)
             for attempt in range(1, attempts + 1):
                 try:
-                    provider = self.provider_factory(
-                        provider=ref.provider,
-                        api_key=self.api_key,
-                        model=ref.model,
-                        timeout_seconds=self.timeout_seconds,
-                        temperature=self.temperature,
-                    )
+                    provider = self._provider_for(ref)
                     routed = LLMRequest(
                         instructions=request.instructions,
                         input=request.input,
@@ -176,9 +186,9 @@ def _failure_class_from_message(text: str) -> str | None:
 
 
 def _retryable(exc: LLMError) -> bool:
-    if isinstance(exc, (LLMAuthError, LLMNetworkError)):
+    if isinstance(exc, LLMAuthError):
         return False
     return isinstance(
         exc,
-        (LLMTimeoutError, LLMRateLimitError, LLMProviderError),
+        (LLMTimeoutError, LLMRateLimitError, LLMNetworkError, LLMProviderError),
     )

@@ -212,19 +212,79 @@ class ScheduleStore:
         run_id: str,
         attempt: int,
         dry_run: bool,
-    ) -> ScheduleRun:
+        expected_next_run_at: str | None = None,
+        resume_retry: bool = False,
+        force: bool = False,
+        exclusive: bool = True,
+    ) -> ScheduleRun | None:
+        """Atomically claim a schedule slot and insert a running row.
+
+        Returns ``None`` when another worker already claimed the same due slot
+        (or the schedule is already running/retrying and this is not a resume).
+        When ``exclusive`` is false (``allow_overlap``), concurrent starts are
+        permitted.
+        """
+
         now = _utc_now()
         with self._connect() as connection:
-            # Claim the due slot so concurrent ticks cannot double-start.
-            connection.execute(
-                """
-                UPDATE schedules
-                SET last_started_at = ?, last_status = ?, next_run_at = NULL,
-                    updated_at = ?
-                WHERE id = ?
-                """,
-                (now, "running", now, schedule_id),
-            )
+            if resume_retry:
+                claim = connection.execute(
+                    """
+                    UPDATE schedules
+                    SET last_started_at = ?, last_status = ?, next_run_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND last_status = 'retrying'
+                      AND next_run_at IS NULL
+                    """,
+                    (now, "running", now, schedule_id),
+                )
+            elif not exclusive:
+                # allow_overlap: concurrent starts are intentional.
+                claim = connection.execute(
+                    """
+                    UPDATE schedules
+                    SET last_started_at = ?, last_status = ?, next_run_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, "running", now, schedule_id),
+                )
+            elif force:
+                claim = connection.execute(
+                    """
+                    UPDATE schedules
+                    SET last_started_at = ?, last_status = ?, next_run_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND (
+                        last_status IS NULL
+                        OR last_status NOT IN ('running', 'retrying')
+                      )
+                    """,
+                    (now, "running", now, schedule_id),
+                )
+            else:
+                if expected_next_run_at is None:
+                    return None
+                claim = connection.execute(
+                    """
+                    UPDATE schedules
+                    SET last_started_at = ?, last_status = ?, next_run_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND next_run_at IS NOT NULL
+                      AND next_run_at = ?
+                      AND (
+                        last_status IS NULL
+                        OR last_status NOT IN ('running', 'retrying')
+                      )
+                    """,
+                    (now, "running", now, schedule_id, expected_next_run_at),
+                )
+            if claim.rowcount != 1:
+                connection.rollback()
+                return None
             cursor = connection.execute(
                 """
                 INSERT INTO schedule_runs (

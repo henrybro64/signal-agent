@@ -86,9 +86,7 @@ class ToolRegistry:
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.input_schema,
-                    "permission": (
-                        str(permission) if permission is not None else None
-                    ),
+                    "permission": (str(permission) if permission is not None else None),
                 }
             )
         return descriptors
@@ -137,6 +135,13 @@ class ToolRegistry:
         )
         if denied is not None:
             return denied
+
+        # Reserve the side-effect budget before invocation so timeouts / partial
+        # external effects cannot bypass max_side_effect_actions on retry.
+        policy = _policy_from_context(ctx)
+        permission = getattr(tool, "permission", None)
+        if policy is not None:
+            policy.record_side_effect(permission)
 
         try:
             validate_tool_arguments(args, tool.input_schema, tool_name=name)
@@ -189,10 +194,6 @@ class ToolRegistry:
         safe_error = (
             None if result.error is None else _redact_text(result.error, secrets)
         )
-        policy = _policy_from_context(ctx)
-        permission = getattr(tool, "permission", None)
-        if policy is not None and result.ok:
-            policy.record_side_effect(permission)
         safe_result = ToolResult(
             ok=result.ok,
             data=safe_data,
@@ -349,9 +350,7 @@ def _permission_denied_result(
         return None
     duration_ms = int((time.perf_counter() - started) * 1000)
     code = (
-        "permission_denied"
-        if not decision.needs_approval
-        else "permission_ask_denied"
+        "permission_denied" if not decision.needs_approval else "permission_ask_denied"
     )
     log_event(
         _LOGGER,
@@ -373,9 +372,7 @@ def _permission_denied_result(
         metadata={
             "code": code,
             "duration_ms": duration_ms,
-            "permission": (
-                decision.permission.value if decision.permission else None
-            ),
+            "permission": (decision.permission.value if decision.permission else None),
             "policy_action": decision.action.value,
         },
     )

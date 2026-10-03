@@ -62,6 +62,9 @@ def main(argv: list[str] | None = None) -> int:
 
         parser.print_help()
         return 0
+    except KeyError as exc:
+        print(f"Unknown schedule id: {exc.args[0]}", file=sys.stderr)
+        return 1
     except (FileNotFoundError, ValueError) as exc:
         # ConfigError/HealthError/SecretError/TelegramNotifierError subclass
         # ValueError; listing them alongside ValueError triggers overlapping-
@@ -142,9 +145,7 @@ def _cmd_config(args: Any) -> int:
         print("Usage: signal-agent config show", file=sys.stderr)
         return 2
     print(
-        redact_setup_text(
-            show_config_redacted(root=args.root, config_path=args.config)
-        )
+        redact_setup_text(show_config_redacted(root=args.root, config_path=args.config))
     )
     return 0
 
@@ -298,11 +299,17 @@ def _cmd_schedule(args: Any) -> int:
     store = ScheduleStore(runtime_paths.db_path(args.root))
     sub = getattr(args, "schedule_command", None)
     if sub == "add":
+        task_name = str(args.schedule_task)
+        known = list_tasks()
+        if task_name not in known:
+            raise ValueError(
+                f"Unknown task {task_name!r}; choose one of: {', '.join(known)}"
+            )
         cron = args.cron or None
         run_at = args.run_at or None
         schedule = store.add(
             name=args.name,
-            task_name=args.schedule_task,
+            task_name=task_name,
             timezone=args.timezone,
             cron=cron,
             run_at=run_at,
@@ -329,6 +336,8 @@ def _cmd_schedule(args: Any) -> int:
         print(f"schedule run: {status}")
         return 0 if status in {"started_ok", "skipped_disabled"} else 1
     if sub == "history":
+        if store.get(args.schedule_id) is None:
+            raise KeyError(args.schedule_id)
         rows = store.history(args.schedule_id, limit=args.limit)
         if not rows:
             print("(no runs)")
@@ -341,8 +350,7 @@ def _cmd_schedule(args: Any) -> int:
             )
         return 0
     print(
-        "Usage: signal-agent schedule "
-        "add|enable|disable|run|history ...",
+        "Usage: signal-agent schedule add|enable|disable|run|history ...",
         file=sys.stderr,
     )
     return 2

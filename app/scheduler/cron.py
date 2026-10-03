@@ -8,8 +8,12 @@ Supports:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
+
+# Cover a full Gregorian leap cycle so expressions like ``0 9 29 2 *`` still
+# resolve when the next match is more than two years away.
+_SEARCH_HORIZON_DAYS = 1600
 
 
 def compute_next_run(
@@ -38,23 +42,45 @@ def compute_next_run(
             "cron must be 5 fields (min hour dom month dow) or every:<minutes>"
         )
     minute_f, hour_f, dom_f, month_f, dow_f = fields
-    cursor = (local_after + timedelta(minutes=1)).replace(
-        second=0,
-        microsecond=0,
+
+    # Advance in UTC minutes, then project back to local wall time. This avoids
+    # constructing nonexistent local times across DST spring-forward gaps.
+    cursor_utc = (
+        (local_after + timedelta(minutes=1))
+        .astimezone(UTC)
+        .replace(
+            second=0,
+            microsecond=0,
+        )
     )
-    # Bound search to ~2 years to avoid infinite loops on impossible cron.
-    limit = cursor + timedelta(days=800)
-    while cursor <= limit:
+    limit = cursor_utc + timedelta(days=_SEARCH_HORIZON_DAYS)
+    while cursor_utc <= limit:
+        local = cursor_utc.astimezone(tz)
         if (
-            _match(cursor.minute, minute_f)
-            and _match(cursor.hour, hour_f)
-            and _match(cursor.day, dom_f)
-            and _match(cursor.month, month_f)
-            and _match((cursor.weekday() + 1) % 7, dow_f)  # cron: 0=Sun
+            _match(local.minute, minute_f)
+            and _match(local.hour, hour_f)
+            and _match(local.day, dom_f)
+            and _match(local.month, month_f)
+            and _match((local.weekday() + 1) % 7, dow_f)  # cron: 0=Sun
         ):
-            return cursor
-        cursor += timedelta(minutes=1)
+            # Reject fold/gap artifacts: wall clock must round-trip via UTC.
+            if _is_real_local_wall_time(local):
+                return local
+        cursor_utc += timedelta(minutes=1)
     return None
+
+
+def _is_real_local_wall_time(value: datetime) -> bool:
+    if value.tzinfo is None:
+        return False
+    round_trip = value.astimezone(UTC).astimezone(value.tzinfo)
+    return (
+        round_trip.year,
+        round_trip.month,
+        round_trip.day,
+        round_trip.hour,
+        round_trip.minute,
+    ) == (value.year, value.month, value.day, value.hour, value.minute)
 
 
 def _match(value: int, field: str) -> bool:
