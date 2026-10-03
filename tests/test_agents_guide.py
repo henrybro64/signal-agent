@@ -68,9 +68,12 @@ def test_agents_guide_lists_m7_execution_order() -> None:
 
 def test_architecture_paths_documented_in_guide_exist() -> None:
     required_paths = [
-        "main.py",
-        "app/cli.py",
-        "app/config.py",
+            "main.py",
+            "app/cli/__init__.py",
+            "app/runtime/lifecycle.py",
+            "app/setup/wizard.py",
+            "app/chat/loop.py",
+            "app/config.py",
         "config.yaml",
         ".env.example",
         "Dockerfile",

@@ -25,7 +25,8 @@ watchlists, investment assistants) without collapsing module boundaries.
 |-----------|--------|--------|
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
 | M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
-| M7 | LangChain-ready platform evolution #60–#67 | **In progress** — #61–#67 implemented locally; push/PR pending |
+| M7 | LangChain-ready platform evolution #60–#67 | **Complete** on `main` |
+| M8 | OpenClaw-like setup / CLI / chat #81–#83 | **In progress** — local implementation under review; push/PR pending |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -34,7 +35,10 @@ Deployment path already exists: local Python → Docker Compose → k3s CronJobs
 ```text
 signal-agent/
 ├── main.py                 # thin CLI entry
-├── app/cli.py              # argparse + task runner + failure-alert wrap
+├── app/cli/                # unified subcommands + legacy flag helpers (#81–#83)
+├── app/runtime/            # local runtime lifecycle / status / logs (#82)
+├── app/setup/              # first-run wizard, doctor validation (#81)
+├── app/chat/               # interactive bounded chat loop (#83)
 ├── config.yaml             # non-secret runtime settings
 ├── .env.example            # secret names only
 ├── Dockerfile
@@ -134,6 +138,9 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 | `evaluation` | Offline eval cases, redacted traces, pass/fail reports | Paid live-provider runs in CI |
 | `integrations` | Optional LangChain/MCP adapters | Own business rules or live in domain packages |
 | `workflows` | Bounded multi-step agent pilots | Replace deterministic tasks |
+| `setup` | First-run wizard, config show, doctor validation | Cloud control plane |
+| `runtime` | Local start/stop/status/logs lifecycle | Multi-node orchestration |
+| `chat` | Interactive plan-act-observe REPL | Unrestricted shell/SQL/browser tools |
 | `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |
 | `notifiers` | Outbound delivery | Business ranking rules |
 | `profiles` | Packaged preference text for scorers | Secrets |
@@ -201,7 +208,7 @@ a regression is found. Paths below are the current landing spots for each slice.
 | 1–2 | Repo + tooling | `pyproject.toml`, `Makefile`, `main.py`, ruff/pytest |
 | 3 | `SignalItem` model | `app/core/models.py` |
 | 4 | Source plugin interface | `app/sources/base.py`, `app/sources/dummy.py` |
-| 5 | Task interface + CLI | `app/tasks/base.py`, `app/tasks/dummy.py`, `app/cli.py` |
+| 5 | Task interface + CLI | `app/tasks/base.py`, `app/tasks/dummy.py`, `app/cli/` (was `app/cli.py`) |
 | 6–7 | Config + secrets | `app/core/config.py`, `app/core/secrets.py`, `.env.example`, `deploy/k3s/secret.example.yaml` |
 | 8 | SQLite + dedup | `app/core/db.py`, `sql/schema.sql` |
 | 9 | Telegram notifier | `app/notifiers/telegram.py` |

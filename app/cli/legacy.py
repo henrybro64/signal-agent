@@ -1,8 +1,7 @@
-"""Command-line entrypoint for signal-agent."""
+"""Legacy flag helpers preserved for backward-compatible CLI paths."""
 
 from __future__ import annotations
 
-import argparse
 import logging
 import sys
 
@@ -28,157 +27,27 @@ DEFAULT_CONFIG_PATH = "config.yaml"
 DEFAULT_RECENT_RUNS_LIMIT = 20
 _CLI_LOGGER = get_logger("cli")
 
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the bootstrap CLI parser."""
-
-    parser = argparse.ArgumentParser(
-        prog="signal-agent",
-        description=(
-            "Run the bootstrap signal-agent CLI for local development checks."
-        ),
-    )
-    action_group = parser.add_mutually_exclusive_group()
-    action_group.add_argument(
-        "--task",
-        help="Run one named bootstrap task.",
-    )
-    action_group.add_argument(
-        "--list-tasks",
-        action="store_true",
-        help="List the available bootstrap tasks and exit.",
-    )
-    action_group.add_argument(
-        "--health",
-        action="store_true",
-        help="Print a concise health summary from local SQLite history.",
-    )
-    action_group.add_argument(
-        "--recent-runs",
-        action="store_true",
-        help="Print recent source collection runs from SQLite.",
-    )
-    action_group.add_argument(
-        "--telegram-test",
-        nargs="?",
-        const="",
-        metavar="TEXT",
-        help="Send a Telegram test message, optionally using custom text.",
-    )
-    action_group.add_argument(
-        "--langchain-smoke",
-        action="store_true",
-        help=(
-            "List LangChain-adapted tools and run a deterministic fake-model "
-            "smoke (requires pip install -e '.[langchain]')."
-        ),
-    )
-    action_group.add_argument(
-        "--eval",
-        nargs="?",
-        const="core",
-        metavar="SUITE",
-        help=(
-            "Run the offline evaluation suite (default: core). "
-            "No network or paid APIs."
-        ),
-    )
-    action_group.add_argument(
-        "--mcp-serve",
-        action="store_true",
-        help=(
-            "Serve allowlisted read-oriented tools over MCP on localhost "
-            "(requires pip install -e '.[mcp]')."
-        ),
-    )
-    parser.add_argument(
-        "--mcp-host",
-        default="127.0.0.1",
-        help="MCP bind host (localhost only). Default: %(default)s",
-    )
-    parser.add_argument(
-        "--mcp-port",
-        type=int,
-        default=8765,
-        help="MCP SSE port when using --mcp-transport sse. Default: %(default)s",
-    )
-    parser.add_argument(
-        "--mcp-transport",
-        choices=("stdio", "sse"),
-        default="stdio",
-        help="MCP transport. Default: %(default)s",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=DEFAULT_RECENT_RUNS_LIMIT,
-        help=(
-            "Maximum rows for --recent-runs. "
-            f"Default: {DEFAULT_RECENT_RUNS_LIMIT}."
-        ),
-    )
-    parser.add_argument(
-        "--config",
-        default=DEFAULT_CONFIG_PATH,
-        help="Path to the YAML config file. Default: %(default)s",
-    )
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run the CLI and return a process exit code."""
-
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    if args.list_tasks:
-        print("\n".join(list_tasks()))
-        return 0
-
-    try:
-        if args.health:
-            print_health_report()
-            return 0
-
-        if args.recent_runs:
-            print_recent_runs(limit=args.limit)
-            return 0
-
-        if args.telegram_test is not None:
-            send_telegram_test_message(args.telegram_test)
-            return 0
-
-        if args.langchain_smoke:
-            return run_langchain_smoke_command()
-
-        if args.eval is not None:
-            return run_eval_command(suite=args.eval)
-
-        if args.mcp_serve:
-            return run_mcp_serve_command(
-                host=args.mcp_host,
-                port=args.mcp_port,
-                transport=args.mcp_transport,
-                config_path=args.config,
-            )
-
-        if args.task is None:
-            parser.print_help()
-            return 0
-
-        run_task_with_failure_alerts(args.task, config_path=args.config)
-    except (
-        FileNotFoundError,
-        ConfigError,
-        HealthError,
-        SecretError,
-        TelegramNotifierError,
-        ValueError,
-    ) as exc:
-        print(exc, file=sys.stderr)
-        return 1
-
-    return 0
+__all__ = [
+    "DEFAULT_CONFIG_PATH",
+    "DEFAULT_RECENT_RUNS_LIMIT",
+    "ConfigError",
+    "HealthError",
+    "SecretError",
+    "TelegramNotifierError",
+    "build_task",
+    "build_telegram_notifier",
+    "list_tasks",
+    "load_env_settings",
+    "notify_task_failure",
+    "print_health_report",
+    "print_recent_runs",
+    "run_eval_command",
+    "run_langchain_smoke_command",
+    "run_mcp_serve_command",
+    "run_task_with_failure_alerts",
+    "send_telegram_test_message",
+    "summarize_run_health",
+]
 
 
 def print_health_report() -> None:
@@ -261,7 +130,6 @@ def run_mcp_serve_command(
         from app.core.health import resolve_db_path
         from app.core.logging import configure_logging
 
-        # stdio uses stdout for JSON-RPC; keep structured logs on stderr.
         if transport == "stdio":
             configure_logging(stream=sys.stderr, force=True)
 
