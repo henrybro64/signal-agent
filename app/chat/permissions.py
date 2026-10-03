@@ -26,8 +26,7 @@ def requires_approval(name: str) -> bool:
     return name in SIDE_EFFECT_TOOLS
 
 
-def default_approver(name: str, arguments: dict) -> bool:
+def default_approver(name: str, _arguments: dict) -> bool:
     """Default policy: deny side-effecting tools."""
 
-    del arguments
     return not requires_approval(name)

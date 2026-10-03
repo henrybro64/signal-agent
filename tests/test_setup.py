@@ -95,9 +95,40 @@ def test_setup_force_backs_up_config(tmp_path: Path) -> None:
         root=tmp_path,
         options=SetupOptions(provider="fake", non_interactive=True, force=True),
     )
-    backup = first.config_path.with_suffix(".yaml.bak")
+    backup = tmp_path / "data" / "runtime" / "backups" / "config.yaml.bak"
     assert backup.is_file()
     assert "# custom note" in backup.read_text(encoding="utf-8")
+
+
+def test_setup_force_replaces_malformed_yaml(tmp_path: Path) -> None:
+    run_setup(
+        root=tmp_path,
+        options=SetupOptions(provider="fake", non_interactive=True, force=True),
+    )
+    (tmp_path / "config.yaml").write_text("llm: [\n: broken\n", encoding="utf-8")
+    result = run_setup(
+        root=tmp_path,
+        options=SetupOptions(provider="fake", non_interactive=True, force=True),
+    )
+    assert result.validation.ok
+    payload = yaml.safe_load(result.config_path.read_text(encoding="utf-8"))
+    assert payload["llm"]["provider"] == "fake"
+
+
+def test_doctor_fails_when_openai_key_missing(tmp_path: Path) -> None:
+    run_setup(
+        root=tmp_path,
+        options=SetupOptions(
+            provider="openai",
+            llm_enabled=False,
+            openai_api_key="",
+            non_interactive=True,
+            force=True,
+        ),
+    )
+    report = validate_local_setup(root=tmp_path)
+    assert not report.ok
+    assert any(issue.code == "openai_key_missing" for issue in report.issues)
 
 
 def test_setup_rejects_invalid_provider(tmp_path: Path) -> None:

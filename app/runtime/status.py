@@ -17,7 +17,7 @@ from app.llm import supported_llm_providers
 from app.tools import DEFAULT_TOOL_ALLOWLIST, build_tool_registry
 
 from . import paths as runtime_paths
-from .lifecycle import get_runtime_info
+from .lifecycle import get_runtime_info, read_runtime_state
 
 
 @dataclass(slots=True)
@@ -81,65 +81,26 @@ def collect_status(
 
     from app.setup.browser import detect_browser
 
-    from .lifecycle import read_runtime_state
-
     cfg_path = Path(config_path or runtime_paths.config_path(root))
     env = load_env_settings(runtime_paths.env_path(root))
     runtime = get_runtime_info(root)
     state = read_runtime_state(root)
     details: list[str] = []
-    if state.get("worker"):
-        worker_status = str(state.get("worker"))
-    else:
-        worker_status = "active" if runtime.running else "stopped"
+
+    worker_status = _derive_worker_status(runtime.running, state)
     last_tick_at = str(state.get("last_tick_at") or "") or None
     last_tick_ok = state.get("last_tick_ok")
     if last_tick_ok is not None:
         last_tick_ok = bool(last_tick_ok)
-    config_ok = False
-    provider = "unknown"
-    model = "unknown"
-    telegram_enabled = False
-    allowlist = list(DEFAULT_TOOL_ALLOWLIST)
-    if cfg_path.is_file():
-        try:
-            config = load_config(cfg_path)
-            config_ok = True
-            provider = config.llm.provider
-            model = config.llm.model
-            telegram_enabled = config.notifiers.telegram.enabled
-            allowlist = list(config.tools.allowlist or DEFAULT_TOOL_ALLOWLIST)
-        except Exception as exc:  # noqa: BLE001
-            details.append(f"config_error:{type(exc).__name__}")
-    else:
-        details.append("config_missing")
 
+    config_fields = _load_config_fields(cfg_path, details)
     db = resolve_db_path(runtime_paths.db_path(root))
     db_ok = db.is_file()
-    health_overall = "UNKNOWN"
-    if db_ok:
-        try:
-            health_overall = summarize_run_health(db_path=db).overall_status
-        except Exception:  # noqa: BLE001
-            health_overall = "UNKNOWN"
-
+    health_overall = _health_overall(db) if db_ok else "UNKNOWN"
     browser = detect_browser()
-    mcp_available = False
-    langchain_available = False
-    try:
-        from app.integrations.mcp import mcp_available as _mcp
+    mcp_available, langchain_available = _detect_optional_extras()
 
-        mcp_available = _mcp()
-    except Exception:  # noqa: BLE001
-        mcp_available = False
-    try:
-        from app.integrations.langchain import langchain_available as _lc
-
-        langchain_available = _lc()
-    except Exception:  # noqa: BLE001
-        langchain_available = False
-
-    # Touch registry construction for readiness without invoking tools.
+    allowlist = config_fields["allowlist"]
     try:
         build_tool_registry(allowlist=allowlist)
     except Exception as exc:  # noqa: BLE001
@@ -152,19 +113,19 @@ def collect_status(
         runtime_pid=runtime.pid,
         runtime_state=runtime.state,
         config_path=str(cfg_path),
-        config_ok=config_ok,
+        config_ok=bool(config_fields["config_ok"]),
         db_path=str(db),
         db_ok=db_ok,
-        provider=provider,
-        model=model,
+        provider=str(config_fields["provider"]),
+        model=str(config_fields["model"]),
         openai_key_configured=has_openai_api_key(env),
         telegram_configured=has_telegram_credentials(env),
-        telegram_enabled=telegram_enabled,
+        telegram_enabled=bool(config_fields["telegram_enabled"]),
         browser_ready=browser.ready,
         browser_detail=browser.detail,
         mcp_available=mcp_available,
         langchain_available=langchain_available,
-        tool_allowlist=allowlist,
+        tool_allowlist=list(allowlist),
         health_overall=health_overall,
         worker_status=worker_status,
         last_tick_at=last_tick_at,
@@ -208,3 +169,64 @@ def format_status_report(report: StatusReport) -> str:
     if report.details:
         lines.append("Notes: " + "; ".join(report.details))
     return "\n".join(lines)
+
+
+def _derive_worker_status(runtime_running: bool, state: dict[str, Any]) -> str:
+    """Worker activity must not contradict a stopped/missing process."""
+
+    if not runtime_running:
+        return "stopped"
+    return str(state.get("worker") or "active")
+
+
+def _load_config_fields(
+    cfg_path: Path,
+    details: list[str],
+) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "config_ok": False,
+        "provider": "unknown",
+        "model": "unknown",
+        "telegram_enabled": False,
+        "allowlist": list(DEFAULT_TOOL_ALLOWLIST),
+    }
+    if not cfg_path.is_file():
+        details.append("config_missing")
+        return fields
+    try:
+        config = load_config(cfg_path)
+    except Exception as exc:  # noqa: BLE001
+        details.append(f"config_error:{type(exc).__name__}")
+        return fields
+    fields["config_ok"] = True
+    fields["provider"] = config.llm.provider
+    fields["model"] = config.llm.model
+    fields["telegram_enabled"] = config.notifiers.telegram.enabled
+    # Preserve explicit empty allowlist.
+    fields["allowlist"] = list(config.tools.allowlist)
+    return fields
+
+
+def _health_overall(db: Path) -> str:
+    try:
+        return summarize_run_health(db_path=db).overall_status
+    except Exception:  # noqa: BLE001
+        return "UNKNOWN"
+
+
+def _detect_optional_extras() -> tuple[bool, bool]:
+    mcp_available = False
+    langchain_available = False
+    try:
+        from app.integrations.mcp import mcp_available as _mcp
+
+        mcp_available = _mcp()
+    except Exception:  # noqa: BLE001
+        mcp_available = False
+    try:
+        from app.integrations.langchain import langchain_available as _lc
+
+        langchain_available = _lc()
+    except Exception:  # noqa: BLE001
+        langchain_available = False
+    return mcp_available, langchain_available

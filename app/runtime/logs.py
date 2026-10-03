@@ -10,6 +10,15 @@ from app.tools.redaction import redact_value
 
 from . import paths as runtime_paths
 
+_SECRET_ENV_KEYS = frozenset(
+    {
+        "OPENAI_API_KEY",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "LINKEDIN_EMAIL_IMAP_PASSWORD",
+    }
+)
+
 
 def collect_secrets(root: str | Path | None = None) -> tuple[str, ...]:
     """Collect secret values from process env and the local ``.env`` file."""
@@ -29,13 +38,10 @@ def collect_secrets(root: str | Path | None = None) -> tuple[str, ...]:
             if "=" not in line or line.strip().startswith("#"):
                 continue
             key, value = line.split("=", 1)
-            if key.strip() in {
-                "OPENAI_API_KEY",
-                "TELEGRAM_BOT_TOKEN",
-                "TELEGRAM_CHAT_ID",
-                "LINKEDIN_EMAIL_IMAP_PASSWORD",
-            }:
-                values.append(value.strip() or None)
+            if key.strip() in _SECRET_ENV_KEYS:
+                parsed = _parse_dotenv_value(value)
+                if parsed:
+                    values.append(parsed)
     return tuple(value for value in values if value)
 
 
@@ -48,6 +54,8 @@ def read_log_tail(
     log_file = Path(path) if path is not None else runtime_paths.log_path(root)
     if lines < 0:
         raise ValueError("lines must be non-negative")
+    if lines == 0:
+        return []
     if not log_file.is_file():
         return []
     content = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -57,3 +65,12 @@ def read_log_tail(
 
 def format_log_lines(lines: Iterable[str]) -> str:
     return "\n".join(lines)
+
+
+def _parse_dotenv_value(raw: str) -> str:
+    """Strip surrounding single/double quotes from a dotenv assignment value."""
+
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value

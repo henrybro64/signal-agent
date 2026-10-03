@@ -84,8 +84,6 @@ def run_chat_turn(
     """Execute one user turn with a bounded plan-act-observe loop."""
 
     limits = budgets or ChatBudgets()
-    # Accept legacy ChatBudgets(max_turns=...) constructed via kwargs in tests
-    # that still pass max_turns into the dataclass initializer through a shim.
     approver = approve or default_approver
     started = time.monotonic()
     events: list[TurnEvent] = []
@@ -106,20 +104,11 @@ def run_chat_turn(
     )
 
     if session.turns > limits.max_session_turns:
-        reply = "Turn budget exhausted for this session. Use /clear to continue."
-        session.messages.append(ChatMessage(role="assistant", content=reply))
-        collector.trace.add(
-            kind="budget",
-            name="max_session_turns",
-            status="error",
-            metadata={"turns": session.turns},
-        )
-        trace_path = _maybe_persist_trace(collector, root=root, enabled=persist_trace)
-        return TurnResult(
-            reply=reply,
-            stopped_reason="max_session_turns",
-            trace_id=collector.trace.trace_id,
-            trace_path=str(trace_path) if trace_path else None,
+        return _budget_exhausted_result(
+            session,
+            collector,
+            root=root,
+            persist_trace=persist_trace,
         )
 
     observations: list[str] = []
@@ -127,22 +116,14 @@ def run_chat_turn(
     stopped: str | None = None
 
     for _step in range(max(1, limits.max_steps_per_turn)):
-        if cancel_check is not None and cancel_check():
-            raise ChatCancelled("chat cancelled")
-        if time.monotonic() - started > limits.max_elapsed_seconds:
-            stopped = "max_elapsed"
-            break
-        if session.llm_calls >= limits.max_llm_calls:
-            stopped = "max_llm_calls"
-            break
-        if session.tool_calls >= limits.max_tool_calls:
-            stopped = "max_tool_calls"
-            break
-        if (
-            limits.max_estimated_tokens
-            and estimated_tokens >= limits.max_estimated_tokens
-        ):
-            stopped = "max_estimated_tokens"
+        stopped = _pre_step_stop(
+            session,
+            limits,
+            started=started,
+            estimated_tokens=estimated_tokens,
+            cancel_check=cancel_check,
+        )
+        if stopped:
             break
 
         with collector.span("plan", "next_action") as span:
@@ -164,132 +145,42 @@ def run_chat_turn(
         if action_type in {"respond", "final", "answer"}:
             final_reply = str(
                 action.get("message") or action.get("text") or ""
-            ).strip()
-            if not final_reply:
-                final_reply = "Done."
+            ).strip() or "Done."
             break
 
         if action_type == "workflow":
-            name = str(action.get("name") or "job_research")
-            if name not in {"job_research", "job_research_agent"}:
-                observations.append(f"workflow_rejected:{name}")
-                events.append(
-                    TurnEvent(
-                        kind="workflow",
-                        name=name,
-                        ok=False,
-                        detail="not allowlisted",
-                    )
-                )
-                collector.trace.add(
-                    kind="workflow",
-                    name=name,
-                    status="error",
-                    metadata={"reason": "not allowlisted"},
-                )
-                continue
-            with collector.span("workflow", name) as span:
-                result_text = _run_job_research(
-                    registry=registry,
-                    context=context,
-                    provider=provider,
-                )
-                span.metadata["digest_chars"] = len(result_text)
-            session.tool_calls += 1
-            observations.append(result_text)
-            events.append(TurnEvent(kind="workflow", name=name, detail="ok"))
+            _handle_workflow_action(
+                action,
+                session=session,
+                limits=limits,
+                registry=registry,
+                context=context,
+                provider=provider,
+                observations=observations,
+                events=events,
+                collector=collector,
+            )
             continue
 
         if action_type == "tool":
-            tool_name = str(action.get("name") or "").strip()
-            arguments = action.get("arguments") or {}
-            if not isinstance(arguments, dict):
-                arguments = {}
-            if not tool_name:
-                observations.append("tool_missing_name")
-                continue
-            if tool_name not in registry.allowlist:
-                observations.append(f"tool_not_allowlisted:{tool_name}")
-                events.append(
-                    TurnEvent(
-                        kind="tool",
-                        name=tool_name,
-                        ok=False,
-                        detail="not allowlisted",
-                    )
-                )
-                collector.trace.add(
-                    kind="tool",
-                    name=tool_name,
-                    status="error",
-                    metadata={"reason": "not allowlisted"},
-                )
-                continue
-            if requires_approval(tool_name) and not approver(tool_name, arguments):
-                observations.append(f"tool_rejected_by_policy:{tool_name}")
-                events.append(
-                    TurnEvent(
-                        kind="tool",
-                        name=tool_name,
-                        ok=False,
-                        detail="approval denied",
-                    )
-                )
-                collector.trace.add(
-                    kind="tool",
-                    name=tool_name,
-                    status="error",
-                    metadata={"reason": "approval denied"},
-                )
-                continue
-            with collector.span("tool", tool_name) as span:
-                try:
-                    result = registry.invoke(tool_name, arguments, context=context)
-                except Exception as exc:  # noqa: BLE001
-                    observations.append(f"tool_error:{type(exc).__name__}")
-                    events.append(
-                        TurnEvent(
-                            kind="tool",
-                            name=tool_name,
-                            ok=False,
-                            detail=type(exc).__name__,
-                        )
-                    )
-                    span.status = "error"
-                    span.metadata["error"] = type(exc).__name__
-                    continue
-                span.metadata["ok"] = result.ok
-                if not result.ok:
-                    span.status = "error"
-            session.tool_calls += 1
-            payload = json.dumps(result.to_safe_dict(), ensure_ascii=False)[:1200]
-            observations.append(f"tool:{tool_name}:{payload}")
-            events.append(
-                TurnEvent(
-                    kind="tool",
-                    name=tool_name,
-                    ok=result.ok,
-                    detail="ok" if result.ok else (result.error or "error"),
-                )
+            _handle_tool_action(
+                action,
+                session=session,
+                registry=registry,
+                context=context,
+                approver=approver,
+                observations=observations,
+                events=events,
+                collector=collector,
             )
             continue
 
         observations.append(f"unknown_action:{action_type}")
 
     if final_reply is None:
-        if observations:
-            final_reply = (
-                "I hit a safety/budget limit before finishing. "
-                f"Last observation: {observations[-1][:300]}"
-            )
-        else:
-            final_reply = "I could not complete that request within budgets."
-        if stopped:
-            final_reply += f" ({stopped})"
-        if stopped is None and session.tool_calls >= limits.max_tool_calls:
-            stopped = "max_tool_calls"
-        if stopped is None:
-            stopped = "max_steps_per_turn"
+        final_reply, stopped = _compose_limit_reply(
+            observations, session=session, limits=limits, stopped=stopped
+        )
 
     session.messages.append(ChatMessage(role="assistant", content=final_reply))
     collector.record_text(kind="digest", name="assistant_reply", text=final_reply)
@@ -309,6 +200,212 @@ def run_chat_turn(
         trace_path=str(trace_path) if trace_path else None,
         estimated_tokens=estimated_tokens,
     )
+
+
+def _budget_exhausted_result(
+    session: ChatSession,
+    collector: TraceCollector,
+    *,
+    root: str | Path | None,
+    persist_trace: bool,
+) -> TurnResult:
+    reply = "Turn budget exhausted for this session. Use /clear to continue."
+    session.messages.append(ChatMessage(role="assistant", content=reply))
+    collector.trace.add(
+        kind="budget",
+        name="max_session_turns",
+        status="error",
+        metadata={"turns": session.turns},
+    )
+    trace_path = _maybe_persist_trace(collector, root=root, enabled=persist_trace)
+    return TurnResult(
+        reply=reply,
+        stopped_reason="max_session_turns",
+        trace_id=collector.trace.trace_id,
+        trace_path=str(trace_path) if trace_path else None,
+    )
+
+
+def _pre_step_stop(
+    session: ChatSession,
+    limits: ChatBudgets,
+    *,
+    started: float,
+    estimated_tokens: int,
+    cancel_check: CancelCheck | None,
+) -> str | None:
+    if cancel_check is not None and cancel_check():
+        raise ChatCancelled("chat cancelled")
+    if time.monotonic() - started > limits.max_elapsed_seconds:
+        return "max_elapsed"
+    if session.llm_calls >= limits.max_llm_calls:
+        return "max_llm_calls"
+    if session.tool_calls >= limits.max_tool_calls:
+        return "max_tool_calls"
+    if limits.max_estimated_tokens and estimated_tokens >= limits.max_estimated_tokens:
+        return "max_estimated_tokens"
+    return None
+
+
+def _handle_workflow_action(
+    action: dict[str, Any],
+    *,
+    session: ChatSession,
+    limits: ChatBudgets,
+    registry: ToolRegistry,
+    context: ToolContext,
+    provider: LLMProvider,
+    observations: list[str],
+    events: list[TurnEvent],
+    collector: TraceCollector,
+) -> None:
+    name = str(action.get("name") or "job_research")
+    if name not in {"job_research", "job_research_agent"}:
+        observations.append(f"workflow_rejected:{name}")
+        events.append(
+            TurnEvent(
+                kind="workflow",
+                name=name,
+                ok=False,
+                detail="not allowlisted",
+            )
+        )
+        collector.trace.add(
+            kind="workflow",
+            name=name,
+            status="error",
+            metadata={"reason": "not allowlisted"},
+        )
+        return
+
+    remaining_tools = max(0, limits.max_tool_calls - session.tool_calls)
+    remaining_llm = max(0, limits.max_llm_calls - session.llm_calls)
+    remaining_steps = max(1, min(12, limits.max_steps_per_turn))
+    with collector.span("workflow", name) as span:
+        result_text, used_tools, used_llm = _run_job_research(
+            registry=registry,
+            context=context,
+            provider=provider,
+            max_tool_calls=remaining_tools,
+            max_llm_calls=remaining_llm,
+            max_steps=remaining_steps,
+        )
+        span.metadata["digest_chars"] = len(result_text)
+        span.metadata["nested_tool_calls"] = used_tools
+        span.metadata["nested_llm_calls"] = used_llm
+    # Charge nested usage (not a flat +1) against the outer session budgets.
+    session.tool_calls += used_tools
+    session.llm_calls += used_llm
+    observations.append(result_text)
+    events.append(TurnEvent(kind="workflow", name=name, detail="ok"))
+
+
+def _handle_tool_action(
+    action: dict[str, Any],
+    *,
+    session: ChatSession,
+    registry: ToolRegistry,
+    context: ToolContext,
+    approver: ApproveFn,
+    observations: list[str],
+    events: list[TurnEvent],
+    collector: TraceCollector,
+) -> None:
+    tool_name = str(action.get("name") or "").strip()
+    arguments = action.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+    if not tool_name:
+        observations.append("tool_missing_name")
+        return
+    if tool_name not in registry.allowlist:
+        observations.append(f"tool_not_allowlisted:{tool_name}")
+        events.append(
+            TurnEvent(
+                kind="tool",
+                name=tool_name,
+                ok=False,
+                detail="not allowlisted",
+            )
+        )
+        collector.trace.add(
+            kind="tool",
+            name=tool_name,
+            status="error",
+            metadata={"reason": "not allowlisted"},
+        )
+        return
+    if requires_approval(tool_name) and not approver(tool_name, arguments):
+        observations.append(f"tool_rejected_by_policy:{tool_name}")
+        events.append(
+            TurnEvent(
+                kind="tool",
+                name=tool_name,
+                ok=False,
+                detail="approval denied",
+            )
+        )
+        collector.trace.add(
+            kind="tool",
+            name=tool_name,
+            status="error",
+            metadata={"reason": "approval denied"},
+        )
+        return
+    with collector.span("tool", tool_name) as span:
+        try:
+            result = registry.invoke(tool_name, arguments, context=context)
+        except Exception as exc:  # noqa: BLE001
+            observations.append(f"tool_error:{type(exc).__name__}")
+            events.append(
+                TurnEvent(
+                    kind="tool",
+                    name=tool_name,
+                    ok=False,
+                    detail=type(exc).__name__,
+                )
+            )
+            span.status = "error"
+            span.metadata["error"] = type(exc).__name__
+            return
+        span.metadata["ok"] = result.ok
+        if not result.ok:
+            span.status = "error"
+    session.tool_calls += 1
+    payload = json.dumps(result.to_safe_dict(), ensure_ascii=False)[:1200]
+    observations.append(f"tool:{tool_name}:{payload}")
+    events.append(
+        TurnEvent(
+            kind="tool",
+            name=tool_name,
+            ok=result.ok,
+            detail="ok" if result.ok else (result.error or "error"),
+        )
+    )
+
+
+def _compose_limit_reply(
+    observations: list[str],
+    *,
+    session: ChatSession,
+    limits: ChatBudgets,
+    stopped: str | None,
+) -> tuple[str, str | None]:
+    if observations:
+        reply = (
+            "I hit a safety/budget limit before finishing. "
+            f"Last observation: {observations[-1][:300]}"
+        )
+    else:
+        reply = "I could not complete that request within budgets."
+    reason = stopped
+    if reason:
+        reply += f" ({reason})"
+    if reason is None and session.tool_calls >= limits.max_tool_calls:
+        reason = "max_tool_calls"
+    if reason is None:
+        reason = "max_steps_per_turn"
+    return reply, reason
 
 
 def _plan_next_action(
@@ -395,14 +492,21 @@ def _run_job_research(
     registry: ToolRegistry,
     context: ToolContext,
     provider: LLMProvider | None,
-) -> str:
+    max_tool_calls: int,
+    max_llm_calls: int,
+    max_steps: int,
+) -> tuple[str, int, int]:
     final = run_job_research_python(
-        JobResearchState(max_steps=12),
+        JobResearchState(
+            max_steps=max_steps,
+            max_tool_calls=max_tool_calls,
+            max_llm_calls=max_llm_calls,
+        ),
         registry=registry,
         context=context,
         provider=provider,
     )
-    return final.digest_text[:1500]
+    return final.digest_text[:1500], final.tool_calls, final.llm_calls
 
 
 def _maybe_persist_trace(

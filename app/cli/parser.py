@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from typing import Any
 
 from app.cli.legacy import DEFAULT_CONFIG_PATH, DEFAULT_RECENT_RUNS_LIMIT
+from app.runtime import paths as runtime_paths
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,30 +18,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # Shared on the root parser *and* every subparser so both of these work:
-    #   signal-agent --root /tmp setup
-    #   signal-agent setup --root /tmp
+    # Shared options use SUPPRESS on subparsers so a value set before the
+    # subcommand (e.g. `signal-agent --root /tmp setup`) is not overwritten
+    # by the subparser default.
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument(
-        "--config",
-        default=DEFAULT_CONFIG_PATH,
-        help="Path to the YAML config file. Default: %(default)s",
-    )
-    shared.add_argument(
-        "--root",
-        default=".",
-        help="Project root for local data/config/runtime files. Default: %(default)s",
-    )
-    parser.add_argument(
-        "--config",
-        default=DEFAULT_CONFIG_PATH,
-        help="Path to the YAML config file. Default: %(default)s",
-    )
-    parser.add_argument(
-        "--root",
-        default=".",
-        help="Project root for local data/config/runtime files. Default: %(default)s",
-    )
+    _add_path_options(shared, with_defaults=False)
+    _add_path_options(parser, with_defaults=True)
 
     sub = parser.add_subparsers(dest="command")
 
@@ -197,3 +181,42 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Max rows for --recent-runs. Default: {DEFAULT_RECENT_RUNS_LIMIT}.",
     )
     return parser
+
+
+def resolve_runtime_args(args: Any) -> Any:
+    """Normalize ``--root`` / ``--config`` after argparse.
+
+    When ``--config`` is omitted, resolve it under the selected root so chat,
+    doctor, and status operate on one installation. For the default root (``.``)
+    keep the historical relative ``config.yaml`` path for legacy CLI messages.
+    """
+
+    root = getattr(args, "root", None) or "."
+    config = getattr(args, "config", None)
+    if config is None:
+        if root == ".":
+            config = DEFAULT_CONFIG_PATH
+        else:
+            config = str(runtime_paths.config_path(root))
+    args.root = root
+    args.config = config
+    return args
+
+
+def _add_path_options(
+    parser: argparse.ArgumentParser,
+    *,
+    with_defaults: bool,
+) -> None:
+    # Root parser: default root=".", config=None (resolved under root later).
+    # Subparsers: SUPPRESS so pre-subcommand values are not overwritten.
+    parser.add_argument(
+        "--config",
+        default=None if with_defaults else argparse.SUPPRESS,
+        help="Path to the YAML config file. Default: <root>/config.yaml",
+    )
+    parser.add_argument(
+        "--root",
+        default="." if with_defaults else argparse.SUPPRESS,
+        help="Project root for local data/config/runtime files. Default: .",
+    )

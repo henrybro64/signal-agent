@@ -10,6 +10,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import FrameType
 
 from app.core.db import init_db
 from app.core.logging import configure_logging, get_logger, log_event
@@ -19,12 +20,22 @@ from .lifecycle import write_runtime_state
 from .worker import run_worker_tick, tick_state_patch
 
 _LOGGER = get_logger("runtime.service")
-_STOP = False
 
 
-def _request_stop(signum: int, frame: object) -> None:  # noqa: ARG001
-    global _STOP
-    _STOP = True
+class _StopState:
+    """Mutable stop flag shared with signal handlers (avoids ``global``)."""
+
+    __slots__ = ("requested",)
+
+    def __init__(self) -> None:
+        self.requested = False
+
+
+_STOP = _StopState()
+
+
+def _request_stop(signum: int, _frame: FrameType | None) -> None:
+    _STOP.requested = True
     log_event(
         _LOGGER,
         event="runtime_signal",
@@ -66,8 +77,7 @@ def run_service_forever(
     individual task/tool errors cannot terminate the runtime.
     """
 
-    global _STOP
-    _STOP = False
+    _STOP.requested = False
     runtime_paths.ensure_local_dirs(root)
     log_file = runtime_paths.log_path(root)
     configure_logging(stream=sys.stderr, force=True)
@@ -141,7 +151,7 @@ def run_service_forever(
     write_runtime_state(_persist_tick(initial), root=root)
 
     try:
-        while not _STOP:
+        while not _STOP.requested:
             time.sleep(max(0.1, heartbeat_seconds))
             heartbeats += 1
             state_payload = {

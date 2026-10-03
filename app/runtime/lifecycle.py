@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import signal
@@ -79,6 +80,14 @@ def get_runtime_info(root: str | Path | None = None) -> RuntimeProcessInfo:
             state="stopped",
             detail="stale pid file",
         )
+    if not _pid_is_our_runtime(pid, root=root):
+        return RuntimeProcessInfo(
+            running=False,
+            pid=pid,
+            started_at=str(state.get("started_at") or "") or None,
+            state="stopped",
+            detail="stale pid file (ownership mismatch)",
+        )
     return RuntimeProcessInfo(
         running=True,
         pid=pid,
@@ -102,6 +111,9 @@ def start_runtime(
             f"Runtime already running (pid={current.pid}). "
             "Use 'signal-agent status' or 'signal-agent stop'."
         )
+
+    # Clear stale pid/lock artifacts before launching a new child.
+    _cleanup_pid(root)
 
     runtime_paths.ensure_local_dirs(root)
     cfg = str(config_path or runtime_paths.config_path(root))
@@ -148,6 +160,7 @@ def start_runtime(
         f"(child_exit={proc.poll()})"
     )
 
+
 def stop_runtime(
     *,
     root: str | Path | None = None,
@@ -162,6 +175,7 @@ def stop_runtime(
         state.update(
             {
                 "state": "stopped",
+                "worker": "stopped",
                 "stopped_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             }
         )
@@ -173,6 +187,15 @@ def stop_runtime(
         )
 
     pid = info.pid
+    # Re-verify ownership immediately before signaling.
+    if not _pid_is_our_runtime(pid, root=root):
+        _cleanup_pid(root)
+        return RuntimeProcessInfo(
+            running=False,
+            state="stopped",
+            detail="stale pid file (ownership mismatch)",
+        )
+
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -185,10 +208,11 @@ def stop_runtime(
             break
         time.sleep(0.05)
     else:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        if _pid_is_our_runtime(pid, root=root):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     _cleanup_pid(root)
     state = read_runtime_state(root)
@@ -196,6 +220,7 @@ def stop_runtime(
         {
             "state": "stopped",
             "pid": None,
+            "worker": "stopped",
             "stopped_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         }
     )
@@ -222,6 +247,80 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _pid_is_our_runtime(pid: int, *, root: str | Path | None = None) -> bool:
+    """Return True only when ``pid`` is a verified signal-agent runtime.
+
+    Requires the runtime flock to be held and the lock-file PID to match.
+    When ``ps`` is available, also require the command line to contain
+    ``app.runtime.service`` so a recycled PID is never signaled.
+    """
+
+    if not _pid_alive(pid):
+        return False
+    # Prefer lock ownership: if nobody holds the lock, the pid file is stale
+    # even when some process reuses the numeric PID.
+    if not _runtime_lock_held(root):
+        return False
+    lock_pid = _read_lock_pid(root)
+    if lock_pid is None or lock_pid != pid:
+        return False
+    cmdline = _read_cmdline(pid)
+    if cmdline is None:
+        # ``ps`` unavailable (restricted environments): lock+pid match is enough.
+        return True
+    return "app.runtime.service" in cmdline
+
+
+def _read_cmdline(pid: int) -> str | None:
+    try:
+        result = subprocess.run(  # noqa: S603 - local diagnostic only
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
+
+
+def _runtime_lock_held(root: str | Path | None = None) -> bool:
+    lock_path = runtime_paths.lock_path(root)
+    if not lock_path.is_file():
+        return False
+    try:
+        handle = lock_path.open("a+", encoding="utf-8")
+    except OSError:
+        return False
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    else:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        return False
+    finally:
+        handle.close()
+
+
+def _read_lock_pid(root: str | Path | None = None) -> int | None:
+    lock_path = runtime_paths.lock_path(root)
+    if not lock_path.is_file():
+        return None
+    try:
+        text = lock_path.read_text(encoding="utf-8").strip()
+        return int(text.splitlines()[0]) if text else None
+    except (OSError, ValueError):
+        return None
 
 
 def _cleanup_pid(root: str | Path | None = None) -> None:

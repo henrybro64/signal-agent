@@ -74,6 +74,66 @@ def test_logs_redact_secrets(tmp_path: Path) -> None:
     assert "***" in lines[0]
 
 
+def test_logs_redact_quoted_dotenv_and_zero_lines(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    (tmp_path / ".env").write_text(
+        'OPENAI_API_KEY="sk-quoted-secret"\n',
+        encoding="utf-8",
+    )
+    path = log_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("leaked sk-quoted-secret value\nsecond\n", encoding="utf-8")
+    lines = read_log_tail(root=tmp_path, lines=10)
+    assert "sk-quoted-secret" not in "\n".join(lines)
+    assert read_log_tail(root=tmp_path, lines=0) == []
+
+
+def test_status_marks_stale_worker_stopped(tmp_path: Path) -> None:
+    from app.runtime.lifecycle import write_runtime_state
+
+    _prepare(tmp_path)
+    write_runtime_state(
+        {
+            "state": "stopped",
+            "worker": "active",
+            "last_tick_at": "2026-01-01T00:00:00Z",
+            "last_tick_ok": True,
+        },
+        root=tmp_path,
+    )
+    status = collect_status(root=tmp_path, config_path=tmp_path / "config.yaml")
+    assert not status.runtime_running
+    assert status.worker_status == "stopped"
+
+
+def test_cli_tools_respects_empty_allowlist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import yaml
+
+    _prepare(tmp_path)
+    config = tmp_path / "config.yaml"
+    payload = yaml.safe_load(config.read_text(encoding="utf-8"))
+    payload.setdefault("tools", {})["allowlist"] = []
+    config.write_text(
+        yaml.safe_dump(payload, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    loaded = yaml.safe_load(config.read_text(encoding="utf-8"))
+    assert loaded["tools"]["allowlist"] == []
+    monkeypatch.chdir(tmp_path)
+    assert main(["tools", "--config", str(config)]) == 0
+    captured = capsys.readouterr().out
+    assert "(none)" in captured
+    assert "search_jobs:" not in captured
+
+
 def test_cli_tasks_models_tools_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -120,6 +180,23 @@ def test_cli_help_lists_top_level_commands() -> None:
         "logs",
     ):
         assert name in help_text
+
+
+def test_root_before_subcommand_and_config_under_root(tmp_path: Path) -> None:
+    from app.cli.parser import build_parser, resolve_runtime_args
+
+    parser = build_parser()
+    before = resolve_runtime_args(
+        parser.parse_args(["--root", str(tmp_path), "doctor"])
+    )
+    assert before.root == str(tmp_path)
+    assert before.config == str(tmp_path / "config.yaml")
+
+    after = resolve_runtime_args(
+        parser.parse_args(["doctor", "--root", str(tmp_path)])
+    )
+    assert after.root == str(tmp_path)
+    assert after.config == str(tmp_path / "config.yaml")
 
 
 def test_runtime_survives_briefly(tmp_path: Path) -> None:

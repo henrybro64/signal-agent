@@ -16,10 +16,7 @@ from app.cli.legacy import (
     run_task_with_failure_alerts,
     send_telegram_test_message,
 )
-from app.cli.parser import build_parser
-from app.config import ConfigError, SecretError
-from app.core.health import HealthError
-from app.notifiers import TelegramNotifierError
+from app.cli.parser import build_parser, resolve_runtime_args
 from app.tasks import build_task, list_tasks
 
 
@@ -27,8 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     """Dispatch subcommands or legacy flags; return a process exit code."""
 
     parser = build_parser()
-    # Global options (`--config`, `--root`) should appear before the subcommand.
-    args = parser.parse_args(argv)
+    # Global options (`--config`, `--root`) may appear before or after the
+    # subcommand; resolve_runtime_args normalizes defaults under --root.
+    args = resolve_runtime_args(parser.parse_args(argv))
 
     try:
         if args.command:
@@ -64,14 +62,10 @@ def main(argv: list[str] | None = None) -> int:
 
         parser.print_help()
         return 0
-    except (
-        FileNotFoundError,
-        ConfigError,
-        HealthError,
-        SecretError,
-        TelegramNotifierError,
-        ValueError,
-    ) as exc:
+    except (FileNotFoundError, ValueError) as exc:
+        # ConfigError/HealthError/SecretError/TelegramNotifierError subclass
+        # ValueError; listing them alongside ValueError triggers overlapping-
+        # exception lint findings.
         print(exc, file=sys.stderr)
         return 1
 
@@ -248,10 +242,14 @@ def _cmd_tools(args: Any) -> int:
 
     try:
         config = load_config(args.config)
-        allowlist = list(config.tools.allowlist or DEFAULT_TOOL_ALLOWLIST)
+        # Preserve an explicit empty allowlist (operator disabled all tools).
+        allowlist = list(config.tools.allowlist)
     except Exception:  # noqa: BLE001
         allowlist = list(DEFAULT_TOOL_ALLOWLIST)
     registry = build_tool_registry(allowlist=allowlist)
+    if not allowlist:
+        print("(none)")
+        return 0
     for item in registry.list_tools():
         print(f"{item['name']}: {item['description']}")
     return 0

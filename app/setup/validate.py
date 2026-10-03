@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.core.config import ConfigError, load_config
+from app.core.config import load_config
 from app.core.db import init_db, read_schema_version
 from app.core.migrations import latest_migration_version
 from app.core.secrets import (
@@ -62,55 +62,16 @@ def validate_local_setup(
 
     try:
         config = load_config(cfg_path)
-    except (ConfigError, OSError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
+        # ConfigError subclasses ValueError.
         report.add("config_invalid", str(exc))
         return report
 
-    providers = supported_llm_providers()
-    if config.llm.provider not in providers:
-        report.add(
-            "invalid_provider",
-            f"Unsupported llm.provider {config.llm.provider!r}; "
-            f"supported: {', '.join(sorted(providers))}",
-        )
-    if not str(config.llm.model or "").strip():
-        report.add("invalid_model", "llm.model must be a non-empty string")
-
+    _validate_provider_model(report, config)
     env = load_env_settings(dotenv_path)
-    if config.llm.provider == "openai" and config.scoring.llm_enabled:
-        if not has_openai_api_key(env):
-            report.add(
-                "openai_key_missing",
-                "OPENAI_API_KEY required when llm.provider=openai and "
-                "scoring.llm_enabled=true",
-            )
-    if config.llm.provider == "openai" and not has_openai_api_key(env):
-        report.add(
-            "openai_key_absent",
-            "OPENAI_API_KEY not set (ok if you keep scoring.llm_enabled=false "
-            "or use provider=fake)",
-            severity="warning",
-        )
-
-    if config.notifiers.telegram.enabled and not has_telegram_credentials(env):
-        report.add(
-            "telegram_incomplete",
-            "Telegram enabled but TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID missing",
-            severity="warning",
-        )
-
-    try:
-        db = runtime_paths.db_path(root)
-        init_db(db)
-        version = read_schema_version(db)
-        latest = latest_migration_version()
-        if version != latest:
-            report.add(
-                "schema_mismatch",
-                f"DB schema version {version} != latest {latest}",
-            )
-    except Exception as exc:  # noqa: BLE001
-        report.add("db_init_failed", f"SQLite init failed: {exc}")
+    _validate_openai_credentials(report, config, env)
+    _validate_telegram(report, config, env)
+    _validate_database(report, root)
 
     browser = detect_browser()
     report.add(
@@ -126,3 +87,70 @@ def format_validation_report(report: ValidationReport) -> str:
     for issue in report.issues:
         lines.append(f"- [{issue.severity}] {issue.code}: {issue.message}")
     return "\n".join(lines)
+
+
+def _validate_provider_model(report: ValidationReport, config: object) -> None:
+    providers = supported_llm_providers()
+    provider = str(getattr(getattr(config, "llm", None), "provider", "") or "")
+    model = str(getattr(getattr(config, "llm", None), "model", "") or "")
+    if provider not in providers:
+        report.add(
+            "invalid_provider",
+            f"Unsupported llm.provider {provider!r}; "
+            f"supported: {', '.join(sorted(providers))}",
+        )
+    if not model.strip():
+        report.add("invalid_model", "llm.model must be a non-empty string")
+
+
+def _validate_openai_credentials(
+    report: ValidationReport,
+    config: object,
+    env: object,
+) -> None:
+    provider = str(getattr(getattr(config, "llm", None), "provider", "") or "")
+    if provider != "openai":
+        return
+    if has_openai_api_key(env):  # type: ignore[arg-type]
+        return
+    # Chat always constructs the configured provider, so a missing OpenAI key
+    # is a readiness failure even when scoring.llm_enabled is false.
+    report.add(
+        "openai_key_missing",
+        "OPENAI_API_KEY required when llm.provider=openai "
+        "(needed for chat and optional LLM scoring)",
+    )
+
+
+def _validate_telegram(
+    report: ValidationReport,
+    config: object,
+    env: object,
+) -> None:
+    notifiers = getattr(config, "notifiers", None)
+    telegram = getattr(notifiers, "telegram", None)
+    enabled = bool(getattr(telegram, "enabled", False))
+    if enabled and not has_telegram_credentials(env):  # type: ignore[arg-type]
+        report.add(
+            "telegram_incomplete",
+            "Telegram enabled but TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID missing",
+            severity="warning",
+        )
+
+
+def _validate_database(
+    report: ValidationReport,
+    root: str | Path | None,
+) -> None:
+    try:
+        db = runtime_paths.db_path(root)
+        init_db(db)
+        version = read_schema_version(db)
+        latest = latest_migration_version()
+        if version != latest:
+            report.add(
+                "schema_mismatch",
+                f"DB schema version {version} != latest {latest}",
+            )
+    except Exception as exc:  # noqa: BLE001
+        report.add("db_init_failed", f"SQLite init failed: {exc}")

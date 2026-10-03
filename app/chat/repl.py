@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
@@ -12,9 +13,9 @@ from app.core.health import resolve_db_path
 from app.core.secrets import load_env_settings
 from app.llm import create_llm_provider
 from app.runtime import paths as runtime_paths
-from app.tools import ToolContext, build_tool_registry
+from app.tools import ToolContext, ToolRegistry, build_tool_registry
 
-from .loop import ChatBudgets, ChatCancelled, run_chat_turn
+from .loop import ChatBudgets, ChatCancelled, TurnResult, run_chat_turn
 from .session import ChatSession, load_session, new_session, save_session
 
 HELP_TEXT = """\
@@ -25,6 +26,14 @@ Commands:
   /clear    Clear conversation (keeps session id)
   /exit     Leave chat
 """
+
+
+@dataclass(slots=True)
+class _ChatRuntime:
+    base: Path
+    llm: object
+    registry: ToolRegistry
+    context: ToolContext
 
 
 def run_chat_repl(
@@ -42,12 +51,62 @@ def run_chat_repl(
 
     out = output or sys.stdout
     read = input_fn or input
+    runtime = _bootstrap_chat_runtime(
+        root=root, config_path=config_path, provider=provider
+    )
+    session = _open_session(session_id, root=runtime.base, out=out)
+    print("Type /help for commands. Ctrl-C cancels the current turn.", file=out)
+
+    limits = budgets or ChatBudgets()
+    messages_seen = 0
+    while True:
+        if max_messages is not None and messages_seen >= max_messages:
+            break
+        line = _read_user_line(read, out=out)
+        if line is None:
+            break
+        if not line:
+            continue
+        messages_seen += 1
+
+        if line.startswith("/"):
+            action = _handle_slash(
+                line,
+                session=session,
+                registry=runtime.registry,
+                out=out,
+            )
+            if action == "exit":
+                break
+            continue
+
+        result = _safe_chat_turn(
+            session,
+            line,
+            runtime=runtime,
+            budgets=limits,
+            out=out,
+        )
+        if result is None:
+            continue
+        _print_turn_result(result, out=out)
+        save_session(session, root=runtime.base)
+    save_session(session, root=runtime.base)
+    print(f"Session saved: {session.session_id}", file=out)
+    return 0
+
+
+def _bootstrap_chat_runtime(
+    *,
+    root: str | Path | None,
+    config_path: str | Path | None,
+    provider: object | None,
+) -> _ChatRuntime:
     base = runtime_paths.project_root(root)
     cfg_path = Path(config_path or runtime_paths.config_path(base))
     config = load_config(cfg_path)
     env = load_env_settings(runtime_paths.env_path(base))
     db_path = resolve_db_path(runtime_paths.db_path(base))
-
     llm = provider or create_llm_provider(
         provider=config.llm.provider,
         api_key=env.openai_api_key,
@@ -69,68 +128,75 @@ def run_chat_repl(
         timeout_seconds=config.tools.timeout_seconds,
         secrets_to_redact=secrets,
     )
+    return _ChatRuntime(base=base, llm=llm, registry=registry, context=context)
 
+
+def _open_session(
+    session_id: str | None,
+    *,
+    root: Path,
+    out: TextIO,
+) -> ChatSession:
     if session_id:
-        session = load_session(session_id, root=base)
+        session = load_session(session_id, root=root)
         print(f"Resumed session {session.session_id}", file=out)
-    else:
-        session = new_session()
-        print(f"Chat session {session.session_id}", file=out)
-    print("Type /help for commands. Ctrl-C cancels the current turn.", file=out)
+        return session
+    session = new_session()
+    print(f"Chat session {session.session_id}", file=out)
+    return session
 
-    limits = budgets or ChatBudgets()
-    messages_seen = 0
-    while True:
-        if max_messages is not None and messages_seen >= max_messages:
-            break
-        try:
-            line = read("you> ").strip()
-        except EOFError:
-            print("", file=out)
-            break
-        except KeyboardInterrupt:
-            print("\n(interrupted)", file=out)
-            continue
-        if not line:
-            continue
-        messages_seen += 1
 
-        if line.startswith("/"):
-            code = _handle_slash(line, session=session, registry=registry, out=out)
-            if code == "exit":
-                break
-            continue
+def _read_user_line(
+    read: Callable[[str], str],
+    *,
+    out: TextIO,
+) -> str | None:
+    try:
+        return read("you> ").strip()
+    except EOFError:
+        print("", file=out)
+        return None
+    except KeyboardInterrupt:
+        print("\n(interrupted)", file=out)
+        return ""
 
-        try:
-            result = run_chat_turn(
-                session,
-                line,
-                provider=llm,  # type: ignore[arg-type]
-                registry=registry,
-                context=context,
-                budgets=limits,
-                root=base,
-            )
-        except ChatCancelled:
-            print("assistant> (cancelled)", file=out)
-            continue
-        except KeyboardInterrupt:
-            print("\nassistant> (cancelled)", file=out)
-            continue
-        except Exception as exc:  # noqa: BLE001 - keep REPL alive
-            print(f"assistant> error: {type(exc).__name__}: {exc}", file=out)
-            continue
 
-        for event in result.events:
-            mark = "ok" if event.ok else "fail"
-            print(f"  · {event.kind}:{event.name} [{mark}] {event.detail}", file=out)
-        if result.trace_id:
-            print(f"  · trace:{result.trace_id}", file=out)
-        print(f"assistant> {result.reply}", file=out)
-        save_session(session, root=base)
-    save_session(session, root=base)
-    print(f"Session saved: {session.session_id}", file=out)
-    return 0
+def _safe_chat_turn(
+    session: ChatSession,
+    line: str,
+    *,
+    runtime: _ChatRuntime,
+    budgets: ChatBudgets,
+    out: TextIO,
+) -> TurnResult | None:
+    try:
+        return run_chat_turn(
+            session,
+            line,
+            provider=runtime.llm,  # type: ignore[arg-type]
+            registry=runtime.registry,
+            context=runtime.context,
+            budgets=budgets,
+            root=runtime.base,
+        )
+    except ChatCancelled:
+        print("assistant> (cancelled)", file=out)
+        return None
+    except KeyboardInterrupt:
+        print("\nassistant> (cancelled)", file=out)
+        return None
+    except Exception as exc:  # noqa: BLE001 - keep REPL alive
+        print(f"assistant> error: {type(exc).__name__}: {exc}", file=out)
+        return None
+
+
+def _print_turn_result(result: TurnResult, *, out: TextIO) -> None:
+    for event in result.events:
+        mark = "ok" if event.ok else "fail"
+        print(f"  · {event.kind}:{event.name} [{mark}] {event.detail}", file=out)
+    if result.trace_id:
+        print(f"  · trace:{result.trace_id}", file=out)
+    print(f"assistant> {result.reply}", file=out)
 
 
 def _handle_slash(

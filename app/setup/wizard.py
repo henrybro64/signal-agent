@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import getpass
 import re
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,15 +63,28 @@ def run_setup(
     dotenv_path = runtime_paths.env_path(base)
     db = runtime_paths.db_path(base)
 
-    existing_cfg = _load_yaml(cfg_path)
+    # Under --force, skip parsing a possibly-malformed config so recovery works.
+    if opts.force:
+        existing_cfg: dict[str, Any] = {}
+    else:
+        existing_cfg = _load_yaml(cfg_path)
     existing_env = _load_env_file(dotenv_path)
     merged = _merge_options(opts, existing_cfg, existing_env)
 
     ask = prompt or _default_prompt
+    # Custom prompt callables (tests) also receive secret prompts; the default
+    # interactive path uses getpass so secrets are never echoed.
+    ask_secret = prompt or _default_secret_prompt
     yes = confirm or _default_confirm
 
     if not opts.non_interactive:
-        merged = _interactive_collect(merged, existing_cfg, existing_env, ask, yes)
+        merged = _interactive_collect(
+            merged,
+            existing_env,
+            ask,
+            ask_secret,
+            yes,
+        )
 
     _validate_provider_model(merged.provider, merged.model)
 
@@ -79,15 +94,15 @@ def run_setup(
         _write_config(cfg_path, merged)
         created_config = True
     elif opts.force:
-        _backup_file(cfg_path)
+        _backup_file(cfg_path, root=base)
         _write_config(cfg_path, merged)
         created_config = True
     elif not opts.non_interactive and yes(
         f"Replace {cfg_path.name} with generated defaults "
-        f"(a .bak backup will be kept)?",
+        f"(a backup will be kept under data/runtime/backups/)?",
         False,
     ):
-        _backup_file(cfg_path)
+        _backup_file(cfg_path, root=base)
         _write_config(cfg_path, merged)
         created_config = True
     else:
@@ -100,7 +115,7 @@ def run_setup(
         created_env = False
     else:
         if env_existed and opts.force:
-            _backup_file(dotenv_path)
+            _backup_file(dotenv_path, root=base)
         _write_env(dotenv_path, merged)
         created_env = not env_existed or opts.force
 
@@ -163,9 +178,9 @@ def show_config_redacted(
 
 def _interactive_collect(
     opts: SetupOptions,
-    existing_cfg: dict[str, Any],
     existing_env: dict[str, str],
     prompt: PromptFn,
+    secret_prompt: PromptFn,
     confirm: ConfirmFn,
 ) -> SetupOptions:
     providers = ", ".join(sorted(supported_llm_providers()))
@@ -181,7 +196,7 @@ def _interactive_collect(
     openai_key = opts.openai_api_key
     if provider == "openai":
         current = "(set)" if existing_env.get("OPENAI_API_KEY") else "(empty)"
-        entered = prompt(
+        entered = secret_prompt(
             f"OPENAI_API_KEY {current} — enter to keep, or paste new value",
             "",
         )
@@ -197,7 +212,7 @@ def _interactive_collect(
     bot = opts.telegram_bot_token
     chat = opts.telegram_chat_id
     if telegram_enabled:
-        entered_bot = prompt(
+        entered_bot = secret_prompt(
             "TELEGRAM_BOT_TOKEN (enter keeps existing)",
             "",
         )
@@ -205,7 +220,7 @@ def _interactive_collect(
             bot = entered_bot.strip()
         else:
             bot = existing_env.get("TELEGRAM_BOT_TOKEN", "")
-        entered_chat = prompt(
+        entered_chat = secret_prompt(
             "TELEGRAM_CHAT_ID (enter keeps existing)",
             "",
         )
@@ -214,7 +229,6 @@ def _interactive_collect(
         else:
             chat = existing_env.get("TELEGRAM_CHAT_ID", "")
 
-    del existing_cfg  # merge/overwrite handled by caller after prompts
     return SetupOptions(
         provider=provider,
         model=model,
@@ -233,31 +247,12 @@ def _merge_options(
     existing_cfg: dict[str, Any],
     existing_env: dict[str, str],
 ) -> SetupOptions:
-    llm = existing_cfg.get("llm") if isinstance(existing_cfg.get("llm"), dict) else {}
-    scoring = (
-        existing_cfg.get("scoring")
-        if isinstance(existing_cfg.get("scoring"), dict)
-        else {}
+    llm = _as_dict(existing_cfg.get("llm"))
+    scoring = _as_dict(existing_cfg.get("scoring"))
+    telegram = _as_dict(_as_dict(existing_cfg.get("notifiers")).get("telegram"))
+    provider, model, llm_enabled, telegram_enabled = _resolve_merge_flags(
+        opts, llm, scoring, telegram
     )
-    notifiers = (
-        existing_cfg.get("notifiers")
-        if isinstance(existing_cfg.get("notifiers"), dict)
-        else {}
-    )
-    telegram = (
-        notifiers.get("telegram") if isinstance(notifiers.get("telegram"), dict) else {}
-    )
-    if opts.non_interactive:
-        provider = opts.provider or str(llm.get("provider") or "fake")
-        model = opts.model or str(llm.get("model") or "gpt-4o-mini")
-        llm_enabled = opts.llm_enabled
-        telegram_enabled = opts.telegram_enabled
-    else:
-        provider = str(llm.get("provider") or opts.provider or "fake")
-        model = str(llm.get("model") or opts.model or "gpt-4o-mini")
-        llm_enabled = bool(scoring.get("llm_enabled", opts.llm_enabled))
-        telegram_enabled = bool(telegram.get("enabled", opts.telegram_enabled))
-
     return SetupOptions(
         provider=provider,
         model=model,
@@ -273,6 +268,27 @@ def _merge_options(
         non_interactive=opts.non_interactive,
         force=opts.force,
     )
+
+
+def _resolve_merge_flags(
+    opts: SetupOptions,
+    llm: dict[str, Any],
+    scoring: dict[str, Any],
+    telegram: dict[str, Any],
+) -> tuple[str, str, bool, bool]:
+    if opts.non_interactive:
+        provider = opts.provider or str(llm.get("provider") or "fake")
+        model = opts.model or str(llm.get("model") or "gpt-4o-mini")
+        return provider, model, opts.llm_enabled, opts.telegram_enabled
+    provider = str(llm.get("provider") or opts.provider or "fake")
+    model = str(llm.get("model") or opts.model or "gpt-4o-mini")
+    llm_enabled = bool(scoring.get("llm_enabled", opts.llm_enabled))
+    telegram_enabled = bool(telegram.get("enabled", opts.telegram_enabled))
+    return provider, model, llm_enabled, telegram_enabled
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _validate_provider_model(provider: str, model: str) -> None:
@@ -376,18 +392,25 @@ def _update_existing_env(
     path.write_text("\n".join(output) + "\n", encoding="utf-8")
 
 
-def _backup_file(path: Path) -> Path | None:
+def _backup_file(path: Path, *, root: str | Path | None = None) -> Path | None:
+    """Copy ``path`` into ``data/runtime/backups/`` (gitignored via /data/)."""
+
     if not path.is_file():
         return None
-    backup = path.with_suffix(path.suffix + ".bak")
-    backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    backup_dir = runtime_paths.runtime_dir(root) / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / f"{path.name}.bak"
+    shutil.copy2(path, backup)
     return backup
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
-    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
     return payload if isinstance(payload, dict) else {}
 
 
@@ -400,13 +423,29 @@ def _load_env_file(path: Path) -> dict[str, str]:
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, value = stripped.split("=", 1)
-        result[key.strip()] = value
+        result[key.strip()] = _parse_dotenv_value(value)
     return result
+
+
+def _parse_dotenv_value(raw: str) -> str:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
 
 
 def _default_prompt(message: str, default: str) -> str:
     suffix = f" [{default}]" if default else ""
     return input(f"{message}{suffix}: ")
+
+
+def _default_secret_prompt(message: str, _default: str) -> str:
+    """Prompt without echoing input (API keys / tokens)."""
+
+    try:
+        return getpass.getpass(f"{message}: ")
+    except (EOFError, KeyboardInterrupt):
+        return ""
 
 
 def _default_confirm(message: str, default: bool) -> bool:

@@ -128,6 +128,35 @@ def test_chat_workflow_job_research(tmp_path: Path) -> None:
     assert any(event.kind == "workflow" for event in result.events)
 
 
+def test_chat_workflow_charges_nested_budgets(tmp_path: Path) -> None:
+    provider = FakeLLMProvider(
+        responses=[
+            '{"type":"workflow","name":"job_research"}',
+            '{"type":"respond","message":"done"}',
+        ],
+        validate_structured_json=False,
+    )
+    session = new_session()
+    result = run_chat_turn(
+        session,
+        "research with tight budget",
+        provider=provider,
+        registry=build_tool_registry(),
+        context=_context(tmp_path),
+        budgets=ChatBudgets(
+            max_session_turns=4,
+            max_steps_per_turn=4,
+            max_tool_calls=1,
+            max_llm_calls=4,
+        ),
+        root=tmp_path,
+    )
+    assert any(event.kind == "workflow" for event in result.events)
+    # Nested workflow tool usage is charged; outer budget of 1 must hold.
+    assert session.tool_calls <= 1
+    assert result.reply
+
+
 def test_chat_rejects_non_allowlisted_tool(tmp_path: Path) -> None:
     provider = FakeLLMProvider(
         responses=[
