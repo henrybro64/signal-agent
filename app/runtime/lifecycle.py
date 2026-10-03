@@ -118,17 +118,19 @@ def start_runtime(
     # Clear stale pid/lock artifacts before launching a new child.
     _cleanup_pid(root)
 
+    if not detach:
+        # Foreground mode is `python -m app.runtime.service` only. Importing
+        # service from lifecycle would create a cyclic import (service →
+        # lifecycle → service) that DeepSource flags as PYL-R0401.
+        raise RuntimeLifecycleError(
+            "In-process foreground runtime is not supported via start_runtime; "
+            "run `python -m app.runtime.service` or use detach=True."
+        )
+
     runtime_paths.ensure_local_dirs(root)
     cfg = str(config_path or runtime_paths.config_path(root))
     log_file = runtime_paths.log_path(root)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    if not detach:
-        # Foreground mode used by the service entry itself.
-        from .service import run_service_forever
-
-        run_service_forever(root=root, config_path=cfg)
-        return get_runtime_info(root)
 
     cmd = [
         sys.executable,

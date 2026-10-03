@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -22,10 +22,13 @@ def apply_optional_overrides[TSourceSettings](
 ) -> TSourceSettings:
     """Return dataclass settings with any non-None overrides applied."""
 
-    return replace(
-        settings,  # type: ignore[arg-type]
-        **{key: value for key, value in overrides.items() if value is not None},
-    )
+    if not is_dataclass(settings) or isinstance(settings, type):
+        raise TypeError("settings must be a dataclass instance")
+    values = {item.name: getattr(settings, item.name) for item in fields(settings)}
+    for key, value in overrides.items():
+        if value is not None:
+            values[key] = value
+    return cast(TSourceSettings, type(settings)(**values))
 
 
 @dataclass(slots=True)
