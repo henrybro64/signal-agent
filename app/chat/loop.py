@@ -84,13 +84,46 @@ def run_chat_turn(
     """Execute one user turn with a bounded plan-act-observe loop."""
 
     limits = budgets or ChatBudgets()
-    approver = approve or default_approver
-    started = time.monotonic()
-    events: list[TurnEvent] = []
-    estimated_tokens = 0
+    collector = _new_turn_collector(session, user_text, context)
     session.messages.append(ChatMessage(role="user", content=user_text))
     session.turns += 1
 
+    if session.turns > limits.max_session_turns:
+        return _budget_exhausted_result(
+            session,
+            collector,
+            root=root,
+            persist_trace=persist_trace,
+        )
+
+    final_reply, events, stopped, estimated_tokens = _run_plan_act_loop(
+        session,
+        user_text,
+        provider=provider,
+        registry=registry,
+        context=context,
+        limits=limits,
+        approver=approve or default_approver,
+        cancel_check=cancel_check,
+        collector=collector,
+    )
+    return _finalize_turn_result(
+        session,
+        collector,
+        final_reply=final_reply,
+        events=events,
+        stopped=stopped,
+        estimated_tokens=estimated_tokens,
+        root=root,
+        persist_trace=persist_trace,
+    )
+
+
+def _new_turn_collector(
+    session: ChatSession,
+    user_text: str,
+    context: ToolContext,
+) -> TraceCollector:
     collector = TraceCollector(
         suite="chat",
         case_id=session.session_id,
@@ -102,15 +135,24 @@ def run_chat_turn(
         status="ok",
         metadata={"text": user_text[:500]},
     )
+    return collector
 
-    if session.turns > limits.max_session_turns:
-        return _budget_exhausted_result(
-            session,
-            collector,
-            root=root,
-            persist_trace=persist_trace,
-        )
 
+def _run_plan_act_loop(
+    session: ChatSession,
+    user_text: str,
+    *,
+    provider: LLMProvider,
+    registry: ToolRegistry,
+    context: ToolContext,
+    limits: ChatBudgets,
+    approver: ApproveFn,
+    cancel_check: CancelCheck | None,
+    collector: TraceCollector,
+) -> tuple[str, list[TurnEvent], str | None, int]:
+    started = time.monotonic()
+    events: list[TurnEvent] = []
+    estimated_tokens = 0
     observations: list[str] = []
     final_reply: str | None = None
     stopped: str | None = None
@@ -126,62 +168,124 @@ def run_chat_turn(
         if stopped:
             break
 
-        with collector.span("plan", "next_action") as span:
-            action, used_tokens = _plan_next_action(
-                provider=provider,
-                session=session,
-                observations=observations,
-                user_text=user_text,
-            )
-            estimated_tokens += used_tokens
-            span.metadata["action_type"] = str(action.get("type") or "unknown")
-            span.metadata["estimated_tokens"] = used_tokens
-        session.llm_calls += 1
-        events.append(
-            TurnEvent(kind="plan", name=str(action.get("type") or "unknown"))
+        action, used_tokens = _plan_step(
+            provider=provider,
+            session=session,
+            observations=observations,
+            user_text=user_text,
+            collector=collector,
+            events=events,
         )
-
-        action_type = str(action.get("type") or "respond").lower()
-        if action_type in {"respond", "final", "answer"}:
-            final_reply = str(
-                action.get("message") or action.get("text") or ""
-            ).strip() or "Done."
+        estimated_tokens += used_tokens
+        final_reply, cont = _dispatch_action(
+            action,
+            session=session,
+            limits=limits,
+            registry=registry,
+            context=context,
+            provider=provider,
+            approver=approver,
+            observations=observations,
+            events=events,
+            collector=collector,
+        )
+        if not cont:
             break
-
-        if action_type == "workflow":
-            _handle_workflow_action(
-                action,
-                session=session,
-                limits=limits,
-                registry=registry,
-                context=context,
-                provider=provider,
-                observations=observations,
-                events=events,
-                collector=collector,
-            )
-            continue
-
-        if action_type == "tool":
-            _handle_tool_action(
-                action,
-                session=session,
-                registry=registry,
-                context=context,
-                approver=approver,
-                observations=observations,
-                events=events,
-                collector=collector,
-            )
-            continue
-
-        observations.append(f"unknown_action:{action_type}")
 
     if final_reply is None:
         final_reply, stopped = _compose_limit_reply(
             observations, session=session, limits=limits, stopped=stopped
         )
+    return final_reply, events, stopped, estimated_tokens
 
+
+def _plan_step(
+    *,
+    provider: LLMProvider,
+    session: ChatSession,
+    observations: list[str],
+    user_text: str,
+    collector: TraceCollector,
+    events: list[TurnEvent],
+) -> tuple[dict[str, Any], int]:
+    with collector.span("plan", "next_action") as span:
+        action, used_tokens = _plan_next_action(
+            provider=provider,
+            session=session,
+            observations=observations,
+            user_text=user_text,
+        )
+        span.metadata["action_type"] = str(action.get("type") or "unknown")
+        span.metadata["estimated_tokens"] = used_tokens
+    session.llm_calls += 1
+    events.append(TurnEvent(kind="plan", name=str(action.get("type") or "unknown")))
+    return action, used_tokens
+
+
+def _dispatch_action(
+    action: dict[str, Any],
+    *,
+    session: ChatSession,
+    limits: ChatBudgets,
+    registry: ToolRegistry,
+    context: ToolContext,
+    provider: LLMProvider,
+    approver: ApproveFn,
+    observations: list[str],
+    events: list[TurnEvent],
+    collector: TraceCollector,
+) -> tuple[str | None, bool]:
+    """Apply one planned action.
+
+    Returns ``(final_reply, continue_loop)``.
+    """
+
+    action_type = str(action.get("type") or "respond").lower()
+    if action_type in {"respond", "final", "answer"}:
+        reply = str(
+            action.get("message") or action.get("text") or ""
+        ).strip() or "Done."
+        return reply, False
+    if action_type == "workflow":
+        _handle_workflow_action(
+            action,
+            session=session,
+            limits=limits,
+            registry=registry,
+            context=context,
+            provider=provider,
+            observations=observations,
+            events=events,
+            collector=collector,
+        )
+        return None, True
+    if action_type == "tool":
+        _handle_tool_action(
+            action,
+            session=session,
+            registry=registry,
+            context=context,
+            approver=approver,
+            observations=observations,
+            events=events,
+            collector=collector,
+        )
+        return None, True
+    observations.append(f"unknown_action:{action_type}")
+    return None, True
+
+
+def _finalize_turn_result(
+    session: ChatSession,
+    collector: TraceCollector,
+    *,
+    final_reply: str,
+    events: list[TurnEvent],
+    stopped: str | None,
+    estimated_tokens: int,
+    root: str | Path | None,
+    persist_trace: bool,
+) -> TurnResult:
     session.messages.append(ChatMessage(role="assistant", content=final_reply))
     collector.record_text(kind="digest", name="assistant_reply", text=final_reply)
     if stopped:

@@ -63,61 +63,28 @@ def run_setup(
     dotenv_path = runtime_paths.env_path(base)
     db = runtime_paths.db_path(base)
 
-    # Under --force, skip parsing a possibly-malformed config so recovery works.
-    if opts.force:
-        existing_cfg: dict[str, Any] = {}
-    else:
-        existing_cfg = _load_yaml(cfg_path)
-    existing_env = _load_env_file(dotenv_path)
-    merged = _merge_options(opts, existing_cfg, existing_env)
-
-    ask = prompt or _default_prompt
-    # Custom prompt callables (tests) also receive secret prompts; the default
-    # interactive path uses getpass so secrets are never echoed.
-    ask_secret = prompt or _default_secret_prompt
-    yes = confirm or _default_confirm
-
-    if not opts.non_interactive:
-        merged = _interactive_collect(
-            merged,
-            existing_env,
-            ask,
-            ask_secret,
-            yes,
-        )
-
+    merged = _collect_setup_options(
+        opts,
+        cfg_path=cfg_path,
+        dotenv_path=dotenv_path,
+        prompt=prompt,
+        confirm=confirm,
+    )
     _validate_provider_model(merged.provider, merged.model)
-
-    created_config = False
-    created_env = False
-    if not cfg_path.exists():
-        _write_config(cfg_path, merged)
-        created_config = True
-    elif opts.force:
-        _backup_file(cfg_path, root=base)
-        _write_config(cfg_path, merged)
-        created_config = True
-    elif not opts.non_interactive and yes(
-        f"Replace {cfg_path.name} with generated defaults "
-        f"(a backup will be kept under data/runtime/backups/)?",
-        False,
-    ):
-        _backup_file(cfg_path, root=base)
-        _write_config(cfg_path, merged)
-        created_config = True
-    else:
-        # Default / non-interactive: merge LLM/telegram keys only.
-        _update_existing_config(cfg_path, merged)
-
-    env_existed = dotenv_path.exists()
-    if env_existed and not opts.force:
-        _update_existing_env(dotenv_path, merged, preserve_missing=True)
-        created_env = False
-    else:
-        if env_existed and opts.force:
-            _backup_file(dotenv_path, root=base)
-        _write_env(dotenv_path, merged)
-        created_env = not env_existed or opts.force
+    created_config = _apply_config_file(
+        cfg_path,
+        merged,
+        root=base,
+        interactive=not opts.non_interactive,
+        force=opts.force,
+        confirm=confirm or _default_confirm,
+    )
+    created_env = _apply_env_file(
+        dotenv_path,
+        merged,
+        root=base,
+        force=opts.force,
+    )
 
     init_db(db)
     browser = detect_browser()
@@ -135,6 +102,74 @@ def run_setup(
         validation=validation,
         browser_detail=browser.detail,
     )
+
+
+def _collect_setup_options(
+    opts: SetupOptions,
+    *,
+    cfg_path: Path,
+    dotenv_path: Path,
+    prompt: PromptFn | None,
+    confirm: ConfirmFn | None,
+) -> SetupOptions:
+    # Under --force, skip parsing a possibly-malformed config so recovery works.
+    existing_cfg: dict[str, Any] = {} if opts.force else _load_yaml(cfg_path)
+    existing_env = _load_env_file(dotenv_path)
+    merged = _merge_options(opts, existing_cfg, existing_env)
+    if opts.non_interactive:
+        return merged
+    ask = prompt or _default_prompt
+    # Custom prompt callables (tests) also receive secret prompts; the default
+    # interactive path uses getpass so secrets are never echoed.
+    ask_secret = prompt or _default_secret_prompt
+    yes = confirm or _default_confirm
+    return _interactive_collect(merged, existing_env, ask, ask_secret, yes)
+
+
+def _apply_config_file(
+    cfg_path: Path,
+    merged: SetupOptions,
+    *,
+    root: Path,
+    interactive: bool,
+    force: bool,
+    confirm: ConfirmFn,
+) -> bool:
+    if not cfg_path.exists():
+        _write_config(cfg_path, merged)
+        return True
+    if force:
+        _backup_file(cfg_path, root=root)
+        _write_config(cfg_path, merged)
+        return True
+    if interactive and confirm(
+        f"Replace {cfg_path.name} with generated defaults "
+        f"(a backup will be kept under data/runtime/backups/)?",
+        False,
+    ):
+        _backup_file(cfg_path, root=root)
+        _write_config(cfg_path, merged)
+        return True
+    # Default / non-interactive: merge LLM/telegram keys only.
+    _update_existing_config(cfg_path, merged)
+    return False
+
+
+def _apply_env_file(
+    dotenv_path: Path,
+    merged: SetupOptions,
+    *,
+    root: Path,
+    force: bool,
+) -> bool:
+    env_existed = dotenv_path.exists()
+    if env_existed and not force:
+        _update_existing_env(dotenv_path, merged, preserve_missing=True)
+        return False
+    if env_existed and force:
+        _backup_file(dotenv_path, root=root)
+    _write_env(dotenv_path, merged)
+    return not env_existed or force
 
 
 def show_config_redacted(

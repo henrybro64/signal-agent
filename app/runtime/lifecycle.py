@@ -16,6 +16,9 @@ from typing import Any
 
 from . import paths as runtime_paths
 
+# Absolute path avoids PATH-dependent process launch (DeepSource PTC).
+_PS_EXECUTABLE = "/bin/ps"
+
 
 class RuntimeLifecycleError(RuntimeError):
     """Raised for lifecycle conflicts or invalid runtime state."""
@@ -274,9 +277,11 @@ def _pid_is_our_runtime(pid: int, *, root: str | Path | None = None) -> bool:
 
 
 def _read_cmdline(pid: int) -> str | None:
+    if not _PS_EXECUTABLE or not Path(_PS_EXECUTABLE).is_file():
+        return None
     try:
-        result = subprocess.run(  # noqa: S603 - local diagnostic only
-            ["ps", "-p", str(pid), "-o", "command="],
+        result = subprocess.run(  # noqa: S603 - absolute ps path
+            [_PS_EXECUTABLE, "-p", str(pid), "-o", "command="],
             capture_output=True,
             text=True,
             check=False,
