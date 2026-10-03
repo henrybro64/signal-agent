@@ -6,16 +6,23 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from app.core.config import load_config
 from app.core.health import resolve_db_path
 from app.core.secrets import load_env_settings
-from app.llm import create_llm_provider
+from app.llm.models_cli import build_routed_provider
 from app.runtime import paths as runtime_paths
 from app.tools import ToolContext, ToolRegistry, build_tool_registry
+from app.tools.permissions import (
+    build_permission_policy,
+    format_approval_prompt,
+    permission_policy_config_from_tools,
+)
+from app.tools.registry import builtin_tools
 
 from .loop import ChatBudgets, ChatCancelled, TurnResult, run_chat_turn
+from .permissions import policy_approver
 from .session import ChatSession, load_session, new_session, save_session
 
 HELP_TEXT = """\
@@ -34,6 +41,7 @@ class _ChatRuntime:
     llm: object
     registry: ToolRegistry
     context: ToolContext
+    approve: Callable[[str, dict], bool] | None = None
 
 
 def run_chat_repl(
@@ -52,7 +60,11 @@ def run_chat_repl(
     out = output or sys.stdout
     read = input_fn or input
     runtime = _bootstrap_chat_runtime(
-        root=root, config_path=config_path, provider=provider
+        root=root,
+        config_path=config_path,
+        provider=provider,
+        input_fn=read,
+        output=out,
     )
     session = _open_session(session_id, root=runtime.base, out=out)
     print("Type /help for commands. Ctrl-C cancels the current turn.", file=out)
@@ -86,6 +98,7 @@ def run_chat_repl(
             runtime=runtime,
             budgets=limits,
             out=out,
+            approve=runtime.approve,
         )
         if result is None:
             continue
@@ -101,18 +114,17 @@ def _bootstrap_chat_runtime(
     root: str | Path | None,
     config_path: str | Path | None,
     provider: object | None,
+    input_fn: Callable[[str], str],
+    output: TextIO,
 ) -> _ChatRuntime:
     base = runtime_paths.project_root(root)
     cfg_path = Path(config_path or runtime_paths.config_path(base))
     config = load_config(cfg_path)
     env = load_env_settings(runtime_paths.env_path(base))
     db_path = resolve_db_path(runtime_paths.db_path(base))
-    llm = provider or create_llm_provider(
-        provider=config.llm.provider,
+    llm = provider or build_routed_provider(
+        config.llm,
         api_key=env.openai_api_key,
-        model=config.llm.model,
-        timeout_seconds=config.llm.timeout_seconds,
-        temperature=config.llm.temperature,
     )
     registry = build_tool_registry(allowlist=list(config.tools.allowlist))
     secrets = tuple(
@@ -120,15 +132,58 @@ def _bootstrap_chat_runtime(
         for value in (env.openai_api_key, env.telegram_bot_token, env.telegram_chat_id)
         if value
     )
+
+    def _prompt_yes(prompt: str) -> bool:
+        print(prompt, file=output)
+        try:
+            answer = input_fn("approve> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return answer in {"y", "yes"}
+
+    policy_box: dict[str, Any] = {}
+
+    def _policy_approve(name: str, args: dict, summary: str) -> bool:
+        permission = None
+        active = policy_box.get("policy")
+        if active is not None:
+            permission = active.classify_tool(name, tool=builtin_tools().get(name))
+        return _prompt_yes(
+            format_approval_prompt(
+                name,
+                side_effect_summary=summary,
+                permission=permission,
+            )
+        )
+
+    policy = build_permission_policy(
+        permission_policy_config_from_tools(
+            config.tools.permissions,
+            audit_log_path=str(base / "logs" / "permissions-audit.jsonl"),
+        ),
+        interactive=True,
+        approve=_policy_approve,
+        secrets=secrets,
+        root=base,
+    )
+    policy_box["policy"] = policy
     context = ToolContext(
         config=config,
         env=env,
         db_path=db_path,
-        telegram_enabled=False,
+        telegram_enabled=bool(env.telegram_bot_token and env.telegram_chat_id),
         timeout_seconds=config.tools.timeout_seconds,
         secrets_to_redact=secrets,
+        interactive=True,
+        permission_policy=policy,
     )
-    return _ChatRuntime(base=base, llm=llm, registry=registry, context=context)
+    return _ChatRuntime(
+        base=base,
+        llm=llm,
+        registry=registry,
+        context=context,
+        approve=policy_approver(policy, prompt_fn=_prompt_yes),
+    )
 
 
 def _open_session(
@@ -168,6 +223,7 @@ def _safe_chat_turn(
     runtime: _ChatRuntime,
     budgets: ChatBudgets,
     out: TextIO,
+    approve: Callable[[str, dict], bool] | None = None,
 ) -> TurnResult | None:
     try:
         return run_chat_turn(
@@ -177,6 +233,7 @@ def _safe_chat_turn(
             registry=runtime.registry,
             context=runtime.context,
             budgets=budgets,
+            approve=approve,
             root=runtime.base,
         )
     except ChatCancelled:

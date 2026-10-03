@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from .models import ToolContext, ToolResult
+from .permissions import PermissionClass
 
 
 @runtime_checkable
@@ -22,6 +23,10 @@ class Tool(Protocol):
     @property
     def input_schema(self) -> dict[str, Any]:
         """JSON Schema for tool arguments."""
+
+    @property
+    def permission(self) -> PermissionClass:
+        """Explicit permission classification (#84). Default-deny if missing."""
 
     def invoke(
         self,

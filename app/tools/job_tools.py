@@ -15,6 +15,7 @@ from app.sources import (
 
 from .args import optional_int
 from .models import ToolContext, ToolError, ToolResult
+from .permissions import PermissionClass
 from .serialization import signal_item_to_dict
 
 _INPUT_SCHEMA: dict[str, Any] = {
@@ -44,6 +45,7 @@ class SearchJobsTool:
     """Fetch job signals through configured collectors (no scraping login)."""
 
     name = "search_jobs"
+    permission = PermissionClass.READ
     description = (
         "Fetch recent job postings from configured sources "
         "(104, LinkedIn email alerts, optional web collectors). "

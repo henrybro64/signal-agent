@@ -57,6 +57,9 @@ tasks:
     max_tool_calls: 6
     max_llm_calls: 3
     memory_namespace: job_research
+    # Optional per-workflow model override (#86); omit to inherit llm.*
+    # llm_provider: fake
+    # llm_model: research-model
 
 # Explicit Markdown/text documents for namespaced agent memory (#65).
 # Paths are ingested at job_research start; never put .env/secrets here.
@@ -119,15 +122,29 @@ llm:
   model: gpt-4o-mini
   timeout_seconds: 20
   temperature: 0.2
+  max_retries: 1
+  # Optional ordered fallbacks used by RoutedLLMProvider (#86).
+  # fallbacks:
+  #   - fake/backup-model
 
-# Optional agent tool registry defaults (#62). Telegram stays off the default
-# allowlist; enable via include path / job_research_agent.telegram_enabled.
+# Optional agent tool registry defaults (#62/#84). Telegram stays off the
+# default allowlist; enable via include path / job_research_agent.telegram_enabled.
 tools:
   allowlist:
     - search_jobs
     - get_tw_stock_movers
     - query_recent_runs
   timeout_seconds: 30
+  permissions:
+    classes:
+      read: allow
+      notify: ask
+      write: disabled
+      execute: disabled
+    # Per-tool overrides (disabled/ask/allow), e.g.:
+    # tools:
+    #   send_telegram_message: allow
+    max_side_effect_actions: 3
 
 # Optional source runtime tuning. Safe defaults apply when this section
 # (or any nested key) is omitted.

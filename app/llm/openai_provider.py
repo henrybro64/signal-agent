@@ -11,7 +11,14 @@ import requests
 
 from app.core.logging import get_logger, log_event
 
-from .exceptions import LLMProviderError, LLMResponseError, LLMTimeoutError
+from .exceptions import (
+    LLMAuthError,
+    LLMNetworkError,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMResponseError,
+    LLMTimeoutError,
+)
 from .models import LLMRequest, LLMResponse, StructuredOutputSpec
 
 DEFAULT_OPENAI_RESPONSES_URL: Final[str] = "https://api.openai.com/v1/responses"
@@ -90,8 +97,8 @@ class OpenAIProvider:
             _log_failure(model=model, status="timeout")
             raise LLMTimeoutError("OpenAI request timed out") from exc
         except requests.RequestException as exc:
-            _log_failure(model=model, status="provider_error")
-            raise LLMProviderError("OpenAI request failed") from exc
+            _log_failure(model=model, status="network_error")
+            raise LLMNetworkError("OpenAI network request failed") from exc
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         if response.status_code >= 400:
@@ -101,6 +108,18 @@ class OpenAIProvider:
                 duration_ms=duration_ms,
                 http_status=response.status_code,
             )
+            if response.status_code in {401, 403}:
+                raise LLMAuthError(
+                    f"OpenAI authentication failed with status "
+                    f"{response.status_code}"
+                )
+            if response.status_code == 429:
+                raise LLMRateLimitError("OpenAI rate limit exceeded")
+            if response.status_code == 404:
+                raise LLMProviderError(
+                    f"OpenAI model unsupported or not found "
+                    f"(status {response.status_code})"
+                )
             raise LLMProviderError(
                 f"OpenAI request failed with status {response.status_code}"
             )

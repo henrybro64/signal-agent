@@ -7,6 +7,7 @@ from typing import Any
 from app.notifiers import build_telegram_notifier
 
 from .models import ToolContext, ToolError, ToolResult
+from .permissions import PermissionClass
 
 _INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -29,6 +30,7 @@ class SendTelegramMessageTool:
     """
 
     name = "send_telegram_message"
+    permission = PermissionClass.NOTIFY
     description = (
         "Send a plain-text Telegram notification using configured bot credentials. "
         "Disabled unless explicitly enabled for the agent workflow."

@@ -275,10 +275,13 @@ def test_job_research_persistence_failure_still_returns_digest() -> None:
 
 
 def test_job_research_source_partial_failure_warning() -> None:
+    from app.tools.permissions import PermissionClass
+
     class FlakySearch:
         name = "search_jobs"
         description = "flaky"
         input_schema = {"type": "object", "properties": {}}
+        permission = PermissionClass.READ
 
         @staticmethod
         def invoke(arguments, *, context):
@@ -432,6 +435,12 @@ def test_persist_uses_distinct_research_identity() -> None:
 
 
 def test_notify_propagates_telegram_failure_as_error() -> None:
+    from app.tools.permissions import (
+        PermissionClass,
+        PermissionPolicyConfig,
+        build_permission_policy,
+    )
+
     class FailTelegram:
         name = "send_telegram_message"
         description = "fail"
@@ -440,6 +449,7 @@ def test_notify_propagates_telegram_failure_as_error() -> None:
             "required": ["text"],
             "properties": {"text": {"type": "string"}},
         }
+        permission = PermissionClass.NOTIFY
 
         @staticmethod
         def invoke(arguments, *, context):
@@ -462,17 +472,25 @@ def test_notify_propagates_telegram_failure_as_error() -> None:
     notify_node(
         state,
         registry=registry,
-        context=ToolContext(telegram_enabled=True),
+        context=ToolContext(
+            telegram_enabled=True,
+            permission_policy=build_permission_policy(
+                PermissionPolicyConfig(classes={"notify": "allow"})
+            ),
+        ),
     )
     assert state.notification_status == "failed"
     assert "telegram_http_failed" in state.errors
 
 
 def test_fetch_promotes_total_source_outage_to_error() -> None:
+    from app.tools.permissions import PermissionClass
+
     class DeadSearch:
         name = "search_jobs"
         description = "dead"
         input_schema = {"type": "object", "properties": {}}
+        permission = PermissionClass.READ
 
         @staticmethod
         def invoke(arguments, *, context):

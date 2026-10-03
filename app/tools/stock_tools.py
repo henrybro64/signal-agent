@@ -9,6 +9,7 @@ from app.sources import build_tw_stock_mover_sources, fetch_from_sources
 
 from .args import optional_int
 from .models import ToolContext, ToolError, ToolResult
+from .permissions import PermissionClass
 from .serialization import signal_item_to_dict
 
 _INPUT_SCHEMA: dict[str, Any] = {
@@ -29,6 +30,7 @@ class GetTwStockMoversTool:
     """Fetch TWSE/TPEx mover signals via existing collectors."""
 
     name = "get_tw_stock_movers"
+    permission = PermissionClass.READ
     description = (
         "Fetch Taiwan stock market movers from TWSE and TPEx collectors. "
         "Read-only; does not place trades."

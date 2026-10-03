@@ -9,6 +9,7 @@ from app.core.health import resolve_db_path
 
 from .args import optional_int
 from .models import ToolContext, ToolError, ToolResult
+from .permissions import PermissionClass
 
 _INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -36,6 +37,7 @@ class QueryRecentRunsTool:
     """Read recent task or source collection runs from SQLite (read-only)."""
 
     name = "query_recent_runs"
+    permission = PermissionClass.READ
     description = (
         "Query recent run history from the local SQLite database "
         "(task_runs by default, or signal_runs). "

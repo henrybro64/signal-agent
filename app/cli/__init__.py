@@ -97,6 +97,10 @@ def _dispatch_command(args: Any) -> int:
         return _cmd_models(args)
     if command == "tools":
         return _cmd_tools(args)
+    if command == "schedules":
+        return _cmd_schedules(args)
+    if command == "schedule":
+        return _cmd_schedule(args)
     if command == "logs":
         return _cmd_logs(args)
     print(f"Unknown command: {command}", file=sys.stderr)
@@ -223,17 +227,125 @@ def _cmd_run(args: Any) -> int:
 
 
 def _cmd_models(args: Any) -> int:
-    from app.core.config import load_config
     from app.llm import supported_llm_providers
+    from app.llm.models_cli import (
+        add_fallback_model,
+        check_model_health,
+        format_models_status,
+        set_default_model,
+    )
 
-    providers = ", ".join(sorted(supported_llm_providers()))
-    print(f"supported_providers: {providers}")
-    try:
-        config = load_config(args.config)
-        print(f"configured: provider={config.llm.provider} model={config.llm.model}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"configured: unavailable ({type(exc).__name__})")
+    sub = getattr(args, "models_command", None)
+    if sub in {None, "status"}:
+        providers = ", ".join(sorted(supported_llm_providers()))
+        print(f"supported_providers: {providers}")
+        print(format_models_status(root=args.root, config_path=args.config))
+        return 0
+    if sub == "set":
+        selected = set_default_model(
+            args.model_id,
+            root=args.root,
+            config_path=args.config,
+        )
+        print(f"default model set to {selected}")
+        return 0
+    if sub == "fallback":
+        fb = getattr(args, "models_fallback_command", None)
+        if fb != "add":
+            print(
+                "Usage: signal-agent models fallback add <provider/model>",
+                file=sys.stderr,
+            )
+            return 2
+        items = add_fallback_model(
+            args.model_id,
+            root=args.root,
+            config_path=args.config,
+        )
+        print("fallbacks:")
+        for item in items:
+            print(f"- {item}")
+        return 0
+    if sub == "test":
+        result = check_model_health(root=args.root, config_path=args.config)
+        if result["ok"]:
+            print(f"models test: ok served={result['served']}")
+            return 0
+        print(
+            "models test: failed "
+            f"class={result.get('failure_class')} "
+            f"error={result.get('error_type')}: {result.get('error')}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"Unknown models command: {sub}", file=sys.stderr)
+    return 2
+
+
+def _cmd_schedules(args: Any) -> int:
+    from app.runtime import paths as runtime_paths
+    from app.scheduler import ScheduleStore, format_schedules
+
+    store = ScheduleStore(runtime_paths.db_path(args.root))
+    print(format_schedules(store.list()))
     return 0
+
+
+def _cmd_schedule(args: Any) -> int:
+    from app.runtime import paths as runtime_paths
+    from app.scheduler import ScheduleStore, format_schedules, run_schedule_now
+
+    store = ScheduleStore(runtime_paths.db_path(args.root))
+    sub = getattr(args, "schedule_command", None)
+    if sub == "add":
+        cron = args.cron or None
+        run_at = args.run_at or None
+        schedule = store.add(
+            name=args.name,
+            task_name=args.schedule_task,
+            timezone=args.timezone,
+            cron=cron,
+            run_at=run_at,
+            allow_overlap=bool(args.allow_overlap),
+            dry_run=bool(args.dry_run),
+            max_retries=args.max_retries,
+            backoff_seconds=args.backoff_seconds,
+        )
+        print(format_schedules([schedule]))
+        return 0
+    if sub == "enable":
+        print(format_schedules([store.set_enabled(args.schedule_id, enabled=True)]))
+        return 0
+    if sub == "disable":
+        print(format_schedules([store.set_enabled(args.schedule_id, enabled=False)]))
+        return 0
+    if sub == "run":
+        status = run_schedule_now(
+            args.schedule_id,
+            root=args.root,
+            config_path=args.config,
+            dry_run=bool(args.dry_run) or None,
+        )
+        print(f"schedule run: {status}")
+        return 0 if status in {"started_ok", "skipped_disabled"} else 1
+    if sub == "history":
+        rows = store.history(args.schedule_id, limit=args.limit)
+        if not rows:
+            print("(no runs)")
+            return 0
+        for row in rows:
+            print(
+                f"{row.run_id}  {row.status}  attempt={row.attempt}  "
+                f"started={row.started_at}  finished={row.finished_at or '-'}  "
+                f"error={row.error or '-'}"
+            )
+        return 0
+    print(
+        "Usage: signal-agent schedule "
+        "add|enable|disable|run|history ...",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def _cmd_tools(args: Any) -> int:

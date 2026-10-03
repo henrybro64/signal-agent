@@ -439,7 +439,12 @@ def _handle_tool_action(
             metadata={"reason": "not allowlisted"},
         )
         return
-    if requires_approval(tool_name) and not approver(tool_name, arguments):
+    # When a PermissionPolicy is attached to the context, the registry is the
+    # authoritative gate (interactive ask / non-interactive deny). Otherwise
+    # keep the chat-level approver for backward-compatible call sites.
+    if context.permission_policy is None and requires_approval(
+        tool_name
+    ) and not approver(tool_name, arguments):
         observations.append(f"tool_rejected_by_policy:{tool_name}")
         events.append(
             TurnEvent(

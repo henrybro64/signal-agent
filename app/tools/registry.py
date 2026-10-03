@@ -14,6 +14,7 @@ from .health_tools import QueryRecentRunsTool
 from .job_tools import SearchJobsTool
 from .models import ToolContext, ToolError, ToolResult
 from .notification_tools import SendTelegramMessageTool
+from .permissions import PermissionPolicy, build_permission_policy
 from .redaction import redact_mapping, safe_log_fields
 from .stock_tools import GetTwStockMoversTool
 from .validation import validate_tool_arguments
@@ -79,11 +80,15 @@ class ToolRegistry:
         descriptors: list[dict[str, Any]] = []
         for name in sorted(self._allowlist):
             tool = self._catalog[name]
+            permission = getattr(tool, "permission", None)
             descriptors.append(
                 {
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.input_schema,
+                    "permission": (
+                        str(permission) if permission is not None else None
+                    ),
                 }
             )
         return descriptors
@@ -122,6 +127,16 @@ class ToolRegistry:
         secrets = ctx.secrets_to_redact
         tool = self.get(name)
         started = time.perf_counter()
+
+        denied = _permission_denied_result(
+            name,
+            tool=tool,
+            arguments=args,
+            context=ctx,
+            started=started,
+        )
+        if denied is not None:
+            return denied
 
         try:
             validate_tool_arguments(args, tool.input_schema, tool_name=name)
@@ -174,11 +189,19 @@ class ToolRegistry:
         safe_error = (
             None if result.error is None else _redact_text(result.error, secrets)
         )
+        policy = _policy_from_context(ctx)
+        permission = getattr(tool, "permission", None)
+        if policy is not None and result.ok:
+            policy.record_side_effect(permission)
         safe_result = ToolResult(
             ok=result.ok,
             data=safe_data,
             error=safe_error,
-            metadata={**result.metadata, "duration_ms": duration_ms},
+            metadata={
+                **result.metadata,
+                "duration_ms": duration_ms,
+                "permission": str(permission) if permission is not None else None,
+            },
         )
         log_event(
             _LOGGER,
@@ -267,3 +290,92 @@ def _redact_text(value: str, secrets: tuple[str, ...]) -> str:
     from .redaction import redact_value
 
     return redact_value(value, secrets)
+
+
+def _policy_from_context(context: ToolContext) -> PermissionPolicy | None:
+    policy = context.permission_policy
+    if isinstance(policy, PermissionPolicy):
+        return policy
+    # Opt out only when callers explicitly set permission_policy=False.
+    if context.permission_policy is False:
+        return None
+
+    from .permissions import (
+        PermissionPolicyConfig,
+        get_active_permission_policy,
+        policy_from_app_config,
+    )
+
+    active = get_active_permission_policy()
+    if active is not None:
+        return active
+
+    # Prefer AppConfig.tools.permissions when the caller attached config.
+    if context.config is not None:
+        return policy_from_app_config(
+            context.config,
+            interactive=bool(context.interactive),
+            secrets=context.secrets_to_redact,
+        )
+
+    # Conservative legacy fallback: never auto-allow notify from telegram_enabled.
+    return build_permission_policy(
+        PermissionPolicyConfig(
+            classes={
+                "read": "allow",
+                "notify": "disabled",
+                "write": "disabled",
+                "execute": "disabled",
+            }
+        ),
+        interactive=bool(context.interactive),
+        secrets=context.secrets_to_redact,
+    )
+
+
+def _permission_denied_result(
+    name: str,
+    *,
+    tool: Tool,
+    arguments: dict[str, Any],
+    context: ToolContext,
+    started: float,
+) -> ToolResult | None:
+    policy = _policy_from_context(context)
+    if policy is None:
+        return None
+    decision = policy.decide(name, arguments, tool=tool)
+    if decision.allowed:
+        return None
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    code = (
+        "permission_denied"
+        if not decision.needs_approval
+        else "permission_ask_denied"
+    )
+    log_event(
+        _LOGGER,
+        event="tool_invoke_failed",
+        message=f"Tool {name} blocked by permission policy",
+        level=30,
+        **safe_log_fields(
+            tool_name=name,
+            status=code,
+            duration_ms=duration_ms,
+            arguments=arguments,
+            error=decision.reason,
+            secrets=context.secrets_to_redact,
+        ),
+    )
+    return ToolResult(
+        ok=False,
+        error=decision.reason,
+        metadata={
+            "code": code,
+            "duration_ms": duration_ms,
+            "permission": (
+                decision.permission.value if decision.permission else None
+            ),
+            "policy_action": decision.action.value,
+        },
+    )

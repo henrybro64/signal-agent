@@ -9,6 +9,16 @@ from .health_tools import QueryRecentRunsTool
 from .job_tools import SearchJobsTool
 from .models import ToolContext, ToolError, ToolResult
 from .notification_tools import SendTelegramMessageTool
+from .permissions import (
+    PermissionClass,
+    PermissionPolicy,
+    PermissionPolicyConfig,
+    PolicyAction,
+    build_permission_policy,
+    format_approval_prompt,
+    permission_policy_config_from_tools,
+    policy_from_app_config,
+)
 from .registry import (
     ALL_BUILTIN_TOOLS,
     DEFAULT_TOOL_ALLOWLIST,
@@ -22,6 +32,10 @@ __all__ = [
     "ALL_BUILTIN_TOOLS",
     "DEFAULT_TOOL_ALLOWLIST",
     "GetTwStockMoversTool",
+    "PermissionClass",
+    "PermissionPolicy",
+    "PermissionPolicyConfig",
+    "PolicyAction",
     "QueryRecentRunsTool",
     "SearchJobsTool",
     "SendTelegramMessageTool",
@@ -30,6 +44,10 @@ __all__ = [
     "ToolError",
     "ToolRegistry",
     "ToolResult",
+    "build_permission_policy",
     "build_tool_registry",
     "builtin_tools",
+    "format_approval_prompt",
+    "permission_policy_config_from_tools",
+    "policy_from_app_config",
 ]

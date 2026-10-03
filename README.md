@@ -40,6 +40,11 @@ signal-agent tasks
 signal-agent run dummy
 signal-agent status
 signal-agent chat
+signal-agent models status
+signal-agent models test
+signal-agent schedules
+signal-agent schedule add --name movers --task tw_stock_movers \
+  --timezone Asia/Taipei --cron '*/30 9-13 * * 1-5'
 signal-agent start   # long-running worker (survives individual tick failures)
 signal-agent stop
 
@@ -48,6 +53,12 @@ python main.py --list-tasks
 python main.py --task job_search
 python main.py --health
 ```
+
+Tool side effects are gated by `tools.permissions` in `config.yaml` (`read` /
+`notify` / `write` / `execute` → `disabled` / `ask` / `allow`). Interactive
+`chat` prompts for `ask` actions; the runtime worker and scheduler never block
+on stdin. Model fallbacks live under `llm.fallbacks` and are managed with
+`signal-agent models fallback add <provider/model>`.
 
 `setup` never prints API keys. Re-running setup keeps existing `.env` secrets
 and comments unless you pass `--force` (which writes a `.bak` backup first).

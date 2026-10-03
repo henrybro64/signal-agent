@@ -5,6 +5,7 @@ Does not replace the deterministic ``job_search`` task.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,10 @@ from app.core import load_config, load_env_settings
 from app.core.db import TaskRunStatus, finish_task_run, init_db, start_task_run
 from app.core.health import resolve_db_path
 from app.core.logging import get_logger, log_event
-from app.llm import FakeLLMProvider, create_llm_provider
+from app.llm import FakeLLMProvider
+from app.llm.models_cli import build_routed_provider
 from app.tools import ToolContext, build_tool_registry
+from app.tools.permissions import policy_from_app_config
 from app.workflows import JobResearchState, run_job_research
 
 from .base import BaseTask
@@ -40,6 +43,7 @@ class JobResearchAgentTask(BaseTask):
                 db_path=db_path,
                 telegram_enabled=prepared["telegram_enabled"],
                 allowlist=prepared["allowlist"],
+                task_cfg=prepared["task_cfg"],
             )
             state = JobResearchState(
                 profile_name="default",
@@ -111,10 +115,26 @@ class JobResearchAgentTask(BaseTask):
         db_path: Path,
         telegram_enabled: bool,
         allowlist: list[str],
+        task_cfg: Any,
     ) -> tuple[Any, ToolContext, Any]:
         registry = build_tool_registry(
             allowlist=allowlist,
             include_telegram=telegram_enabled,
+        )
+        secrets = tuple(
+            value
+            for value in (
+                env.openai_api_key,
+                env.telegram_bot_token,
+                env.telegram_chat_id,
+            )
+            if value
+        )
+        # Unattended task path: ask→deny; honor config.tools.permissions.
+        policy = policy_from_app_config(
+            config,
+            interactive=False,
+            secrets=secrets,
         )
         context = ToolContext(
             config=config,
@@ -122,27 +142,25 @@ class JobResearchAgentTask(BaseTask):
             db_path=Path(db_path),
             telegram_enabled=telegram_enabled,
             timeout_seconds=config.tools.timeout_seconds,
-            secrets_to_redact=tuple(
-                value
-                for value in (
-                    env.openai_api_key,
-                    env.telegram_bot_token,
-                    env.telegram_chat_id,
-                )
-                if value
-            ),
+            secrets_to_redact=secrets,
+            interactive=False,
+            permission_policy=policy,
         )
 
         provider = None
-        if config.scoring.llm_enabled and env.openai_api_key:
-            provider = create_llm_provider(
-                provider=config.llm.provider,
-                api_key=env.openai_api_key,
-                model=config.scoring.llm_model,
-                timeout_seconds=config.llm.timeout_seconds,
-                temperature=config.llm.temperature,
+        llm_cfg = config.llm
+        if task_cfg.llm_provider or task_cfg.llm_model:
+            llm_cfg = replace(
+                config.llm,
+                provider=task_cfg.llm_provider or config.llm.provider,
+                model=task_cfg.llm_model or config.llm.model,
             )
-        elif config.llm.provider == "fake":
+        if config.scoring.llm_enabled and env.openai_api_key:
+            provider = build_routed_provider(
+                llm_cfg,
+                api_key=env.openai_api_key,
+            )
+        elif llm_cfg.provider == "fake" or config.llm.provider == "fake":
             provider = FakeLLMProvider(
                 responses=["Brief note: deterministic fake analysis."],
                 validate_structured_json=False,

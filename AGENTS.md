@@ -26,7 +26,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
 | M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
 | M7 | LangChain-ready platform evolution #60–#67 | **Complete** on `main` |
-| M8 | OpenClaw-like setup / CLI / chat #81–#83 | **In progress** — local implementation under review; push/PR pending |
+| M8 | OpenClaw-like productization #81–#86 | **In progress** — #81–#83 on `main`; #84–#86 local (permissions/scheduler/models) |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -35,10 +35,11 @@ Deployment path already exists: local Python → Docker Compose → k3s CronJobs
 ```text
 signal-agent/
 ├── main.py                 # thin CLI entry
-├── app/cli/                # unified subcommands + legacy flag helpers (#81–#83)
+├── app/cli/                # unified subcommands + legacy flag helpers (#81–#86)
 ├── app/runtime/            # local runtime lifecycle / status / logs (#82)
 ├── app/setup/              # first-run wizard, doctor validation (#81)
 ├── app/chat/               # interactive bounded chat loop (#83)
+├── app/scheduler/          # persistent schedules + worker tick (#85)
 ├── config.yaml             # non-secret runtime settings
 ├── .env.example            # secret names only
 ├── Dockerfile
@@ -87,14 +88,17 @@ signal-agent/
 │   │   ├── job_score_pipeline.py  # two-stage rule → LLM orchestration
 │   │   ├── job_search.py   # profile loading + score orchestration
 │   │   └── tw_signal_classifier.py  # TW theme / research-candidate rules
-│   ├── llm/                # framework-neutral LLM gateway (#61)
+│   ├── llm/                # framework-neutral LLM gateway (#61/#86)
 │   │   ├── base.py         # LLMProvider protocol
 │   │   ├── models.py       # request/response models
 │   │   ├── exceptions.py   # project-owned LLM errors
 │   │   ├── openai_provider.py
 │   │   ├── fake_provider.py
-│   │   └── factory.py
-│   ├── tools/              # agent-callable tool protocol + registry (#62)
+│   │   ├── factory.py
+│   │   ├── router.py       # primary + fallback routing (#86)
+│   │   └── models_cli.py   # models status/set/fallback/test helpers
+│   ├── tools/              # agent-callable tool protocol + registry (#62/#84)
+│   │   └── permissions.py  # permission classes + policy gate (#84)
 │   ├── memory/             # durable namespaced memory + keyword RAG (#65)
 │   ├── evaluation/         # offline eval runner + redacted traces (#66)
 │   ├── integrations/       # optional framework adapters (#63/#67)
@@ -141,6 +145,7 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 | `setup` | First-run wizard, config show, doctor validation | Cloud control plane |
 | `runtime` | Local start/stop/status/logs lifecycle | Multi-node orchestration |
 | `chat` | Interactive plan-act-observe REPL | Unrestricted shell/SQL/browser tools |
+| `scheduler` | Persistent cron/one-shot schedules + overlap/retry | Reimplement task orchestration |
 | `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |
 | `notifiers` | Outbound delivery | Business ranking rules |
 | `profiles` | Packaged preference text for scorers | Secrets |
@@ -279,6 +284,25 @@ Starting points (see also the M7 roadmap doc):
 | #65 | `app/memory/`, SQLite migrations, keyword retrieval before optional vectors — done |
 | #66 | `app/evaluation/` (+ packaged `cases/`/`fixtures/`), offline CI subset — done |
 | #67 | optional `.[mcp]`; `app/integrations/mcp/` (localhost + allowlist) — done |
+
+## Next execution order (M8)
+
+OpenClaw-like productization. Preserve legacy CLI flags and deterministic tasks.
+
+```text
+1. #81  Setup / config / doctor wizard — DONE (on main)
+2. #82  Runtime lifecycle (start/stop/status/logs) — DONE (on main)
+3. #83  Interactive chat REPL — DONE (on main)
+4. #84  Tool permission policy + human approval gates — local
+5. #85  Scheduler + persistent task management CLI — local
+6. #86  Model management, health checks, fallbacks — local
+```
+
+| Issue | Preferred packages / entry points |
+|-------|-----------------------------------|
+| #84 | `app/tools/permissions.py`, registry gate, `tools.permissions` in config |
+| #85 | `app/scheduler/`, migration `003_schedules.sql`, runtime worker tick |
+| #86 | `app/llm/router.py`, `app/llm/models_cli.py`, `signal-agent models …` |
 
 ## How to pick up work
 

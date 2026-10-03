@@ -83,7 +83,7 @@ _JOB_RESEARCH_AGENT_CONFIG_PATH = "tasks.job_research_agent"
 
 @dataclass(slots=True)
 class JobResearchAgentTaskConfig:
-    """Optional bounded LangGraph/plain-Python job research pilot (#64)."""
+    """Optional bounded LangGraph/plain-Python job research pilot (#64/#86)."""
 
     enabled: bool = True
     telegram_enabled: bool = False
@@ -91,6 +91,9 @@ class JobResearchAgentTaskConfig:
     max_tool_calls: int = 6
     max_llm_calls: int = 3
     memory_namespace: str = "job_research"
+    # Optional per-workflow model override (#86); None inherits llm.* defaults.
+    llm_provider: str | None = None
+    llm_model: str | None = None
 
 
 @dataclass(slots=True)
@@ -108,8 +111,24 @@ class MemoryConfig:
 
 
 @dataclass(slots=True)
+class ToolsPermissionsConfig:
+    """Tool permission policy defaults (#84)."""
+
+    classes: dict[str, str] = field(
+        default_factory=lambda: {
+            "read": "allow",
+            "notify": "ask",
+            "write": "disabled",
+            "execute": "disabled",
+        }
+    )
+    tools: dict[str, str] = field(default_factory=dict)
+    max_side_effect_actions: int = 3
+
+
+@dataclass(slots=True)
 class ToolsConfig:
-    """Optional agent tool registry defaults (#62)."""
+    """Optional agent tool registry defaults (#62/#84)."""
 
     allowlist: list[str] = field(
         default_factory=lambda: [
@@ -119,6 +138,9 @@ class ToolsConfig:
         ]
     )
     timeout_seconds: float = 30.0
+    permissions: ToolsPermissionsConfig = field(
+        default_factory=ToolsPermissionsConfig
+    )
 
 
 @dataclass(slots=True)
@@ -193,6 +215,14 @@ class ScoringConfig:
 
 
 @dataclass(slots=True)
+class LlmFallbackConfig:
+    """One fallback provider/model pair (#86)."""
+
+    provider: str
+    model: str
+
+
+@dataclass(slots=True)
 class LlmConfig:
     """Framework-neutral LLM gateway defaults (optional OpenAI/fake).
 
@@ -204,6 +234,8 @@ class LlmConfig:
     model: str = "gpt-4o-mini"
     timeout_seconds: float = 20.0
     temperature: float = 0.2
+    max_retries: int = 1
+    fallbacks: list[LlmFallbackConfig] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -588,6 +620,21 @@ def _parse_job_research_agent_config(
             f"in {source_name}: must be a non-empty string"
         )
 
+    llm_provider = _optional_str(
+        data,
+        "llm_provider",
+        default="",
+        parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+        source_name=source_name,
+    ).strip()
+    llm_model = _optional_str(
+        data,
+        "llm_model",
+        default="",
+        parent_path=_JOB_RESEARCH_AGENT_CONFIG_PATH,
+        source_name=source_name,
+    ).strip()
+
     return JobResearchAgentTaskConfig(
         enabled=_optional_bool(
             data,
@@ -607,6 +654,8 @@ def _parse_job_research_agent_config(
         max_tool_calls=max_tool_calls,
         max_llm_calls=max_llm_calls,
         memory_namespace=memory_namespace.strip(),
+        llm_provider=llm_provider or None,
+        llm_model=llm_model or None,
     )
 
 
@@ -691,7 +740,73 @@ def _parse_tools_config(
     else:
         allowlist = [item.strip() for item in allowlist_raw]
 
-    return ToolsConfig(allowlist=allowlist, timeout_seconds=timeout_seconds)
+    permissions = _parse_tools_permissions_config(
+        data.get("permissions") if isinstance(data.get("permissions"), dict) else None,
+        source_name=source_name,
+    )
+    return ToolsConfig(
+        allowlist=allowlist,
+        timeout_seconds=timeout_seconds,
+        permissions=permissions,
+    )
+
+
+def _parse_tools_permissions_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> ToolsPermissionsConfig:
+    defaults = ToolsPermissionsConfig()
+    if not data:
+        return defaults
+    parent = "tools.permissions"
+    classes_raw = data.get("classes")
+    classes = dict(defaults.classes)
+    if classes_raw is not None:
+        if not isinstance(classes_raw, dict):
+            raise ConfigError(
+                f"Config value '{parent}.classes' must be a mapping in {source_name}"
+            )
+        for key, value in classes_raw.items():
+            action = str(value).strip().lower()
+            if action not in {"disabled", "ask", "allow"}:
+                raise ConfigError(
+                    f"Config value '{parent}.classes.{key}' must be one of "
+                    f"disabled/ask/allow in {source_name}"
+                )
+            classes[str(key)] = action
+    tools_raw = data.get("tools")
+    tools: dict[str, str] = {}
+    if tools_raw is not None:
+        if not isinstance(tools_raw, dict):
+            raise ConfigError(
+                f"Config value '{parent}.tools' must be a mapping in {source_name}"
+            )
+        for key, value in tools_raw.items():
+            action = str(value).strip().lower()
+            if action not in {"disabled", "ask", "allow"}:
+                raise ConfigError(
+                    f"Config value '{parent}.tools.{key}' must be one of "
+                    f"disabled/ask/allow in {source_name}"
+                )
+            tools[str(key)] = action
+    max_side = _optional_int(
+        data,
+        "max_side_effect_actions",
+        default=defaults.max_side_effect_actions,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    if max_side < 0:
+        raise ConfigError(
+            f"Config value '{parent}.max_side_effect_actions' must be >= 0 "
+            f"in {source_name}"
+        )
+    return ToolsPermissionsConfig(
+        classes=classes,
+        tools=tools,
+        max_side_effect_actions=max_side,
+    )
 
 
 def _parse_investment_config(
@@ -802,6 +917,73 @@ def _parse_llm_config(
             f"0 and 2 in {source_name}"
         )
 
+    max_retries = _optional_int(
+        data,
+        "max_retries",
+        default=1,
+        parent_path=_LLM_CONFIG_PATH,
+        source_name=source_name,
+    )
+    if max_retries < 0:
+        raise ConfigError(
+            f"Config value '{_LLM_CONFIG_PATH}.max_retries' must be >= 0 "
+            f"in {source_name}"
+        )
+
+    fallbacks_raw = data.get("fallbacks")
+    fallbacks: list[LlmFallbackConfig] = []
+    if fallbacks_raw is not None:
+        if not isinstance(fallbacks_raw, list):
+            raise ConfigError(
+                f"Config value '{_LLM_CONFIG_PATH}.fallbacks' must be a list "
+                f"in {source_name}"
+            )
+        for index, item in enumerate(fallbacks_raw):
+            if isinstance(item, str):
+                provider_name, _, model_name = item.partition("/")
+                if not provider_name or not model_name:
+                    raise ConfigError(
+                        f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}]' "
+                        f"must look like provider/model in {source_name}"
+                    )
+                fallbacks.append(
+                    LlmFallbackConfig(
+                        provider=provider_name.strip().lower(),
+                        model=model_name.strip(),
+                    )
+                )
+                continue
+            if not isinstance(item, dict):
+                raise ConfigError(
+                    f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}]' "
+                    f"must be a string or mapping in {source_name}"
+                )
+            fb_provider = _require_str(
+                item,
+                "provider",
+                parent_path=f"{_LLM_CONFIG_PATH}.fallbacks[{index}]",
+                source_name=source_name,
+            ).strip().lower()
+            fb_model = _require_str(
+                item,
+                "model",
+                parent_path=f"{_LLM_CONFIG_PATH}.fallbacks[{index}]",
+                source_name=source_name,
+            )
+            if fb_provider not in _SUPPORTED_LLM_PROVIDERS and fb_provider != "ollama":
+                supported = ", ".join(sorted(_SUPPORTED_LLM_PROVIDERS))
+                raise ConfigError(
+                    f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}].provider' "
+                    f"must be one of {supported} in {source_name}"
+                )
+            if fb_provider == "ollama":
+                raise ConfigError(
+                    f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}].provider' "
+                    f"value 'ollama' is reserved but not implemented yet "
+                    f"in {source_name}"
+                )
+            fallbacks.append(LlmFallbackConfig(provider=fb_provider, model=fb_model))
+
     return LlmConfig(
         provider=provider,
         model=_optional_str(
@@ -813,6 +995,8 @@ def _parse_llm_config(
         ),
         timeout_seconds=timeout_seconds,
         temperature=temperature,
+        max_retries=max_retries,
+        fallbacks=fallbacks,
     )
 
 

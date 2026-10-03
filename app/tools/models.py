@@ -37,6 +37,11 @@ class ToolContext:
     send_telegram: Callable[[str], None] | None = None
     query_runs: Callable[..., list[dict[str, Any]]] | None = None
     secrets_to_redact: tuple[str, ...] = ()
+    # Permission policy gate (#84). When unset, registry uses AppConfig when
+    # present, else a scheduler/runtime ContextVar, else conservative defaults
+    # (notify disabled). Set False to opt out of the gate entirely.
+    interactive: bool = False
+    permission_policy: Any | None = None
 
 
 @dataclass(slots=True, frozen=True)
