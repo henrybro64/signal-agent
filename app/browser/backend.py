@@ -250,14 +250,6 @@ def _probe_with_get(url: str, *, policy: BrowserPolicy) -> str:
         return url
 
 
-def _assert_http_https_url(url: str) -> None:
-    scheme = (urlparse(url).scheme or "").lower()
-    if scheme not in {"http", "https"}:
-        raise BrowserPolicyError(
-            f"URL scheme {scheme!r} is not allowed for network probe (http/https only)"
-        )
-
-
 def _http_probe(
     url: str,
     *,
@@ -267,13 +259,19 @@ def _http_probe(
 ) -> str:
     """Open an http(s) URL after an explicit scheme audit."""
 
-    _assert_http_https_url(url)
+    # Inline startswith check so static analyzers (DeepSource PTC-W6004 /
+    # Bandit B310) can see the scheme gate in the same function as urlopen.
+    lowered = url.lower()
+    if not lowered.startswith(("http://", "https://")):
+        raise BrowserPolicyError(
+            "URL scheme is not allowed for network probe (http/https only)"
+        )
     request = urllib.request.Request(
         url,
         method=method,
         headers={"User-Agent": "signal-agent-browser/1.0"},
     )
-    with urllib.request.urlopen(  # noqa: S310 - scheme audited above
+    with urllib.request.urlopen(  # noqa: S310  # skipcq: PTC-W6004
         request,
         timeout=min(5.0, timeout_seconds),
     ) as response:
