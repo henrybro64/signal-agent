@@ -364,13 +364,12 @@ def _default_task_runner(
     task_name: str,
     *,
     config_path: str,
-    root: Path | None = None,
     db_path: Path | None = None,
+    **_kwargs: Any,
 ) -> None:
     from app.core.health import DB_PATH_ENV_VAR
     from app.tasks import build_task
 
-    del root  # reserved for future task context plumbing
     previous = os.environ.get(DB_PATH_ENV_VAR)
     if db_path is not None:
         os.environ[DB_PATH_ENV_VAR] = str(db_path)

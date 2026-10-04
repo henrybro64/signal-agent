@@ -294,66 +294,91 @@ def _cmd_schedules(args: Any) -> int:
 
 def _cmd_schedule(args: Any) -> int:
     from app.runtime import paths as runtime_paths
-    from app.scheduler import ScheduleStore, format_schedules, run_schedule_now
+    from app.scheduler import ScheduleStore
 
     store = ScheduleStore(runtime_paths.db_path(args.root))
-    sub = getattr(args, "schedule_command", None)
-    if sub == "add":
-        task_name = str(args.schedule_task)
-        known = list_tasks()
-        if task_name not in known:
-            raise ValueError(
-                f"Unknown task {task_name!r}; choose one of: {', '.join(known)}"
-            )
-        cron = args.cron or None
-        run_at = args.run_at or None
-        schedule = store.add(
-            name=args.name,
-            task_name=task_name,
-            timezone=args.timezone,
-            cron=cron,
-            run_at=run_at,
-            allow_overlap=bool(args.allow_overlap),
-            dry_run=bool(args.dry_run),
-            max_retries=args.max_retries,
-            backoff_seconds=args.backoff_seconds,
+    handlers = {
+        "add": _schedule_add,
+        "enable": _schedule_enable,
+        "disable": _schedule_disable,
+        "run": _schedule_run,
+        "history": _schedule_history,
+    }
+    handler = handlers.get(getattr(args, "schedule_command", None))
+    if handler is None:
+        print(
+            "Usage: signal-agent schedule add|enable|disable|run|history ...",
+            file=sys.stderr,
         )
-        print(format_schedules([schedule]))
-        return 0
-    if sub == "enable":
-        print(format_schedules([store.set_enabled(args.schedule_id, enabled=True)]))
-        return 0
-    if sub == "disable":
-        print(format_schedules([store.set_enabled(args.schedule_id, enabled=False)]))
-        return 0
-    if sub == "run":
-        status = run_schedule_now(
-            args.schedule_id,
-            root=args.root,
-            config_path=args.config,
-            dry_run=bool(args.dry_run) or None,
+        return 2
+    return handler(args, store=store)
+
+
+def _schedule_add(args: Any, *, store: Any) -> int:
+    from app.scheduler import format_schedules
+
+    task_name = str(args.schedule_task)
+    known = list_tasks()
+    if task_name not in known:
+        raise ValueError(
+            f"Unknown task {task_name!r}; choose one of: {', '.join(known)}"
         )
-        print(f"schedule run: {status}")
-        return 0 if status in {"started_ok", "skipped_disabled"} else 1
-    if sub == "history":
-        if store.get(args.schedule_id) is None:
-            raise KeyError(args.schedule_id)
-        rows = store.history(args.schedule_id, limit=args.limit)
-        if not rows:
-            print("(no runs)")
-            return 0
-        for row in rows:
-            print(
-                f"{row.run_id}  {row.status}  attempt={row.attempt}  "
-                f"started={row.started_at}  finished={row.finished_at or '-'}  "
-                f"error={row.error or '-'}"
-            )
-        return 0
-    print(
-        "Usage: signal-agent schedule add|enable|disable|run|history ...",
-        file=sys.stderr,
+    schedule = store.add(
+        name=args.name,
+        task_name=task_name,
+        timezone=args.timezone,
+        cron=args.cron or None,
+        run_at=args.run_at or None,
+        allow_overlap=bool(args.allow_overlap),
+        dry_run=bool(args.dry_run),
+        max_retries=args.max_retries,
+        backoff_seconds=args.backoff_seconds,
     )
-    return 2
+    print(format_schedules([schedule]))
+    return 0
+
+
+def _schedule_enable(args: Any, *, store: Any) -> int:
+    from app.scheduler import format_schedules
+
+    print(format_schedules([store.set_enabled(args.schedule_id, enabled=True)]))
+    return 0
+
+
+def _schedule_disable(args: Any, *, store: Any) -> int:
+    from app.scheduler import format_schedules
+
+    print(format_schedules([store.set_enabled(args.schedule_id, enabled=False)]))
+    return 0
+
+
+def _schedule_run(args: Any, **_kwargs: Any) -> int:
+    from app.scheduler import run_schedule_now
+
+    status = run_schedule_now(
+        args.schedule_id,
+        root=args.root,
+        config_path=args.config,
+        dry_run=bool(args.dry_run) or None,
+    )
+    print(f"schedule run: {status}")
+    return 0 if status in {"started_ok", "skipped_disabled"} else 1
+
+
+def _schedule_history(args: Any, *, store: Any) -> int:
+    if store.get(args.schedule_id) is None:
+        raise KeyError(args.schedule_id)
+    rows = store.history(args.schedule_id, limit=args.limit)
+    if not rows:
+        print("(no runs)")
+        return 0
+    for row in rows:
+        print(
+            f"{row.run_id}  {row.status}  attempt={row.attempt}  "
+            f"started={row.started_at}  finished={row.finished_at or '-'}  "
+            f"error={row.error or '-'}"
+        )
+    return 0
 
 
 def _cmd_tools(args: Any) -> int:
