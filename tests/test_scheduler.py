@@ -81,11 +81,10 @@ def test_overlap_prevention_restart_and_disabled(tmp_path: Path) -> None:
 
     calls: list[str] = []
 
-    def runner(task_name: str, *, config_path: str, **_kwargs) -> None:
+    def runner(task_name: str, **_kwargs) -> None:
         calls.append(task_name)
         # Simulate overlap: leave a running row if allow_overlap is false by
         # inserting a stuck run before the second tick would start.
-        del config_path
 
     first = run_schedule_tick(
         root=tmp_path,
@@ -174,8 +173,7 @@ def test_transient_retry_and_permission_rejection(tmp_path: Path) -> None:
 
     attempts = {"n": 0}
 
-    def flaky_runner(task_name: str, *, config_path: str, **_kwargs) -> None:
-        del task_name, config_path
+    def flaky_runner(*_args, **_kwargs) -> None:
         attempts["n"] += 1
         if attempts["n"] < 3:
             raise TimeoutError("temporarily unavailable")

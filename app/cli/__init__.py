@@ -74,40 +74,34 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch_command(args: Any) -> int:
-    command = args.command
-    if command == "setup":
-        return _cmd_setup(args)
-    if command == "config":
-        return _cmd_config(args)
-    if command == "doctor":
-        return _cmd_doctor(args)
-    if command == "start":
-        return _cmd_start(args)
-    if command == "stop":
-        return _cmd_stop(args)
-    if command == "restart":
-        return _cmd_restart(args)
-    if command == "status":
-        return _cmd_status(args)
-    if command == "chat":
-        return _cmd_chat(args)
-    if command == "run":
-        return _cmd_run(args)
-    if command == "tasks":
-        print("\n".join(list_tasks()))
-        return 0
-    if command == "models":
-        return _cmd_models(args)
-    if command == "tools":
-        return _cmd_tools(args)
-    if command == "schedules":
-        return _cmd_schedules(args)
-    if command == "schedule":
-        return _cmd_schedule(args)
-    if command == "logs":
-        return _cmd_logs(args)
-    print(f"Unknown command: {command}", file=sys.stderr)
-    return 2
+    handlers = {
+        "setup": _cmd_setup,
+        "config": _cmd_config,
+        "doctor": _cmd_doctor,
+        "start": _cmd_start,
+        "stop": _cmd_stop,
+        "restart": _cmd_restart,
+        "status": _cmd_status,
+        "chat": _cmd_chat,
+        "run": _cmd_run,
+        "tasks": _cmd_tasks,
+        "models": _cmd_models,
+        "tools": _cmd_tools,
+        "schedules": _cmd_schedules,
+        "schedule": _cmd_schedule,
+        "logs": _cmd_logs,
+    }
+    command = getattr(args, "command", None)
+    handler = handlers.get(command) if isinstance(command, str) else None
+    if handler is None:
+        print(f"Unknown command: {command}", file=sys.stderr)
+        return 2
+    return handler(args)
+
+
+def _cmd_tasks(_args: Any) -> int:
+    print("\n".join(list_tasks()))
+    return 0
 
 
 def _cmd_setup(args: Any) -> int:
@@ -304,7 +298,8 @@ def _cmd_schedule(args: Any) -> int:
         "run": _schedule_run,
         "history": _schedule_history,
     }
-    handler = handlers.get(getattr(args, "schedule_command", None))
+    sub = getattr(args, "schedule_command", None)
+    handler = handlers.get(sub) if isinstance(sub, str) else None
     if handler is None:
         print(
             "Usage: signal-agent schedule add|enable|disable|run|history ...",

@@ -37,8 +37,7 @@ class _FailThenOk:
         self.fail_with = fail_with
         self.calls = 0
 
-    def generate(self, request: LLMRequest) -> LLMResponse:
-        del request
+    def generate(self, _request: LLMRequest) -> LLMResponse:
         self.calls += 1
         if self.fail_with is not None:
             raise self.fail_with
@@ -152,8 +151,8 @@ def test_auth_failure_health_does_not_leak_credentials(tmp_path: Path) -> None:
     class AuthBoom:
         name = "boom"
 
-        def generate(self, request: LLMRequest) -> LLMResponse:
-            del request
+        @staticmethod
+        def generate(_request: LLMRequest) -> LLMResponse:
             raise LLMAuthError("invalid key sk-should-not-appear")
 
     router = RoutedLLMProvider(
@@ -177,8 +176,8 @@ def test_network_failures_are_retryable_and_providers_are_cached() -> None:
     class FlakyNetwork:
         name = "fake"
 
-        def generate(self, request: LLMRequest) -> LLMResponse:
-            del request
+        @staticmethod
+        def generate(_request: LLMRequest) -> LLMResponse:
             attempts["n"] += 1
             if attempts["n"] < 2:
                 raise LLMNetworkError("connection reset")
@@ -186,8 +185,7 @@ def test_network_failures_are_retryable_and_providers_are_cached() -> None:
 
     factory_calls = {"n": 0}
 
-    def factory(**kwargs):
-        del kwargs
+    def factory(**_kwargs):
         factory_calls["n"] += 1
         return FlakyNetwork()
 
