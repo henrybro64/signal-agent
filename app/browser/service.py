@@ -342,8 +342,8 @@ def _start_local_fixture_server() -> tuple[Any, str]:
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
 
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
-            return
+        def log_message(self, *_args: Any) -> None:
+            """Silence BaseHTTPRequestHandler access logs."""
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

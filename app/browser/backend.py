@@ -209,18 +209,13 @@ def resolve_allowed_url(
     for _ in range(_MAX_REDIRECTS):
         policy.assert_url_allowed(current)
         try:
-            request = urllib.request.Request(
+            final = _http_probe(
                 current,
                 method="HEAD",
-                headers={"User-Agent": "signal-agent-browser/1.0"},
+                timeout_seconds=policy.navigation_timeout_seconds,
             )
-            with urllib.request.urlopen(  # noqa: S310 - operator-allowlisted URL
-                request,
-                timeout=min(5.0, policy.navigation_timeout_seconds),
-            ) as response:
-                final = response.geturl() or current
-                policy.assert_url_allowed(final)
-                return final
+            policy.assert_url_allowed(final)
+            return final
         except urllib.error.HTTPError as exc:
             if exc.code in {403, 405, 501}:
                 return _probe_with_get(current, policy=policy)
@@ -242,22 +237,49 @@ def resolve_allowed_url(
 
 
 def _probe_with_get(url: str, *, policy: BrowserPolicy) -> str:
-    request = urllib.request.Request(
-        url,
-        method="GET",
-        headers={"User-Agent": "signal-agent-browser/1.0"},
-    )
     try:
-        with urllib.request.urlopen(  # noqa: S310
-            request,
-            timeout=min(5.0, policy.navigation_timeout_seconds),
-        ) as response:
-            response.read(64)
-            final = response.geturl() or url
-            policy.assert_url_allowed(final)
-            return final
+        final = _http_probe(
+            url,
+            method="GET",
+            timeout_seconds=policy.navigation_timeout_seconds,
+            read_prefix=64,
+        )
+        policy.assert_url_allowed(final)
+        return final
     except urllib.error.URLError:
         return url
+
+
+def _assert_http_https_url(url: str) -> None:
+    scheme = (urlparse(url).scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        raise BrowserPolicyError(
+            f"URL scheme {scheme!r} is not allowed for network probe (http/https only)"
+        )
+
+
+def _http_probe(
+    url: str,
+    *,
+    method: str,
+    timeout_seconds: float,
+    read_prefix: int = 0,
+) -> str:
+    """Open an http(s) URL after an explicit scheme audit."""
+
+    _assert_http_https_url(url)
+    request = urllib.request.Request(
+        url,
+        method=method,
+        headers={"User-Agent": "signal-agent-browser/1.0"},
+    )
+    with urllib.request.urlopen(  # noqa: S310 - scheme audited above
+        request,
+        timeout=min(5.0, timeout_seconds),
+    ) as response:
+        if read_prefix > 0:
+            response.read(read_prefix)
+        return response.geturl() or url
 
 
 def _run_chromium_bounded(
@@ -270,8 +292,28 @@ def _run_chromium_bounded(
 ) -> str:
     """Run Chromium and stream stdout into a bounded buffer."""
 
+    proc = _spawn_chromium(cmd, action=action)
+    timed_out, stdout = _drain_chromium_stdout(
+        proc,
+        max_page_bytes=max_page_bytes,
+        timeout_seconds=timeout_seconds,
+    )
+    stderr = _read_chromium_stderr(proc)
+    if timed_out:
+        raise BrowserPolicyError(
+            f"Chromium {action} timed out after {timeout_seconds}s"
+        )
+    if proc.returncode != 0:
+        err = (stderr or stdout or f"chromium {action} failed")[:200]
+        raise BrowserPolicyError(f"Chromium {action} failed: {err}")
+    if require_stdout and not stdout and action == "navigation":
+        raise BrowserPolicyError("Chromium navigation returned empty document")
+    return stdout
+
+
+def _spawn_chromium(cmd: list[str], *, action: str) -> subprocess.Popen[str]:
     try:
-        proc = subprocess.Popen(  # noqa: S603
+        return subprocess.Popen(  # noqa: S603
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -280,6 +322,13 @@ def _run_chromium_bounded(
     except OSError as exc:
         raise BrowserPolicyError(f"Chromium {action} failed: {exc}") from exc
 
+
+def _drain_chromium_stdout(
+    proc: subprocess.Popen[str],
+    *,
+    max_page_bytes: int,
+    timeout_seconds: float,
+) -> tuple[bool, str]:
     assert proc.stdout is not None
     chunks: list[str] = []
     total = 0
@@ -303,24 +352,16 @@ def _run_chromium_bounded(
     finally:
         if proc.poll() is None:
             proc.kill()
+    return timed_out, "".join(chunks)
 
-    stderr = ""
-    if proc.stderr is not None:
-        try:
-            stderr = proc.stderr.read() or ""
-        except OSError:
-            stderr = ""
-    if timed_out:
-        raise BrowserPolicyError(
-            f"Chromium {action} timed out after {timeout_seconds}s"
-        )
-    stdout = "".join(chunks)
-    if proc.returncode != 0:
-        err = (stderr or stdout or f"chromium {action} failed")[:200]
-        raise BrowserPolicyError(f"Chromium {action} failed: {err}")
-    if require_stdout and not stdout and action == "navigation":
-        raise BrowserPolicyError("Chromium navigation returned empty document")
-    return stdout
+
+def _read_chromium_stderr(proc: subprocess.Popen[str]) -> str:
+    if proc.stderr is None:
+        return ""
+    try:
+        return proc.stderr.read() or ""
+    except OSError:
+        return ""
 
 
 def _assert_downloads_denied(policy: BrowserPolicy) -> None:
