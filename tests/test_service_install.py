@@ -45,10 +45,12 @@ def test_render_user_unit_has_restart_and_no_secrets() -> None:
     assert "KillSignal=SIGTERM" in body
     exec_start = default_exec_start(
         python_executable="/usr/bin/python3",
-        root="/tmp/root",
-        config_path="/tmp/root/config.yaml",
+        root="/tmp/root with spaces",
+        config_path="/tmp/root with spaces/config.yaml",
     )
     assert "-m app.runtime.service" in exec_start
+    assert "root with spaces" in exec_start
+    assert "--root '" in exec_start or '--root "' in exec_start
 
 
 def test_install_uninstall_idempotent(tmp_path: Path) -> None:
@@ -84,6 +86,34 @@ def test_install_uninstall_idempotent(tmp_path: Path) -> None:
     assert again["removed"] is False
 
 
+def test_active_systemd_unit_not_treated_as_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_setup(
+        root=tmp_path,
+        options=SetupOptions(provider="fake", non_interactive=True, force=True),
+    )
+    unit_dir = tmp_path / "systemd-user"
+    fake_runtime = MagicMock(running=True, pid=4242, state="running")
+    monkeypatch.setattr(
+        "app.service.install.get_runtime_info",
+        lambda _root: fake_runtime,
+    )
+    monkeypatch.setattr(
+        "app.service.install._pid_is_active_user_unit",
+        lambda pid, systemctl_bin=None: pid == 4242,
+    )
+    result = install_user_service(
+        root=tmp_path,
+        config_path=tmp_path / "config.yaml",
+        unit_dir=unit_dir,
+        enable=False,
+    )
+    assert result["conflict"] is None
+    assert result["refused_enable"] is False
+
+
 def test_conflict_refuses_enable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -97,6 +127,10 @@ def test_conflict_refuses_enable(
     monkeypatch.setattr(
         "app.service.install.get_runtime_info",
         lambda _root: fake_runtime,
+    )
+    monkeypatch.setattr(
+        "app.service.install._pid_is_active_user_unit",
+        lambda pid, systemctl_bin=None: False,
     )
     enable_calls: list[list[str]] = []
 
@@ -149,11 +183,16 @@ def test_xdg_seeds_config_and_status_uses_unit_root(
     assert Path(result["config_path"]).is_file()
     assert Path(result["config_path"]) == paths.config_path
     body = Path(result["unit_path"]).read_text(encoding="utf-8")
-    assert f"--root {paths.data_dir.resolve()}" in body
+    assert str(paths.data_dir.resolve()) in body
     assert "SIGNAL_AGENT_LOG_PATH=" in body
     status = service_status(unit_dir=tmp_path / "systemd")
     assert status.root == str(paths.data_dir.resolve())
     assert status.config_path == str(paths.config_path.resolve())
+    # Default unit dir honors XDG_CONFIG_HOME when no explicit override.
+    monkeypatch.delenv("SIGNAL_AGENT_SYSTEMD_USER_DIR", raising=False)
+    from app.service.install import _default_user_unit_dir
+
+    assert _default_user_unit_dir() == tmp_path / "config" / "systemd" / "user"
 
 
 def test_xdg_fails_without_source_config(

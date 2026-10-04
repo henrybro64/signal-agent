@@ -135,6 +135,47 @@ def test_skill_gating_respects_root_not_cwd(tmp_path: Path, monkeypatch) -> None
     assert "search_jobs" not in registry.allowlist
 
 
+def test_corrupt_skills_state_fails_closed(tmp_path: Path) -> None:
+    cfg = _prepare(tmp_path)
+    state = skills_state_path(tmp_path)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(SkillManifestError, match="corrupt skills-state"):
+        enabled_skill_names(root=tmp_path, config_path=cfg)
+    catalog_tools = __import__(
+        "app.tools.registry", fromlist=["builtin_tools"]
+    ).builtin_tools(
+        root=tmp_path,
+        config_path=cfg,
+    )
+    assert set(catalog_tools) == {"query_recent_runs"}
+
+
+def test_config_enabled_browser_adds_allowlist(tmp_path: Path) -> None:
+    cfg = _prepare(tmp_path)
+    payload = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    payload["skills"] = {"enabled": ["job_search", "stock_monitoring", "browser"]}
+    cfg.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    registry = build_tool_registry(
+        allowlist=["query_recent_runs"],
+        root=tmp_path,
+        config_path=cfg,
+    )
+    assert "browser_navigate" in registry.allowlist
+
+
+def test_unknown_allowlist_tool_still_errors(tmp_path: Path) -> None:
+    cfg = _prepare(tmp_path)
+    from app.tools import ToolError
+
+    with pytest.raises(ToolError, match="Unknown tools"):
+        build_tool_registry(
+            allowlist=["query_recent_runs", "not_a_real_tool"],
+            root=tmp_path,
+            config_path=cfg,
+        )
+
+
 def test_skills_failure_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     import app.skills as skills_pkg
     import app.tools.registry as tr

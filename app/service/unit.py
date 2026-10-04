@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,10 +25,11 @@ def render_user_unit(spec: UserUnitSpec) -> str:
     env_lines = ""
     if spec.environment_file:
         # '-' prefix means optional; secrets stay in the env file.
-        env_lines += f"EnvironmentFile=-{spec.environment_file}\n"
+        env_lines += f"EnvironmentFile=-{shlex.quote(spec.environment_file)}\n"
     for key, value in sorted(spec.environment.items()):
         # Values are paths we control; never put secrets here.
-        env_lines += f"Environment={key}={value}\n"
+        env_lines += f"Environment={key}={shlex.quote(value)}\n"
+    working = shlex.quote(spec.working_directory)
     return f"""\
 [Unit]
 Description={spec.description}
@@ -37,7 +39,7 @@ StartLimitBurst={spec.start_limit_burst}
 
 [Service]
 Type=simple
-WorkingDirectory={spec.working_directory}
+WorkingDirectory={working}
 {env_lines}ExecStart={spec.exec_start}
 Restart=on-failure
 RestartSec={spec.restart_sec}
@@ -60,8 +62,7 @@ def default_exec_start(
 ) -> str:
     """Match ``signal-agent start`` child process (app.runtime.service)."""
 
-    root_s = str(Path(root).resolve())
-    cfg_s = str(Path(config_path).resolve())
-    return (
-        f"{python_executable} -m app.runtime.service --root {root_s} --config {cfg_s}"
-    )
+    python_s = shlex.quote(str(Path(python_executable).resolve()))
+    root_s = shlex.quote(str(Path(root).resolve()))
+    cfg_s = shlex.quote(str(Path(config_path).resolve()))
+    return f"{python_s} -m app.runtime.service --root {root_s} --config {cfg_s}"

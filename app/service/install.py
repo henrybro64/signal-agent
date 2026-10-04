@@ -94,15 +94,16 @@ def install_user_service(
         use_xdg=use_xdg,
     )
     runtime = get_runtime_info(base)
-    conflict = (
-        (
+    conflict = None
+    if runtime.running and not _pid_is_active_user_unit(
+        runtime.pid,
+        systemctl_bin=systemctl_bin,
+    ):
+        conflict = (
             f"Foreground/detached runtime already running (pid={runtime.pid}). "
             "Stop it with `signal-agent stop` before enabling the user service "
             "to avoid PID conflicts."
         )
-        if runtime.running
-        else None
-    )
 
     body = render_user_unit_for_root(
         root=base,
@@ -393,7 +394,34 @@ def _default_user_unit_dir() -> Path:
     override = os.environ.get("SIGNAL_AGENT_SYSTEMD_USER_DIR")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".config" / "systemd" / "user"
+    config_home = Path(
+        os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
+    ).expanduser()
+    return config_home / "systemd" / "user"
+
+
+def _pid_is_active_user_unit(
+    pid: int | None,
+    *,
+    systemctl_bin: str | None,
+) -> bool:
+    """True when ``pid`` is the MainPID of the installed user unit."""
+
+    if pid is None:
+        return False
+    systemctl = systemctl_bin or shutil.which("systemctl")
+    if not systemctl:
+        return False
+    code, out = _run(
+        [systemctl, "--user", "show", "-p", "MainPID", "--value", UNIT_NAME],
+        ignore_error=True,
+    )
+    if code != 0:
+        return False
+    try:
+        return int(out.strip() or "0") == pid
+    except ValueError:
+        return False
 
 
 def _run(

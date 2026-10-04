@@ -72,6 +72,8 @@ def run_worker_tick(
                 db_path=db,
                 telegram_enabled=False,
                 query_runs=lambda **_: [],
+                root=base,
+                config_path=cfg,
             )
             result = registry.invoke(
                 "query_recent_runs",

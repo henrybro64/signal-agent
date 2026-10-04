@@ -271,6 +271,7 @@ def build_tool_registry(
 ) -> ToolRegistry:
     """Build a registry from builtins with an optional allowlist override."""
 
+    full_catalog = builtin_tools(include_skill_tools=False)
     catalog = builtin_tools(
         enabled_skill_tools=enabled_skill_tools,
         root=root,
@@ -287,7 +288,8 @@ def build_tool_registry(
         ):
             if tool_name not in names:
                 names.append(tool_name)
-    # Merge allowlist additions recorded when skills were enabled (#89).
+    # Merge allowlist additions for enabled skills (#89), including config-only
+    # enablement that never wrote skills-state.json.
     if root is not None or config_path is not None:
         try:
             from app.skills import allowlist_additions_for_enabled_skills
@@ -300,7 +302,13 @@ def build_tool_registry(
                     names.append(tool_name)
         except Exception:  # noqa: BLE001
             pass
-    # Drop allowlist entries whose skill is disabled / not in catalog.
+    unknown = [name for name in names if name not in full_catalog]
+    if unknown:
+        raise ToolError(
+            "Unknown tools in allowlist: " + ", ".join(sorted(unknown)),
+            code="unknown_allowlist_tool",
+        )
+    # Drop allowlist entries whose skill is disabled / not in skill catalog.
     names = [name for name in names if name in catalog]
     return ToolRegistry(tools=catalog, allowlist=names)
 

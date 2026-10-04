@@ -5,11 +5,16 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urljoin, urlparse
 
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
+
+_MAX_REDIRECTS = 5
 
 
 @dataclass(slots=True, frozen=True)
@@ -40,15 +45,14 @@ class FakeBrowserBackend:
     fixtures: dict[str, tuple[str, str]]
 
     def open(self, url: str, *, policy: BrowserPolicy) -> PageSnapshot:
-        policy.assert_url_allowed(url)
-        _assert_downloads_denied(policy)
+        final_url = resolve_allowed_url(url, policy=policy, network=False)
         title, text = self.fixtures.get(
-            url,
-            ("Fixture", f"Fake page for {url}"),
+            final_url,
+            self.fixtures.get(url, ("Fixture", f"Fake page for {final_url}")),
         )
         if len(text.encode("utf-8")) > policy.max_page_bytes:
             raise BrowserPolicyError("Page exceeds max_page_bytes")
-        return PageSnapshot(url=url, title=title, text=text)
+        return PageSnapshot(url=final_url, title=title, text=text)
 
     def screenshot(
         self,
@@ -79,33 +83,19 @@ class ChromiumBackend:
     headless: bool = True
 
     def open(self, url: str, *, policy: BrowserPolicy) -> PageSnapshot:
-        policy.assert_url_allowed(url)
+        final_url = resolve_allowed_url(url, policy=policy, network=True)
         _assert_downloads_denied(policy)
         self.profile_dir.mkdir(parents=True, exist_ok=True)
-        cmd = self._base_cmd(policy) + ["--dump-dom", url]
-        try:
-            completed = subprocess.run(  # noqa: S603 - controlled local executable
-                cmd,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=policy.navigation_timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise BrowserPolicyError(
-                f"Chromium navigation timed out after "
-                f"{policy.navigation_timeout_seconds}s"
-            ) from exc
-        if completed.returncode != 0:
-            err = (completed.stderr or completed.stdout or "chromium failed")[:200]
-            raise BrowserPolicyError(f"Chromium navigation failed: {err}")
-        html = completed.stdout or ""
-        raw = html.encode("utf-8")
-        if len(raw) > policy.max_page_bytes:
-            raise BrowserPolicyError("Page exceeds max_page_bytes")
+        cmd = self._base_cmd(policy) + ["--dump-dom", final_url]
+        html = _run_chromium_bounded(
+            cmd,
+            timeout_seconds=policy.navigation_timeout_seconds,
+            max_page_bytes=policy.max_page_bytes,
+            action="navigation",
+        )
         text = _html_to_text(html)
-        title = _extract_title(html) or url
-        return PageSnapshot(url=url, title=title, text=text)
+        title = _extract_title(html) or final_url
+        return PageSnapshot(url=final_url, title=title, text=text)
 
     def screenshot(
         self,
@@ -114,34 +104,26 @@ class ChromiumBackend:
         policy: BrowserPolicy,
         output_path: Path,
     ) -> PageSnapshot:
-        policy.assert_url_allowed(url)
+        final_url = resolve_allowed_url(url, policy=policy, network=True)
         _assert_downloads_denied(policy)
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         cmd = self._base_cmd(policy) + [
             f"--screenshot={output_path}",
-            url,
+            final_url,
         ]
-        try:
-            completed = subprocess.run(  # noqa: S603
-                cmd,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=policy.navigation_timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise BrowserPolicyError(
-                f"Chromium screenshot timed out after "
-                f"{policy.navigation_timeout_seconds}s"
-            ) from exc
-        if completed.returncode != 0 or not output_path.is_file():
-            err = (completed.stderr or completed.stdout or "screenshot failed")[:200]
-            raise BrowserPolicyError(f"Chromium screenshot failed: {err}")
-        # Avoid a second navigation; screenshot path is the artifact.
+        _run_chromium_bounded(
+            cmd,
+            timeout_seconds=policy.navigation_timeout_seconds,
+            max_page_bytes=policy.max_page_bytes,
+            action="screenshot",
+            require_stdout=False,
+        )
+        if not output_path.is_file():
+            raise BrowserPolicyError("Chromium screenshot failed: no output file")
         return PageSnapshot(
-            url=url,
-            title=url,
+            url=final_url,
+            title=final_url,
             text="",
             screenshot_path=str(output_path),
         )
@@ -204,6 +186,141 @@ def select_backend(
         profile_dir=profile_dir,
         headless=headless,
     )
+
+
+def resolve_allowed_url(
+    url: str,
+    *,
+    policy: BrowserPolicy,
+    network: bool = True,
+) -> str:
+    """Validate ``url`` and every redirect hop against browser policy."""
+
+    policy.assert_url_allowed(url)
+    _assert_downloads_denied(policy)
+    if not network:
+        return url
+    host = (urlparse(url).hostname or "").lower()
+    # Local fixture host and loopback self-tests skip outbound probes.
+    if host in {"fixture.local", "127.0.0.1", "localhost"}:
+        return url
+
+    current = url
+    for _ in range(_MAX_REDIRECTS):
+        policy.assert_url_allowed(current)
+        try:
+            request = urllib.request.Request(
+                current,
+                method="HEAD",
+                headers={"User-Agent": "signal-agent-browser/1.0"},
+            )
+            with urllib.request.urlopen(  # noqa: S310 - operator-allowlisted URL
+                request,
+                timeout=min(5.0, policy.navigation_timeout_seconds),
+            ) as response:
+                final = response.geturl() or current
+                policy.assert_url_allowed(final)
+                return final
+        except urllib.error.HTTPError as exc:
+            if exc.code in {403, 405, 501}:
+                return _probe_with_get(current, policy=policy)
+            if 300 <= exc.code < 400:
+                location = exc.headers.get("Location")
+                if not location:
+                    raise BrowserPolicyError(
+                        f"Redirect from {current!r} missing Location header"
+                    ) from exc
+                current = urljoin(current, location)
+                continue
+            raise BrowserPolicyError(
+                f"URL probe failed for {current!r}: HTTP {exc.code}"
+            ) from exc
+        except urllib.error.URLError:
+            # Offline / blocked networks: original URL already validated.
+            return current
+    raise BrowserPolicyError(f"Too many redirects while resolving {url!r}")
+
+
+def _probe_with_get(url: str, *, policy: BrowserPolicy) -> str:
+    request = urllib.request.Request(
+        url,
+        method="GET",
+        headers={"User-Agent": "signal-agent-browser/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            request,
+            timeout=min(5.0, policy.navigation_timeout_seconds),
+        ) as response:
+            response.read(64)
+            final = response.geturl() or url
+            policy.assert_url_allowed(final)
+            return final
+    except urllib.error.URLError:
+        return url
+
+
+def _run_chromium_bounded(
+    cmd: list[str],
+    *,
+    timeout_seconds: float,
+    max_page_bytes: int,
+    action: str,
+    require_stdout: bool = True,
+) -> str:
+    """Run Chromium and stream stdout into a bounded buffer."""
+
+    try:
+        proc = subprocess.Popen(  # noqa: S603
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        raise BrowserPolicyError(f"Chromium {action} failed: {exc}") from exc
+
+    assert proc.stdout is not None
+    chunks: list[str] = []
+    total = 0
+    timed_out = False
+    try:
+        while True:
+            block = proc.stdout.read(8192)
+            if not block:
+                break
+            total += len(block.encode("utf-8"))
+            if total > max_page_bytes:
+                proc.kill()
+                raise BrowserPolicyError("Page exceeds max_page_bytes")
+            chunks.append(block)
+        try:
+            proc.wait(timeout=max(0.1, timeout_seconds))
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            proc.wait(timeout=5)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
+    stderr = ""
+    if proc.stderr is not None:
+        try:
+            stderr = proc.stderr.read() or ""
+        except OSError:
+            stderr = ""
+    if timed_out:
+        raise BrowserPolicyError(
+            f"Chromium {action} timed out after {timeout_seconds}s"
+        )
+    stdout = "".join(chunks)
+    if proc.returncode != 0:
+        err = (stderr or stdout or f"chromium {action} failed")[:200]
+        raise BrowserPolicyError(f"Chromium {action} failed: {err}")
+    if require_stdout and not stdout and action == "navigation":
+        raise BrowserPolicyError("Chromium navigation returned empty document")
+    return stdout
 
 
 def _assert_downloads_denied(policy: BrowserPolicy) -> None:

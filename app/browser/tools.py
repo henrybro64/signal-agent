@@ -180,10 +180,14 @@ def _open_page(
 
 
 def _backend_for_context(context: ToolContext) -> tuple[Any, Any, Path]:
-    root = Path(".")
-    if context.db_path is not None:
-        # db lives under <root>/data/... — recover project root when possible.
+    if context.root is not None:
+        root = Path(context.root)
+    elif context.db_path is not None:
+        # Legacy fallback only when callers omit root.
         root = context.db_path.parent.parent
+    else:
+        root = Path(".")
+    cfg_path = Path(context.config_path) if context.config_path is not None else None
     cfg: dict[str, Any] = {}
     if context.config is not None and hasattr(context.config, "browser"):
         browser = context.config.browser
@@ -205,10 +209,10 @@ def _backend_for_context(context: ToolContext) -> tuple[Any, Any, Path]:
             "Browser config unavailable; cannot enforce browser.enabled"
         )
 
-    status = browser_status(root=root)
+    status = browser_status(root=root, config_path=cfg_path)
     if not status.running:
-        start_browser(root=root)
-        status = browser_status(root=root)
+        start_browser(root=root, config_path=cfg_path)
+        status = browser_status(root=root, config_path=cfg_path)
     policy = policy_from_config(cfg)
     backend = select_backend(
         executable=status.executable,

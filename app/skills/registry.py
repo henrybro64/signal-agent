@@ -193,21 +193,35 @@ def allowlist_additions_for_enabled_skills(
     root: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> list[str]:
-    """Tool names added to the effective allowlist when skills were enabled."""
+    """Non-default tools contributed by currently enabled skills.
 
-    state = _load_skills_state(root=root, config_path=config_path)
-    additions = state.get("allowlist_additions") or {}
-    if not isinstance(additions, dict):
-        return []
+    Works for both CLI ``skill enable`` (skills-state.json) and declarative
+    ``skills.enabled`` in config.yaml without a state file.
+    """
+
+    manifests = load_builtin_manifests()
     enabled = set(enabled_skill_names(root=root, config_path=config_path))
+    default_tools = {
+        "search_jobs",
+        "get_tw_stock_movers",
+        "query_recent_runs",
+        "send_telegram_message",
+    }
+    state = _load_skills_state(root=root, config_path=config_path)
+    persisted = state.get("allowlist_additions") or {}
+    if not isinstance(persisted, dict):
+        persisted = {}
     names: list[str] = []
     seen: set[str] = set()
     for skill_name in enabled:
-        raw = additions.get(skill_name) or []
-        if not isinstance(raw, list):
-            continue
-        for item in raw:
-            tool = str(item).strip()
+        manifest = manifests.get(skill_name)
+        candidates: list[str] = []
+        if manifest is not None:
+            candidates.extend(t for t in manifest.tools if t not in default_tools)
+        raw = persisted.get(skill_name) or []
+        if isinstance(raw, list):
+            candidates.extend(str(item).strip() for item in raw if str(item).strip())
+        for tool in candidates:
             if tool and tool not in seen:
                 seen.add(tool)
                 names.append(tool)
@@ -360,10 +374,17 @@ def _load_skills_state(
     if state_path.is_file():
         try:
             raw = json.loads(state_path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and "enabled" in raw:
-                return raw
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as exc:
+            # Fail closed: a corrupt state file must not resurrect defaults /
+            # config enablement that the operator previously disabled via CLI.
+            raise SkillManifestError(
+                f"corrupt skills-state.json at {state_path}: {exc}"
+            ) from exc
+        if isinstance(raw, dict) and "enabled" in raw:
+            return raw
+        raise SkillManifestError(
+            f"corrupt skills-state.json at {state_path}: missing enabled list"
+        )
     cfg_path = Path(config_path or runtime_paths.config_path(root))
     if cfg_path.is_file():
         try:

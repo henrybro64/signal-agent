@@ -177,16 +177,24 @@ def run_browser_test(
         status = browser_status(root=root, config_path=config_path)
     cfg = _load_browser_config(root=root, config_path=config_path)
     policy = policy_from_config(cfg)
-    # Fixture host is always allowed for the offline test path.
-    if "fixture.local" not in policy.allowed_domains:
-        policy.allowed_domains = [*policy.allowed_domains, "fixture.local"]
-    target = url or FIXTURE_URL
+    prefer_fake = status.backend == "fake" or _explicit_fake(cfg)
+    local_server = None
+    target = url
+    if target is None and prefer_fake:
+        if "fixture.local" not in policy.allowed_domains:
+            policy.allowed_domains = [*policy.allowed_domains, "fixture.local"]
+        target = FIXTURE_URL
+    elif target is None:
+        # Chromium cannot resolve fixture.local; serve a real loopback page.
+        local_server, target = _start_local_fixture_server()
+        if "127.0.0.1" not in policy.allowed_domains:
+            policy.allowed_domains = [*policy.allowed_domains, "127.0.0.1"]
     try:
         backend = select_backend(
             executable=status.executable,
             profile_dir=Path(status.profile_dir),
             headless=status.headless,
-            force_fake=status.backend == "fake" or _explicit_fake(cfg),
+            force_fake=prefer_fake,
         )
         snap = backend.open(target, policy=policy)
         ok = True
@@ -200,6 +208,9 @@ def run_browser_test(
         snap = None
         ok = False
         error = str(exc)[:200]
+    finally:
+        if local_server is not None:
+            local_server.shutdown()
     state = _read_state(root)
     state.update({"last_test_at": _now(), "last_test_ok": ok})
     _write_state(state, root=root)
@@ -304,3 +315,38 @@ def _write_state(payload: dict[str, Any], *, root: str | Path | None) -> None:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _start_local_fixture_server() -> tuple[Any, str]:
+    """Serve a tiny HTML page on 127.0.0.1 for Chromium self-tests."""
+
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    html = (
+        b"<!doctype html><title>signal-agent browser test</title>"
+        b"<body>Signal-agent browser fixture page. No network required.</body>"
+    )
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+
+        def do_HEAD(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+    return server, f"http://{host}:{port}/signal-agent-test"

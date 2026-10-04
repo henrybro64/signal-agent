@@ -180,6 +180,8 @@ def _bootstrap_chat_runtime(
         secrets_to_redact=secrets,
         interactive=True,
         permission_policy=policy,
+        root=base,
+        config_path=cfg_path,
     )
     return _ChatRuntime(
         base=base,

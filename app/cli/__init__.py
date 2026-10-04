@@ -474,7 +474,8 @@ def _cmd_service(args: Any) -> int:
         print(result["detail"])
         if result.get("conflict"):
             print(f"warning: {result['conflict']}", file=sys.stderr)
-        if result.get("refused_enable"):
+        enable_requested = not bool(args.no_enable)
+        if enable_requested and not result.get("systemctl_enabled"):
             return 1
         return 0
     if sub == "status":
