@@ -718,41 +718,21 @@ def _parse_browser_config(
         parent_path=parent,
         source_name=source_name,
     )
-    if max_bytes <= 0:
-        raise ConfigError(
-            f"Config value '{parent}.max_page_bytes' must be > 0 in {source_name}"
-        )
-    allowed = data.get("allowed_domains")
-    if allowed is None:
-        allowed_domains: list[str] = []
-    elif not isinstance(allowed, list) or not all(
-        isinstance(item, str) and item.strip() for item in allowed
-    ):
-        raise ConfigError(
-            f"Config value '{parent}.allowed_domains' must be a list of "
-            f"non-empty strings in {source_name}"
-        )
-    else:
-        allowed_domains = [item.strip() for item in allowed]
-    denied = data.get("denied_domains")
-    if denied is None:
-        denied_domains: list[str] = []
-    elif not isinstance(denied, list) or not all(
-        isinstance(item, str) and item.strip() for item in denied
-    ):
-        raise ConfigError(
-            f"Config value '{parent}.denied_domains' must be a list of "
-            f"non-empty strings in {source_name}"
-        )
-    else:
-        denied_domains = [item.strip() for item in denied]
-    backend = _optional_str(
-        data,
-        "backend",
-        default="",
-        parent_path=parent,
+    _require_positive_number(
+        float(max_bytes),
+        config_path=f"{parent}.max_page_bytes",
         source_name=source_name,
-    ).strip() or None
+    )
+    backend = (
+        _optional_str(
+            data,
+            "backend",
+            default="",
+            parent_path=parent,
+            source_name=source_name,
+        ).strip()
+        or None
+    )
     return BrowserConfig(
         enabled=_optional_bool(
             data,
@@ -769,8 +749,20 @@ def _parse_browser_config(
             source_name=source_name,
         ),
         backend=backend,
-        allowed_domains=allowed_domains,
-        denied_domains=denied_domains,
+        allowed_domains=_optional_str_list(
+            data,
+            "allowed_domains",
+            default=[],
+            parent_path=parent,
+            source_name=source_name,
+        ),
+        denied_domains=_optional_str_list(
+            data,
+            "denied_domains",
+            default=[],
+            parent_path=parent,
+            source_name=source_name,
+        ),
         navigation_timeout_seconds=timeout,
         max_page_bytes=max_bytes,
         allow_downloads=_optional_bool(

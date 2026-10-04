@@ -7,6 +7,8 @@ from typing import Any
 
 SKILL_API_VERSION = 1
 
+_VALID_PERMISSIONS = frozenset({"read", "notify", "write", "execute"})
+
 
 class SkillManifestError(ValueError):
     """Raised when a skill manifest is invalid or incompatible."""
@@ -55,10 +57,7 @@ def parse_manifest(
 ) -> SkillManifest:
     if not isinstance(data, dict):
         raise SkillManifestError("manifest root must be a mapping")
-    try:
-        api_version = int(data.get("api_version"))
-    except (TypeError, ValueError) as exc:
-        raise SkillManifestError("api_version must be an integer") from exc
+    api_version = _require_int(data.get("api_version"), field_name="api_version")
     name = str(data.get("name") or "").strip()
     version = str(data.get("version") or "").strip()
     description = str(data.get("description") or "").strip()
@@ -66,11 +65,67 @@ def parse_manifest(
         raise SkillManifestError(
             "manifest requires non-empty name, version, and description"
         )
-    compat = data.get("compatibility") or {}
+    min_api, max_api = _parse_compatibility(data.get("compatibility"))
+    _assert_api_compatible(api_version, min_api, max_api, name=name)
+    required_permissions = _string_tuple(
+        data.get("required_permissions"),
+        field_name="required_permissions",
+    )
+    _assert_known_permissions(required_permissions, name=name)
+    schema = data.get("config_schema") or {}
+    if not isinstance(schema, dict):
+        raise SkillManifestError("config_schema must be a mapping")
+    return SkillManifest(
+        api_version=api_version,
+        name=name,
+        version=version,
+        description=description,
+        tools=_string_tuple(data.get("tools"), field_name="tools"),
+        tasks=_string_tuple(data.get("tasks"), field_name="tasks"),
+        workflows=_string_tuple(data.get("workflows"), field_name="workflows"),
+        required_permissions=required_permissions,
+        python_extras=_string_tuple(
+            data.get("python_extras"),
+            field_name="python_extras",
+        ),
+        config_schema=dict(schema),
+        min_api_version=min_api,
+        max_api_version=max_api,
+        source_path=source_path,
+    )
+
+
+def _require_int(raw: Any, *, field_name: str) -> int:
+    if raw is None:
+        raise SkillManifestError(f"{field_name} must be an integer")
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise SkillManifestError(f"{field_name} must be an integer") from exc
+
+
+def _parse_compatibility(raw: Any) -> tuple[int, int]:
+    compat = raw or {}
     if not isinstance(compat, dict):
         raise SkillManifestError("compatibility must be a mapping")
-    min_api = int(compat.get("min_api_version", 1))
-    max_api = int(compat.get("max_api_version", SKILL_API_VERSION))
+    min_api = _require_int(
+        compat.get("min_api_version", 1),
+        field_name="compatibility.min_api_version",
+    )
+    max_api = _require_int(
+        compat.get("max_api_version", SKILL_API_VERSION),
+        field_name="compatibility.max_api_version",
+    )
+    return min_api, max_api
+
+
+def _assert_api_compatible(
+    api_version: int,
+    min_api: int,
+    max_api: int,
+    *,
+    name: str,
+) -> None:
     if api_version < min_api or api_version > max_api:
         raise SkillManifestError(
             f"manifest api_version {api_version} outside compatibility "
@@ -81,40 +136,14 @@ def parse_manifest(
             f"runtime skill API {SKILL_API_VERSION} incompatible with "
             f"manifest {name} requiring [{min_api}, {max_api}]"
         )
-    tools = _string_tuple(data.get("tools"), field_name="tools")
-    tasks = _string_tuple(data.get("tasks"), field_name="tasks")
-    workflows = _string_tuple(data.get("workflows"), field_name="workflows")
-    required_permissions = _string_tuple(
-        data.get("required_permissions"),
-        field_name="required_permissions",
-    )
-    for perm in required_permissions:
-        if perm not in {"read", "notify", "write", "execute"}:
+
+
+def _assert_known_permissions(permissions: tuple[str, ...], *, name: str) -> None:
+    for perm in permissions:
+        if perm not in _VALID_PERMISSIONS:
             raise SkillManifestError(
                 f"unknown required permission {perm!r} in skill {name}"
             )
-    python_extras = _string_tuple(
-        data.get("python_extras"),
-        field_name="python_extras",
-    )
-    schema = data.get("config_schema") or {}
-    if not isinstance(schema, dict):
-        raise SkillManifestError("config_schema must be a mapping")
-    return SkillManifest(
-        api_version=api_version,
-        name=name,
-        version=version,
-        description=description,
-        tools=tools,
-        tasks=tasks,
-        workflows=workflows,
-        required_permissions=required_permissions,
-        python_extras=python_extras,
-        config_schema=dict(schema),
-        min_api_version=min_api,
-        max_api_version=max_api,
-        source_path=source_path,
-    )
 
 
 def _string_tuple(raw: Any, *, field_name: str) -> tuple[str, ...]:

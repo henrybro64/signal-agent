@@ -194,8 +194,7 @@ def run_browser_test(
     except (
         BrowserPolicyError,
         BrowserServiceError,
-        OSError,
-        TimeoutError,
+        OSError,  # includes TimeoutError on modern Python
         subprocess.TimeoutExpired,
     ) as exc:
         snap = None

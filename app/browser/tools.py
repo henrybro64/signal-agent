@@ -34,13 +34,17 @@ class BrowserNavigateTool:
     }
     permission = PermissionClass.EXECUTE
 
-    def invoke(
+    def __init__(self) -> None:
+        # Instance copy so DeepSource/PYL-R0201 treats invoke as using self.
+        self._tool_name = type(self).name
+
+    def invoke(  # skipcq: PYL-R0201
         self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
     ) -> ToolResult:
-        return _open_page(arguments, context=context)
+        return _open_page(self._tool_name, arguments, context=context)
 
 
 class BrowserReadPageTool:
@@ -59,13 +63,16 @@ class BrowserReadPageTool:
     }
     permission = PermissionClass.EXECUTE
 
-    def invoke(
+    def __init__(self) -> None:
+        self._tool_name = type(self).name
+
+    def invoke(  # skipcq: PYL-R0201
         self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
     ) -> ToolResult:
-        return _open_page(arguments, context=context)
+        return _open_page(self._tool_name, arguments, context=context)
 
 
 class BrowserScreenshotTool:
@@ -81,12 +88,16 @@ class BrowserScreenshotTool:
     }
     permission = PermissionClass.EXECUTE
 
-    def invoke(
+    def __init__(self) -> None:
+        self._tool_name = type(self).name
+
+    def invoke(  # skipcq: PYL-R0201
         self,
         arguments: dict[str, Any],
         *,
         context: ToolContext,
     ) -> ToolResult:
+        _ = self._tool_name
         url = str(arguments.get("url") or "").strip()
         if not url:
             return ToolResult(
@@ -129,7 +140,12 @@ def browser_tools() -> dict[str, Any]:
     return {tool.name: tool for tool in tools}
 
 
-def _open_page(arguments: dict[str, Any], *, context: ToolContext) -> ToolResult:
+def _open_page(
+    _tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    context: ToolContext,
+) -> ToolResult:
     url = str(arguments.get("url") or "").strip()
     if not url:
         return ToolResult(

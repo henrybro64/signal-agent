@@ -379,12 +379,14 @@ def _save_enabled(
     enabled: list[str],
     *,
     root: str | Path | None,
-    config_path: str | Path | None,
+    config_path: str | Path | None = None,
     allowlist_additions: dict[str, list[str]] | None = None,
 ) -> None:
     """Persist enablement to skills-state.json only (preserve config comments)."""
 
-    del config_path  # load still honors config; writes never rewrite it.
+    # config_path is accepted for API symmetry with loaders; writes never
+    # rewrite config.yaml (comments stay intact).
+    _ = config_path
     runtime_paths.ensure_local_dirs(root)
     state_path = skills_state_path(root)
     payload: dict[str, Any] = {"enabled": list(enabled)}

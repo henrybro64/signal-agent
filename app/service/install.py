@@ -88,52 +88,21 @@ def install_user_service(
 ) -> dict[str, Any]:
     """Write the user unit idempotently; optionally enable via systemctl."""
 
-    from app.runtime import paths as runtime_paths
-
-    source_root = runtime_paths.project_root(root)
-    environment: dict[str, str] = {}
-    if use_xdg:
-        paths = xdg_agent_paths()
-        base = paths.data_dir
-        cfg = paths.config_path
-        env = paths.env_path
-        source_cfg = (
-            Path(config_path) if config_path else runtime_paths.config_path(source_root)
-        )
-        for directory in (
-            paths.config_dir,
-            paths.data_dir,
-            paths.state_dir / "logs",
-            paths.runtime_dir,
-        ):
-            directory.mkdir(parents=True, exist_ok=True)
-        _seed_xdg_files(
-            source_root=source_root,
-            source_config=source_cfg,
-            dest_config=cfg,
-            dest_env=env,
-            source_env=runtime_paths.env_path(source_root),
-        )
-        environment["SIGNAL_AGENT_LOG_PATH"] = str(paths.log_path)
-        runtime_paths.ensure_local_dirs(base)
-    else:
-        base = source_root
-        cfg = Path(config_path or runtime_paths.config_path(base))
-        env = runtime_paths.env_path(base)
-        runtime_paths.ensure_local_dirs(base)
-        if not cfg.is_file():
-            raise ServiceError(
-                f"Config not found at {cfg}. Run `signal-agent setup` first."
-            )
-
+    base, cfg, env, environment = _resolve_install_layout(
+        root=root,
+        config_path=config_path,
+        use_xdg=use_xdg,
+    )
     runtime = get_runtime_info(base)
-    conflict = None
-    if runtime.running:
-        conflict = (
+    conflict = (
+        (
             f"Foreground/detached runtime already running (pid={runtime.pid}). "
             "Stop it with `signal-agent stop` before enabling the user service "
             "to avoid PID conflicts."
         )
+        if runtime.running
+        else None
+    )
 
     body = render_user_unit_for_root(
         root=base,
@@ -154,40 +123,13 @@ def install_user_service(
         },
     )
 
-    systemctl_ok = False
-    detail = f"wrote {destination}"
-    refused_enable = False
-    if enable and conflict:
-        refused_enable = True
-        detail = (
-            f"wrote {destination}; refused to enable because a runtime "
-            f"process is already running (pid={runtime.pid}). "
-            "Stop it with `signal-agent stop`, then re-run "
-            "`signal-agent service install`."
-        )
-    elif enable:
-        systemctl = systemctl_bin or shutil.which("systemctl")
-        if systemctl:
-            _run(
-                [systemctl, "--user", "daemon-reload"],
-                ignore_error=True,
-            )
-            code, out = _run(
-                [systemctl, "--user", "enable", "--now", UNIT_NAME],
-                ignore_error=True,
-            )
-            systemctl_ok = code == 0
-            detail = (
-                f"installed and enabled {destination}"
-                if systemctl_ok
-                else f"wrote {destination}; systemctl enable failed: {out}"
-            )
-        else:
-            detail = (
-                f"wrote {destination}; systemctl not found "
-                "(unit file only; enable manually on Ubuntu)"
-            )
-
+    systemctl_ok, detail, refused_enable = _enable_unit_if_requested(
+        destination=destination,
+        enable=enable,
+        conflict=conflict,
+        runtime_pid=runtime.pid,
+        systemctl_bin=systemctl_bin,
+    )
     return {
         "unit_path": str(destination),
         "root": str(base),
@@ -233,23 +175,10 @@ def service_status(
 ) -> ServiceStatus:
     destination = Path(unit_dir or _default_user_unit_dir()) / UNIT_NAME
     installed = destination.is_file()
-    active = "unknown"
-    enabled = "unknown"
-    systemctl = systemctl_bin or shutil.which("systemctl")
-    if systemctl and installed:
-        code, out = _run(
-            [systemctl, "--user", "is-active", UNIT_NAME],
-            ignore_error=True,
-        )
-        active = out.strip() or ("inactive" if code else "unknown")
-        _code2, out2 = _run(
-            [systemctl, "--user", "is-enabled", UNIT_NAME],
-            ignore_error=True,
-        )
-        enabled = out2.strip() or "unknown"
-    elif not installed:
-        active = "inactive"
-        enabled = "disabled"
+    active, enabled = _query_systemd_state(
+        installed=installed,
+        systemctl_bin=systemctl_bin,
+    )
 
     from app.runtime import paths as runtime_paths
 
@@ -295,9 +224,119 @@ def format_service_status(status: ServiceStatus) -> str:
     return "\n".join(lines)
 
 
+def _resolve_install_layout(
+    *,
+    root: str | Path | None,
+    config_path: str | Path | None,
+    use_xdg: bool,
+) -> tuple[Path, Path, Path, dict[str, str]]:
+    from app.runtime import paths as runtime_paths
+
+    source_root = runtime_paths.project_root(root)
+    environment: dict[str, str] = {}
+    if not use_xdg:
+        base = source_root
+        cfg = Path(config_path or runtime_paths.config_path(base))
+        env = runtime_paths.env_path(base)
+        runtime_paths.ensure_local_dirs(base)
+        if not cfg.is_file():
+            raise ServiceError(
+                f"Config not found at {cfg}. Run `signal-agent setup` first."
+            )
+        return base, cfg, env, environment
+
+    paths = xdg_agent_paths()
+    base = paths.data_dir
+    cfg = paths.config_path
+    env = paths.env_path
+    source_cfg = (
+        Path(config_path) if config_path else runtime_paths.config_path(source_root)
+    )
+    for directory in (
+        paths.config_dir,
+        paths.data_dir,
+        paths.state_dir / "logs",
+        paths.runtime_dir,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+    _seed_xdg_files(
+        source_config=source_cfg,
+        dest_config=cfg,
+        dest_env=env,
+        source_env=runtime_paths.env_path(source_root),
+    )
+    environment["SIGNAL_AGENT_LOG_PATH"] = str(paths.log_path)
+    runtime_paths.ensure_local_dirs(base)
+    return base, cfg, env, environment
+
+
+def _enable_unit_if_requested(
+    *,
+    destination: Path,
+    enable: bool,
+    conflict: str | None,
+    runtime_pid: int | None,
+    systemctl_bin: str | None,
+) -> tuple[bool, str, bool]:
+    detail = f"wrote {destination}"
+    if not enable:
+        return False, detail, False
+    if conflict:
+        return (
+            False,
+            (
+                f"wrote {destination}; refused to enable because a runtime "
+                f"process is already running (pid={runtime_pid}). "
+                "Stop it with `signal-agent stop`, then re-run "
+                "`signal-agent service install`."
+            ),
+            True,
+        )
+    systemctl = systemctl_bin or shutil.which("systemctl")
+    if not systemctl:
+        return (
+            False,
+            (
+                f"wrote {destination}; systemctl not found "
+                "(unit file only; enable manually on Ubuntu)"
+            ),
+            False,
+        )
+    _run([systemctl, "--user", "daemon-reload"], ignore_error=True)
+    code, out = _run(
+        [systemctl, "--user", "enable", "--now", UNIT_NAME],
+        ignore_error=True,
+    )
+    if code == 0:
+        return True, f"installed and enabled {destination}", False
+    return False, f"wrote {destination}; systemctl enable failed: {out}", False
+
+
+def _query_systemd_state(
+    *,
+    installed: bool,
+    systemctl_bin: str | None,
+) -> tuple[str, str]:
+    if not installed:
+        return "inactive", "disabled"
+    systemctl = systemctl_bin or shutil.which("systemctl")
+    if not systemctl:
+        return "unknown", "unknown"
+    code, out = _run(
+        [systemctl, "--user", "is-active", UNIT_NAME],
+        ignore_error=True,
+    )
+    active = out.strip() or ("inactive" if code else "unknown")
+    _code2, out2 = _run(
+        [systemctl, "--user", "is-enabled", UNIT_NAME],
+        ignore_error=True,
+    )
+    enabled = out2.strip() or "unknown"
+    return active, enabled
+
+
 def _seed_xdg_files(
     *,
-    source_root: Path,
     source_config: Path,
     dest_config: Path,
     dest_env: Path,
@@ -314,7 +353,6 @@ def _seed_xdg_files(
             )
     if not dest_env.is_file() and source_env.is_file():
         shutil.copy2(source_env, dest_env)
-    del source_root  # reserved for future data seeding
 
 
 def _write_install_meta(unit_dir: Path, payload: dict[str, Any]) -> None:
