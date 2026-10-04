@@ -108,9 +108,8 @@ def test_missing_chromium_does_not_silently_fake(
     payload["browser"]["enabled"] = True
     cfg.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
-    monkeypatch.setattr(
-        "app.browser.service.detect_browser",
-        lambda: type(
+    def _missing_browser() -> object:
+        return type(
             "D",
             (),
             {
@@ -118,8 +117,9 @@ def test_missing_chromium_does_not_silently_fake(
                 "executable": None,
                 "detail": "no browser on PATH",
             },
-        )(),
-    )
+        )()
+
+    monkeypatch.setattr("app.browser.service.detect_browser", _missing_browser)
     with pytest.raises(BrowserServiceError, match="dependencies missing"):
         start_browser(root=tmp_path, config_path=cfg)
 

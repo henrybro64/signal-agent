@@ -193,18 +193,16 @@ def test_dependency_failure_surfaces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _prepare(tmp_path)
-    manifests = load_builtin_manifests()
-    browser = manifests["browser"]
+    assert "browser" in load_builtin_manifests()
     from app.skills import registry as skills_registry
 
-    monkeypatch.setattr(
-        skills_registry,
-        "missing_python_extras",
-        lambda manifest: ("nonexistent_extra",) if manifest.name == "browser" else (),
-    )
+    def _missing_extras(manifest: object) -> tuple[str, ...]:
+        name = getattr(manifest, "name", "")
+        return ("nonexistent_extra",) if name == "browser" else ()
+
+    monkeypatch.setattr(skills_registry, "missing_python_extras", _missing_extras)
     with pytest.raises(SkillManifestError, match="missing optional dependencies"):
         enable_skill("browser", root=tmp_path, config_path=cfg)
-    del browser
 
 
 def test_skill_cli_and_info(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

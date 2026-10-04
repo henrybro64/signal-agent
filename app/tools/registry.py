@@ -277,6 +277,32 @@ def build_tool_registry(
         root=root,
         config_path=config_path,
     )
+    names = _compose_allowlist_names(
+        allowlist=allowlist,
+        include_telegram=include_telegram,
+        include_browser=include_browser,
+        root=root,
+        config_path=config_path,
+    )
+    unknown = [name for name in names if name not in full_catalog]
+    if unknown:
+        raise ToolError(
+            "Unknown tools in allowlist: " + ", ".join(sorted(unknown)),
+            code="unknown_allowlist_tool",
+        )
+    # Drop allowlist entries whose skill is disabled / not in skill catalog.
+    names = [name for name in names if name in catalog]
+    return ToolRegistry(tools=catalog, allowlist=names)
+
+
+def _compose_allowlist_names(
+    *,
+    allowlist: Iterable[str] | None,
+    include_telegram: bool,
+    include_browser: bool,
+    root: str | Path | None,
+    config_path: str | Path | None,
+) -> list[str]:
     names = list(allowlist) if allowlist is not None else list(DEFAULT_TOOL_ALLOWLIST)
     if include_telegram and "send_telegram_message" not in names:
         names.append("send_telegram_message")
@@ -290,28 +316,20 @@ def build_tool_registry(
                 names.append(tool_name)
     # Merge allowlist additions for enabled skills (#89), including config-only
     # enablement that never wrote skills-state.json.
-    if root is not None or config_path is not None:
-        try:
-            from app.skills import allowlist_additions_for_enabled_skills
+    if root is None and config_path is None:
+        return names
+    try:
+        from app.skills import allowlist_additions_for_enabled_skills
 
-            for tool_name in allowlist_additions_for_enabled_skills(
-                root=root,
-                config_path=config_path,
-            ):
-                if tool_name not in names:
-                    names.append(tool_name)
-        except Exception:  # noqa: BLE001
-            pass
-    unknown = [name for name in names if name not in full_catalog]
-    if unknown:
-        raise ToolError(
-            "Unknown tools in allowlist: " + ", ".join(sorted(unknown)),
-            code="unknown_allowlist_tool",
-        )
-    # Drop allowlist entries whose skill is disabled / not in skill catalog.
-    names = [name for name in names if name in catalog]
-    return ToolRegistry(tools=catalog, allowlist=names)
-
+        for tool_name in allowlist_additions_for_enabled_skills(
+            root=root,
+            config_path=config_path,
+        ):
+            if tool_name not in names:
+                names.append(tool_name)
+    except Exception:  # noqa: BLE001
+        pass
+    return names
 
 def _invoke_with_timeout(
     tool: Tool,
