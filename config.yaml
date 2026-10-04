@@ -146,6 +146,30 @@ tools:
     #   send_telegram_message: allow
     max_side_effect_actions: 3
 
+# Optional isolated browser service (#87). Disabled by default.
+# To use: skill enable browser → set enabled: true → browser start/test.
+# Downloads are always denied (allow_downloads=true is rejected).
+# Fake/fixture backend only when SIGNAL_AGENT_BROWSER_BACKEND=fake (or backend: fake).
+browser:
+  enabled: false
+  headless: true
+  # backend: fake   # force offline fixtures (also via SIGNAL_AGENT_BROWSER_BACKEND)
+  allowed_domains:
+    - fixture.local
+    - example.com
+  denied_domains: []
+  navigation_timeout_seconds: 15
+  max_page_bytes: 500000
+  allow_downloads: false
+  allow_javascript: false
+
+# Built-in skills (#89). Omit `enabled` to use defaults (job_search +
+# stock_monitoring). Browser stays off until explicitly enabled.
+skills:
+  enabled:
+    - job_search
+    - stock_monitoring
+
 # Optional source runtime tuning. Safe defaults apply when this section
 # (or any nested key) is omitted.
 sources:

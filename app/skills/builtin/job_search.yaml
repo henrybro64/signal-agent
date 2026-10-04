@@ -1,0 +1,26 @@
+api_version: 1
+name: job_search
+version: "1.0.0"
+description: >
+  Job-search digests from configured sources (104, LinkedIn job-alert email,
+  and optional best-effort web sources) plus the bounded job research pilot.
+tools:
+  - search_jobs
+  - send_telegram_message
+tasks:
+  - job_search
+  - job_research_agent
+workflows:
+  - job_research
+required_permissions:
+  - read
+  - notify
+python_extras: []
+config_schema:
+  type: object
+  properties:
+    tasks.job_search.enabled:
+      type: boolean
+compatibility:
+  min_api_version: 1
+  max_api_version: 1

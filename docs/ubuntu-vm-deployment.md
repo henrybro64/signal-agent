@@ -228,6 +228,46 @@ SQLite recovery tips:
 - Stop scheduled runs before copying `data/signals.sqlite3`.
 - Keep occasional backups: `cp data/signals.sqlite3 "data/signals.sqlite3.bak.$(date +%F)"`.
 
+## 10. Always-on local runtime (systemd --user)
+
+For a pip-installed / venv agent (not Docker Compose oneshots), install the
+OpenClaw-like background service that runs the same process as
+`signal-agent start` (`python -m app.runtime.service`):
+
+```bash
+cd /opt/signal-agent
+source .venv/bin/activate
+signal-agent setup --non-interactive --provider fake   # or your provider
+signal-agent service install
+signal-agent service status
+signal-agent status
+```
+
+Notes:
+
+- Units live under `~/.config/systemd/user/signal-agent.service` (no root).
+- Secrets stay in `.env` via `EnvironmentFile=-…` (never embedded in the unit).
+- On reboot, enable lingering so the user service starts without a login:
+  `sudo loginctl enable-linger "$USER"`.
+- Prefer either `signal-agent start` **or** the systemd unit — not both — to
+  avoid PID conflicts (`service status` warns when both appear active).
+- Development foreground mode remains: `python -m app.runtime.service --root .`.
+- Optional XDG layout: `signal-agent service install --xdg` seeds
+  `config.yaml` / `.env` from the current project into
+  `~/.config/signal-agent`, runs with `--root` under
+  `~/.local/share/signal-agent`, and sets `SIGNAL_AGENT_LOG_PATH` under
+  `~/.local/state/signal-agent`. Requires a prior `signal-agent setup` in
+  the project root so there is a source config to copy.
+- If a detached `signal-agent start` process is already running, install
+  still writes the unit but **refuses** `enable --now` until you
+  `signal-agent stop`.
+
+Uninstall:
+
+```bash
+signal-agent service uninstall
+```
+
 ## Troubleshooting
 
 | Symptom | Likely fix |
@@ -237,6 +277,8 @@ SQLite recovery tips:
 | `.env is missing` from wrapper | `cp .env.example .env` |
 | Cron runs but `docker: command not found` | Ensure crontab `PATH` includes `/usr/bin` (see example) |
 | `skipping … another run is already in progress` | Expected under lock; wait or inspect hung containers |
+| User service inactive after reboot | `sudo loginctl enable-linger "$USER"` then re-login/reboot |
+| `Runtime already running` vs systemd | `signal-agent stop` or `systemctl --user stop signal-agent` |
 
 ## Path comparison
 

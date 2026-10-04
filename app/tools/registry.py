@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from app.core.logging import get_logger, log_event
@@ -27,23 +28,61 @@ DEFAULT_TOOL_ALLOWLIST: tuple[str, ...] = (
     "query_recent_runs",
 )
 
-# Telegram is intentionally omitted from the default allowlist.
+# Core health tool is always registered (not skill-gated).
+_CORE_TOOLS: tuple[str, ...] = ("query_recent_runs",)
+
+# Telegram / browser are intentionally omitted from the default allowlist.
 ALL_BUILTIN_TOOLS: tuple[str, ...] = (
     *DEFAULT_TOOL_ALLOWLIST,
     "send_telegram_message",
+    "browser_navigate",
+    "browser_read_page",
+    "browser_screenshot",
 )
 
 
-def builtin_tools() -> dict[str, Tool]:
-    """Return the canonical built-in tool instances keyed by name."""
+def builtin_tools(
+    *,
+    include_skill_tools: bool = True,
+    enabled_skill_tools: Iterable[str] | None = None,
+    root: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, Tool]:
+    """Return the canonical built-in tool instances keyed by name.
+
+    When ``include_skill_tools`` is true, tools from disabled skills are
+    omitted from the catalog so they cannot be registered (#89).
+    Skill load failures fail closed to core tools only.
+    """
+
+    from app.browser.tools import browser_tools
 
     tools: list[Tool] = [
         SearchJobsTool(),
         GetTwStockMoversTool(),
         QueryRecentRunsTool(),
         SendTelegramMessageTool(),
+        *browser_tools().values(),
     ]
-    return {tool.name: tool for tool in tools}
+    catalog = {tool.name: tool for tool in tools}
+    if not include_skill_tools:
+        return catalog
+    if enabled_skill_tools is None:
+        try:
+            from app.skills import tools_for_enabled_skills
+
+            allowed = set(
+                tools_for_enabled_skills(root=root, config_path=config_path)
+            ) | set(_CORE_TOOLS)
+        except Exception:  # noqa: BLE001 - fail closed, never expose all tools
+            allowed = set(_CORE_TOOLS)
+    else:
+        allowed = set(enabled_skill_tools) | set(_CORE_TOOLS)
+    return {
+        name: tool
+        for name, tool in catalog.items()
+        if name in allowed or name in _CORE_TOOLS
+    }
 
 
 class ToolRegistry:
@@ -225,14 +264,72 @@ def build_tool_registry(
     *,
     allowlist: Iterable[str] | None = None,
     include_telegram: bool = False,
+    include_browser: bool = False,
+    enabled_skill_tools: Iterable[str] | None = None,
+    root: str | Path | None = None,
+    config_path: str | Path | None = None,
 ) -> ToolRegistry:
     """Build a registry from builtins with an optional allowlist override."""
 
+    full_catalog = builtin_tools(include_skill_tools=False)
+    catalog = builtin_tools(
+        enabled_skill_tools=enabled_skill_tools,
+        root=root,
+        config_path=config_path,
+    )
+    names = _compose_allowlist_names(
+        allowlist=allowlist,
+        include_telegram=include_telegram,
+        include_browser=include_browser,
+        root=root,
+        config_path=config_path,
+    )
+    unknown = [name for name in names if name not in full_catalog]
+    if unknown:
+        raise ToolError(
+            "Unknown tools in allowlist: " + ", ".join(sorted(unknown)),
+            code="unknown_allowlist_tool",
+        )
+    # Drop allowlist entries whose skill is disabled / not in skill catalog.
+    names = [name for name in names if name in catalog]
+    return ToolRegistry(tools=catalog, allowlist=names)
+
+
+def _compose_allowlist_names(
+    *,
+    allowlist: Iterable[str] | None,
+    include_telegram: bool,
+    include_browser: bool,
+    root: str | Path | None,
+    config_path: str | Path | None,
+) -> list[str]:
     names = list(allowlist) if allowlist is not None else list(DEFAULT_TOOL_ALLOWLIST)
     if include_telegram and "send_telegram_message" not in names:
         names.append("send_telegram_message")
-    return ToolRegistry(allowlist=names)
+    if include_browser:
+        for tool_name in (
+            "browser_navigate",
+            "browser_read_page",
+            "browser_screenshot",
+        ):
+            if tool_name not in names:
+                names.append(tool_name)
+    # Merge allowlist additions for enabled skills (#89), including config-only
+    # enablement that never wrote skills-state.json.
+    if root is None and config_path is None:
+        return names
+    try:
+        from app.skills import allowlist_additions_for_enabled_skills
 
+        for tool_name in allowlist_additions_for_enabled_skills(
+            root=root,
+            config_path=config_path,
+        ):
+            if tool_name not in names:
+                names.append(tool_name)
+    except Exception:  # noqa: BLE001
+        pass
+    return names
 
 def _invoke_with_timeout(
     tool: Tool,

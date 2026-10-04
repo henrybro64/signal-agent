@@ -10,7 +10,7 @@ data:
     agent:
       timezone: Asia/Taipei
       digest_time: "20:00"
-    
+
     tasks:
       job_search:
         enabled: true
@@ -66,15 +66,19 @@ data:
         max_tool_calls: 6
         max_llm_calls: 3
         memory_namespace: job_research
-    
+        # Optional per-workflow model override (#86); omit to inherit llm.*
+        # llm_provider: fake
+        # llm_model: research-model
+
     # Explicit Markdown/text documents for namespaced agent memory (#65).
     # Paths are ingested at job_research start; never put .env/secrets here.
-    # Deployment-safe default is empty; mount documents explicitly if needed.
+    # Leave empty in deployment-safe defaults; local runs can point at
+    # app/evaluation/fixtures/company-notes.md when experimenting with RAG.
     memory:
       namespaces:
         job_research:
           documents: []
-    
+
     investment:
       watchlist:
         - "2330"
@@ -106,19 +110,19 @@ data:
             - ASIC
             - CoWoS
             - HBM
-    
+
     notifiers:
       telegram:
         enabled: true
         failure_alerts_enabled: true
-    
+
     scoring:
       freshness_weight: 0.6
       priority_weight: 0.4
       llm_enabled: false
       # Kept in sync with llm.model (alias for older configs).
       llm_model: gpt-4o-mini
-    
+
     # Optional LLM gateway defaults (used when scoring.llm_enabled is true).
     # llm.model is the source of truth; provider "fake" is for offline tests;
     # "ollama" is reserved for later.
@@ -131,7 +135,7 @@ data:
       # Optional ordered fallbacks used by RoutedLLMProvider (#86).
       # fallbacks:
       #   - fake/backup-model
-    
+
     # Optional agent tool registry defaults (#62/#84). Telegram stays off the
     # default allowlist; enable via include path / job_research_agent.telegram_enabled.
     tools:
@@ -150,7 +154,30 @@ data:
         # tools:
         #   send_telegram_message: allow
         max_side_effect_actions: 3
-    
+
+    # Optional isolated browser service (#87). Disabled by default.
+    # To use: skill enable browser → set enabled: true → browser start/test.
+    # Downloads always denied; fake backend only when explicitly configured.
+    browser:
+      enabled: false
+      headless: true
+      # backend: fake   # force offline fixtures (also via SIGNAL_AGENT_BROWSER_BACKEND)
+      allowed_domains:
+        - fixture.local
+        - example.com
+      denied_domains: []
+      navigation_timeout_seconds: 15
+      max_page_bytes: 500000
+      allow_downloads: false
+      allow_javascript: false
+
+    # Built-in skills (#89). Omit `enabled` to use defaults (job_search +
+    # stock_monitoring). Browser stays off until explicitly enabled.
+    skills:
+      enabled:
+        - job_search
+        - stock_monitoring
+
     # Optional source runtime tuning. Safe defaults apply when this section
     # (or any nested key) is omitted.
     sources:

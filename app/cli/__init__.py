@@ -90,6 +90,10 @@ def _dispatch_command(args: Any) -> int:
         "schedules": _cmd_schedules,
         "schedule": _cmd_schedule,
         "logs": _cmd_logs,
+        "browser": _cmd_browser,
+        "service": _cmd_service,
+        "skills": _cmd_skills,
+        "skill": _cmd_skill,
     }
     command = getattr(args, "command", None)
     handler = handlers.get(command) if isinstance(command, str) else None
@@ -386,13 +390,176 @@ def _cmd_tools(args: Any) -> int:
         allowlist = list(config.tools.allowlist)
     except Exception:  # noqa: BLE001
         allowlist = list(DEFAULT_TOOL_ALLOWLIST)
-    registry = build_tool_registry(allowlist=allowlist)
-    if not allowlist:
+    registry = build_tool_registry(
+        allowlist=allowlist,
+        root=args.root,
+        config_path=args.config,
+    )
+    if not allowlist and not registry.allowlist:
         print("(none)")
         return 0
     for item in registry.list_tools():
         print(f"{item['name']}: {item['description']}")
     return 0
+
+
+def _cmd_browser(args: Any) -> int:
+    from app.browser import (
+        BrowserServiceError,
+        browser_status,
+        format_browser_status,
+        run_browser_test,
+        start_browser,
+        stop_browser,
+    )
+
+    sub = getattr(args, "browser_command", None)
+    if sub in {None, "status"}:
+        status = browser_status(root=args.root, config_path=args.config)
+        print(format_browser_status(status))
+        return 0
+    if sub == "start":
+        try:
+            status = start_browser(root=args.root, config_path=args.config)
+        except BrowserServiceError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(format_browser_status(status))
+        return 0
+    if sub == "stop":
+        print(format_browser_status(stop_browser(root=args.root)))
+        return 0
+    if sub == "test":
+        result = run_browser_test(
+            root=args.root,
+            config_path=args.config,
+            url=args.url or None,
+        )
+        if result["ok"]:
+            print(
+                f"browser test: ok backend={result['backend']} "
+                f"title={result.get('title')!r}"
+            )
+            return 0
+        print(
+            f"browser test: failed error={result.get('error')}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"Unknown browser command: {sub}", file=sys.stderr)
+    return 2
+
+
+def _cmd_service(args: Any) -> int:
+    from app.service import (
+        ServiceError,
+        format_service_status,
+        install_user_service,
+        service_status,
+        uninstall_user_service,
+    )
+
+    sub = getattr(args, "service_command", None)
+    if sub == "install":
+        try:
+            result = install_user_service(
+                root=args.root,
+                config_path=args.config,
+                use_xdg=bool(args.xdg),
+                enable=not bool(args.no_enable),
+            )
+        except ServiceError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print(result["detail"])
+        if result.get("conflict"):
+            print(f"warning: {result['conflict']}", file=sys.stderr)
+        enable_requested = not bool(args.no_enable)
+        if enable_requested and not result.get("systemctl_enabled"):
+            return 1
+        return 0
+    if sub == "status":
+        print(format_service_status(service_status(root=args.root)))
+        return 0
+    if sub == "uninstall":
+        result = uninstall_user_service()
+        print(result["detail"])
+        return 0
+    print(
+        "Usage: signal-agent service install|status|uninstall",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def _cmd_skills(args: Any) -> int:
+    from app.skills import format_skills, list_skills
+
+    print(format_skills(list_skills(root=args.root, config_path=args.config)))
+    return 0
+
+
+def _cmd_skill(args: Any) -> int:
+    from app.skills import (
+        SkillManifestError,
+        disable_skill,
+        enable_skill,
+        format_skill_info,
+        format_skills,
+        get_skill,
+        list_skills,
+    )
+
+    sub = getattr(args, "skill_command", None)
+    if sub == "info":
+        try:
+            info = get_skill(
+                args.skill_name,
+                root=args.root,
+                config_path=args.config,
+            )
+        except KeyError:
+            print(f"Unknown skill: {args.skill_name}", file=sys.stderr)
+            return 1
+        print(format_skill_info(info))
+        return 0
+    if sub == "enable":
+        from app.skills import next_steps_for_skill
+
+        try:
+            enabled = enable_skill(
+                args.skill_name,
+                root=args.root,
+                config_path=args.config,
+            )
+        except KeyError:
+            print(f"Unknown skill: {args.skill_name}", file=sys.stderr)
+            return 1
+        except SkillManifestError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        print("enabled: " + ", ".join(enabled))
+        print(format_skills(list_skills(root=args.root, config_path=args.config)))
+        for step in next_steps_for_skill(args.skill_name):
+            print(f"next: {step}")
+        return 0
+    if sub == "disable":
+        try:
+            enabled = disable_skill(
+                args.skill_name,
+                root=args.root,
+                config_path=args.config,
+            )
+        except KeyError:
+            print(f"Unknown skill: {args.skill_name}", file=sys.stderr)
+            return 1
+        print("enabled: " + (", ".join(enabled) if enabled else "(none)"))
+        return 0
+    print(
+        "Usage: signal-agent skill info|enable|disable <name>",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def _cmd_logs(args: Any) -> int:

@@ -44,6 +44,9 @@ BUILTIN_TOOL_PERMISSIONS: dict[str, PermissionClass] = {
     "get_tw_stock_movers": PermissionClass.READ,
     "query_recent_runs": PermissionClass.READ,
     "send_telegram_message": PermissionClass.NOTIFY,
+    "browser_navigate": PermissionClass.EXECUTE,
+    "browser_read_page": PermissionClass.EXECUTE,
+    "browser_screenshot": PermissionClass.EXECUTE,
 }
 
 DANGEROUS_CAPABILITIES = frozenset(

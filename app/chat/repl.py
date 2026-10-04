@@ -126,7 +126,11 @@ def _bootstrap_chat_runtime(
         config.llm,
         api_key=env.openai_api_key,
     )
-    registry = build_tool_registry(allowlist=list(config.tools.allowlist))
+    registry = build_tool_registry(
+        allowlist=list(config.tools.allowlist),
+        root=base,
+        config_path=cfg_path,
+    )
     secrets = tuple(
         value
         for value in (env.openai_api_key, env.telegram_bot_token, env.telegram_chat_id)
@@ -176,6 +180,8 @@ def _bootstrap_chat_runtime(
         secrets_to_redact=secrets,
         interactive=True,
         permission_policy=policy,
+        root=base,
+        config_path=cfg_path,
     )
     return _ChatRuntime(
         base=base,

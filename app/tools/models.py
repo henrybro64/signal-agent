@@ -42,6 +42,9 @@ class ToolContext:
     # (notify disabled). Set False to opt out of the gate entirely.
     interactive: bool = False
     permission_policy: Any | None = None
+    # Explicit runtime root/config — do not infer from db_path layout (#87).
+    root: Path | None = None
+    config_path: Path | None = None
 
 
 @dataclass(slots=True, frozen=True)

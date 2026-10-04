@@ -48,9 +48,7 @@ def run_worker_tick(
         try:
             config = load_config(cfg)
             allowlist = [
-                name
-                for name in config.tools.allowlist
-                if name == "query_recent_runs"
+                name for name in config.tools.allowlist if name == "query_recent_runs"
             ] or ["query_recent_runs"]
         except Exception as exc:  # noqa: BLE001
             failures.append(f"config:{type(exc).__name__}")
@@ -64,12 +62,18 @@ def run_worker_tick(
             health_status = "UNKNOWN"
 
         try:
-            registry = build_tool_registry(allowlist=allowlist)
+            registry = build_tool_registry(
+                allowlist=allowlist,
+                root=base,
+                config_path=cfg,
+            )
             context = ToolContext(
                 config=config,
                 db_path=db,
                 telegram_enabled=False,
                 query_runs=lambda **_: [],
+                root=base,
+                config_path=cfg,
             )
             result = registry.invoke(
                 "query_recent_runs",
@@ -91,8 +95,7 @@ def run_worker_tick(
                 db_path=db,
             )
             schedule_detail = (
-                f"schedules_due={tick.due},started={tick.started},"
-                f"failed={tick.failed}"
+                f"schedules_due={tick.due},started={tick.started},failed={tick.failed}"
             )
         except Exception as exc:  # noqa: BLE001
             failures.append(f"scheduler:{type(exc).__name__}")
