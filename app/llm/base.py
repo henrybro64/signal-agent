@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from .capabilities import ProviderCapabilities
 from .models import LLMRequest, LLMResponse
 
 
@@ -17,3 +18,6 @@ class LLMProvider(Protocol):
 
     def generate(self, request: LLMRequest) -> LLMResponse:
         """Generate text (optionally structured) for ``request``."""
+
+    def capabilities(self) -> ProviderCapabilities:
+        """Return explicit feature support for this adapter."""

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
+from .capabilities import FAKE_CAPABILITIES, ProviderCapabilities
+from .capability_gate import assert_request_supported
 from .exceptions import LLMError, LLMResponseError
 from .models import LLMRequest, LLMResponse
 
@@ -23,12 +25,17 @@ class FakeLLMProvider:
         default_text: str = '{"ok": true}',
         default_model: str = "fake-model",
         validate_structured_json: bool = True,
+        capabilities: ProviderCapabilities | None = None,
     ) -> None:
         self._queue: list[_QueuedItem] = list(responses or [])
         self.default_text = default_text
         self.default_model = default_model
         self.validate_structured_json = validate_structured_json
+        self._capabilities = capabilities or FAKE_CAPABILITIES
         self.calls: list[LLMRequest] = []
+
+    def capabilities(self) -> ProviderCapabilities:
+        return self._capabilities
 
     def enqueue(self, item: _QueuedItem) -> None:
         """Append one scripted response or exception."""
@@ -36,6 +43,11 @@ class FakeLLMProvider:
         self._queue.append(item)
 
     def generate(self, request: LLMRequest) -> LLMResponse:
+        assert_request_supported(
+            request,
+            self.capabilities(),
+            provider_name=self.name,
+        )
         self.calls.append(request)
         if self._queue:
             item = self._queue.pop(0)
@@ -58,10 +70,7 @@ class FakeLLMProvider:
                 provider=self.name,
             )
 
-        if (
-            self.validate_structured_json
-            and request.structured_output is not None
-        ):
+        if self.validate_structured_json and request.structured_output is not None:
             _require_json_object_text(response.text)
 
         return response
@@ -71,10 +80,6 @@ def _require_json_object_text(text: str) -> None:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise LLMResponseError(
-            "Fake LLM structured output was not valid JSON"
-        ) from exc
+        raise LLMResponseError("Fake LLM structured output was not valid JSON") from exc
     if not isinstance(parsed, dict):
-        raise LLMResponseError(
-            "Fake LLM structured output must be a JSON object"
-        )
+        raise LLMResponseError("Fake LLM structured output must be a JSON object")

@@ -44,6 +44,9 @@ def test_secret_example_manifest_matches_expected_secret_shape() -> None:
     assert manifest["type"] == "Opaque"
     assert manifest["stringData"] == {
         "OPENAI_API_KEY": "replace-me",
+        "ANTHROPIC_API_KEY": "",
+        "PERPLEXITY_API_KEY": "",
+        "CODEX_API_KEY": "",
         "TELEGRAM_BOT_TOKEN": "replace-me",
         "TELEGRAM_CHAT_ID": "replace-me",
         "LINKEDIN_EMAIL_IMAP_HOST": "imap.gmail.com",

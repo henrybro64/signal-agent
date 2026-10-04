@@ -74,7 +74,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch_command(args: Any) -> int:
+    from app.runtimes.cli import run_agent_command
+
     handlers = {
+        "agent-run": run_agent_command,
         "setup": _cmd_setup,
         "config": _cmd_config,
         "doctor": _cmd_doctor,
@@ -569,11 +572,19 @@ def _cmd_logs(args: Any) -> int:
     if args.lines < 0:
         raise ValueError("--lines must be non-negative")
     if not args.follow:
-        print(format_log_lines(read_log_tail(root=args.root, lines=args.lines)))
+        print(
+            format_log_lines(
+                read_log_tail(root=args.root, lines=args.lines, config_path=args.config)
+            )
+        )
         return 0
 
     path = log_path(args.root)
-    print(format_log_lines(read_log_tail(root=args.root, lines=args.lines)))
+    print(
+        format_log_lines(
+            read_log_tail(root=args.root, lines=args.lines, config_path=args.config)
+        )
+    )
     offset = path.stat().st_size if path.is_file() else 0
     try:
         while True:
@@ -592,7 +603,7 @@ def _cmd_logs(args: Any) -> int:
             from app.runtime.logs import collect_secrets
             from app.tools.redaction import redact_value
 
-            secrets = collect_secrets(args.root)
+            secrets = collect_secrets(args.root, config_path=args.config)
             sys.stdout.write(redact_value(chunk, secrets))
             sys.stdout.flush()
     except KeyboardInterrupt:

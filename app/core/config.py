@@ -243,7 +243,7 @@ class LlmFallbackConfig:
 
 @dataclass(slots=True)
 class LlmConfig:
-    """Framework-neutral LLM gateway defaults (optional OpenAI/fake).
+    """Framework-neutral LLM gateway defaults (OpenAI/Anthropic/fake).
 
     ``model`` is the source of truth for gateway calls; ``ScoringConfig.llm_model``
     is kept in sync by ``AppConfig.from_dict``.
@@ -255,6 +255,49 @@ class LlmConfig:
     temperature: float = 0.2
     max_retries: int = 1
     fallbacks: list[LlmFallbackConfig] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ProviderCredentialConfig:
+    """Maps a vendor to the env var holding its API key (#93)."""
+
+    api_key_env: str
+
+
+@dataclass(slots=True)
+class ProvidersConfig:
+    """Optional provider credential env-var names (secrets stay in .env)."""
+
+    openai: ProviderCredentialConfig = field(
+        default_factory=lambda: ProviderCredentialConfig("OPENAI_API_KEY")
+    )
+    anthropic: ProviderCredentialConfig = field(
+        default_factory=lambda: ProviderCredentialConfig("ANTHROPIC_API_KEY")
+    )
+    codex: ProviderCredentialConfig = field(
+        default_factory=lambda: ProviderCredentialConfig("CODEX_API_KEY")
+    )
+    perplexity: ProviderCredentialConfig = field(
+        default_factory=lambda: ProviderCredentialConfig("PERPLEXITY_API_KEY")
+    )
+
+
+@dataclass(slots=True)
+class SearchConfig:
+    """Web/research search provider defaults (#93)."""
+
+    provider: str = "fake"
+    model: str = "sonar"
+    max_results: int = 5
+    timeout_seconds: float = 20.0
+
+
+@dataclass(slots=True)
+class RuntimeConfig:
+    """Bounded agent runtime selection (#93)."""
+
+    default: str = "builtin"
+    model: str | None = None
 
 
 @dataclass(slots=True)
@@ -306,6 +349,9 @@ class AppConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    providers: ProvidersConfig = field(default_factory=ProvidersConfig)
+    search: SearchConfig = field(default_factory=SearchConfig)
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     @classmethod
     def from_dict(
@@ -374,6 +420,21 @@ class AppConfig:
         skills = _optional_mapping(
             data,
             "skills",
+            source_name=source_name,
+        )
+        providers = _optional_mapping(
+            data,
+            "providers",
+            source_name=source_name,
+        )
+        search = _optional_mapping(
+            data,
+            "search",
+            source_name=source_name,
+        )
+        runtime = _optional_mapping(
+            data,
+            "runtime",
             source_name=source_name,
         )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
@@ -537,6 +598,9 @@ class AppConfig:
             memory=_parse_memory_config(memory, source_name=source_name),
             browser=_parse_browser_config(browser, source_name=source_name),
             skills=_parse_skills_config(skills, source_name=source_name),
+            providers=_parse_providers_config(providers, source_name=source_name),
+            search=_parse_search_config(search, source_name=source_name),
+            runtime=_parse_runtime_config(runtime, source_name=source_name),
         )
 
 
@@ -782,6 +846,138 @@ def _parse_browser_config(
     )
 
 
+def _parse_providers_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> ProvidersConfig:
+    defaults = ProvidersConfig()
+    if not data:
+        return defaults
+
+    def _one(name: str, default_env: str) -> ProviderCredentialConfig:
+        raw = data.get(name)
+        if raw is None:
+            return ProviderCredentialConfig(default_env)
+        if not isinstance(raw, dict):
+            raise ConfigError(
+                f"Config value 'providers.{name}' must be a mapping in {source_name}"
+            )
+        env_name = _optional_str(
+            raw,
+            "api_key_env",
+            default=default_env,
+            parent_path=f"providers.{name}",
+            source_name=source_name,
+        ).strip()
+        if not env_name:
+            raise ConfigError(
+                f"Config value 'providers.{name}.api_key_env' must be non-empty "
+                f"in {source_name}"
+            )
+        return ProviderCredentialConfig(env_name)
+
+    return ProvidersConfig(
+        openai=_one("openai", defaults.openai.api_key_env),
+        anthropic=_one("anthropic", defaults.anthropic.api_key_env),
+        perplexity=_one("perplexity", defaults.perplexity.api_key_env),
+        codex=_one("codex", defaults.codex.api_key_env),
+    )
+
+
+def _parse_search_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> SearchConfig:
+    defaults = SearchConfig()
+    if not data:
+        return defaults
+    parent = "search"
+    provider = (
+        _optional_str(
+            data,
+            "provider",
+            default=defaults.provider,
+            parent_path=parent,
+            source_name=source_name,
+        )
+        .strip()
+        .lower()
+    )
+    if provider not in {"perplexity", "fake"}:
+        raise ConfigError(
+            f"Config value '{parent}.provider' must be one of fake, perplexity "
+            f"in {source_name}"
+        )
+    max_results = _optional_int(
+        data,
+        "max_results",
+        default=defaults.max_results,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    if max_results <= 0:
+        raise ConfigError(
+            f"Config value '{parent}.max_results' must be > 0 in {source_name}"
+        )
+    timeout = _optional_float(
+        data,
+        "timeout_seconds",
+        default=defaults.timeout_seconds,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout,
+        config_path=f"{parent}.timeout_seconds",
+        source_name=source_name,
+    )
+    return SearchConfig(
+        provider=provider,
+        model=_optional_str(
+            data,
+            "model",
+            default=defaults.model,
+            parent_path=parent,
+            source_name=source_name,
+        ),
+        max_results=max_results,
+        timeout_seconds=timeout,
+    )
+
+
+def _parse_runtime_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> RuntimeConfig:
+    defaults = RuntimeConfig()
+    if not data:
+        return defaults
+    parent = "runtime"
+    default_runtime = (
+        _optional_str(
+            data,
+            "default",
+            default=defaults.default,
+            parent_path=parent,
+            source_name=source_name,
+        )
+        .strip()
+        .lower()
+    )
+    if default_runtime not in {"builtin", "codex", "fake"}:
+        raise ConfigError(
+            f"Config value '{parent}.default' must be one of "
+            f"builtin, codex, fake in {source_name}"
+        )
+    model = data.get("model")
+    if model is not None and (not isinstance(model, str) or not model.strip()):
+        raise ConfigError("runtime.model must be a non-empty string when provided")
+    return RuntimeConfig(default=default_runtime, model=model)
+
+
 def _parse_skills_config(
     data: dict[str, Any] | None,
     *,
@@ -1007,7 +1203,12 @@ def _parse_investment_config(
     )
 
 
-_SUPPORTED_LLM_PROVIDERS = frozenset({"openai", "fake"})
+def _supported_llm_providers() -> frozenset[str]:
+    from app.llm.factory import supported_llm_providers
+
+    return supported_llm_providers()
+
+
 _LLM_CONFIG_PATH = "llm"
 
 
@@ -1017,8 +1218,8 @@ def _validate_llm_fallback_provider(
     index: int,
     source_name: str,
 ) -> None:
-    if provider not in _SUPPORTED_LLM_PROVIDERS and provider != "ollama":
-        supported = ", ".join(sorted(_SUPPORTED_LLM_PROVIDERS))
+    if provider not in _supported_llm_providers() and provider != "ollama":
+        supported = ", ".join(sorted(_supported_llm_providers()))
         raise ConfigError(
             f"Config value '{_LLM_CONFIG_PATH}.fallbacks[{index}].provider' "
             f"must be one of {supported} in {source_name}"
@@ -1057,8 +1258,8 @@ def _parse_llm_config(
             f"Config value '{_LLM_CONFIG_PATH}.provider' value 'ollama' is "
             f"reserved but not implemented yet in {source_name}"
         )
-    if provider not in _SUPPORTED_LLM_PROVIDERS:
-        supported = ", ".join(sorted(_SUPPORTED_LLM_PROVIDERS))
+    if provider not in _supported_llm_providers():
+        supported = ", ".join(sorted(_supported_llm_providers()))
         raise ConfigError(
             f"Config value '{_LLM_CONFIG_PATH}.provider' must be one of "
             f"{supported} in {source_name}"

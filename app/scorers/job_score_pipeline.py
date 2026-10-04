@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from app.core import SignalItem
 from app.core.config import LlmConfig, ScoringConfig
-from app.core.secrets import EnvSettings
+from app.core.secrets import EnvSettings, llm_api_keys_from_env
 from app.llm.models_cli import build_routed_provider
 
 from .job_llm_scorer import JobLLMScorer, JobLLMScorerError
@@ -145,7 +145,7 @@ def build_job_score_pipeline(
         # failure-class preservation stay consistent even with an empty chain.
         provider = build_routed_provider(
             gateway,
-            api_key=env.openai_api_key or "",
+            api_keys=llm_api_keys_from_env(env),
         )
         llm_scorer = JobLLMScorer(
             provider=provider,

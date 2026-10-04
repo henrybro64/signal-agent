@@ -102,6 +102,21 @@ def build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", parents=[shared], help="Run one named task")
     run_p.add_argument("task_name", help="Task name (see `signal-agent tasks`)")
 
+    agent_run = sub.add_parser(
+        "agent-run",
+        parents=[shared],
+        help="Bounded coding analysis through the configured runtime",
+    )
+    agent_run.add_argument(
+        "goal", help="Goal and selected code context; no automatic file access"
+    )
+    agent_run.add_argument(
+        "--action",
+        choices=["analyze", "summarize", "plan", "propose_patch"],
+        default="analyze",
+    )
+    agent_run.add_argument("--timeout", type=float, default=30.0)
+
     sub.add_parser("tasks", parents=[shared], help="List available tasks")
 
     models_p = sub.add_parser(

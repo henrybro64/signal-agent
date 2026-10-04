@@ -9,9 +9,10 @@ from app.core.config import load_config
 from app.core.db import init_db, read_schema_version
 from app.core.migrations import latest_migration_version
 from app.core.secrets import (
-    has_openai_api_key,
     has_telegram_credentials,
+    llm_api_keys_from_env,
     load_env_settings,
+    resolve_provider_credentials,
 )
 from app.llm import supported_llm_providers
 from app.runtime import paths as runtime_paths
@@ -69,6 +70,7 @@ def validate_local_setup(
 
     _validate_provider_model(report, config)
     env = load_env_settings(dotenv_path)
+    env = resolve_provider_credentials(env, config.providers)
     _validate_openai_credentials(report, config, env)
     _validate_telegram(report, config, env)
     _validate_database(report, root)
@@ -149,15 +151,16 @@ def _validate_openai_credentials(
     env: object,
 ) -> None:
     provider = str(getattr(getattr(config, "llm", None), "provider", "") or "")
-    if provider != "openai":
+    if provider == "fake":
         return
-    if has_openai_api_key(env):  # type: ignore[arg-type]
+    if llm_api_keys_from_env(env).get(provider):  # type: ignore[arg-type]
         return
     # Chat always constructs the configured provider, so a missing OpenAI key
     # is a readiness failure even when scoring.llm_enabled is false.
     report.add(
-        "openai_key_missing",
-        "OPENAI_API_KEY required when llm.provider=openai "
+        f"{provider}_key_missing",
+        f"{getattr(config.providers, provider).api_key_env} required "
+        f"when llm.provider={provider} "
         "(needed for chat and optional LLM scoring)",
     )
 

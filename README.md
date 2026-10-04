@@ -879,3 +879,10 @@ python3 -m ruff format .
 
 The `Makefile` defaults to `python3`, which matches typical Ubuntu setups. To
 use a different interpreter, run `make test PYTHON=python3.12`.
+
+### Vendor-neutral AI adapters
+
+OpenAI and Anthropic share the existing LLM gateway and provider-specific fallback
+credentials. Optional Perplexity research uses the `research` skill; bounded coding
+analysis uses `signal-agent agent-run` with the built-in, Codex CLI, or fake runtime.
+See [configuration, permissions, limitations, and adapter development](docs/vendor-neutral-ai.md).

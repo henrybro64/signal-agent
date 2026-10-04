@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.logging import get_logger, log_event
+from app.core.secrets import resolve_provider_credentials, secret_values
 
 from .base import Tool
 from .health_tools import QueryRecentRunsTool
@@ -17,6 +18,7 @@ from .models import ToolContext, ToolError, ToolResult
 from .notification_tools import SendTelegramMessageTool
 from .permissions import PermissionPolicy, build_permission_policy
 from .redaction import redact_mapping, safe_log_fields
+from .research_tools import ResearchWebTool
 from .stock_tools import GetTwStockMoversTool
 from .validation import validate_tool_arguments
 
@@ -38,6 +40,7 @@ ALL_BUILTIN_TOOLS: tuple[str, ...] = (
     "browser_navigate",
     "browser_read_page",
     "browser_screenshot",
+    "research_web",
 )
 
 
@@ -61,6 +64,7 @@ def builtin_tools(
         SearchJobsTool(),
         GetTwStockMoversTool(),
         QueryRecentRunsTool(),
+        ResearchWebTool(),
         SendTelegramMessageTool(),
         *browser_tools().values(),
     ]
@@ -161,6 +165,12 @@ class ToolRegistry:
             for key, value in dict(arguments or {}).items()
             if value is not None
         }
+        if ctx.env is not None:
+            if ctx.config is not None:
+                ctx.env = resolve_provider_credentials(ctx.env, ctx.config.providers)
+            ctx.secrets_to_redact = tuple(
+                set(ctx.secrets_to_redact) | set(secret_values(ctx.env))
+            )
         secrets = ctx.secrets_to_redact
         tool = self.get(name)
         started = time.perf_counter()
@@ -330,6 +340,7 @@ def _compose_allowlist_names(
     except Exception:  # noqa: BLE001
         pass
     return names
+
 
 def _invoke_with_timeout(
     tool: Tool,

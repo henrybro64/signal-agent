@@ -831,7 +831,7 @@ def test_app_config_from_dict_rejects_invalid_llm_provider() -> None:
                     "freshness_weight": 0.5,
                     "priority_weight": 0.5,
                 },
-                "llm": {"provider": "anthropic"},
+                "llm": {"provider": "unknown"},
             }
         )
 

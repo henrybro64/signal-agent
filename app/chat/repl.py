@@ -10,7 +10,12 @@ from typing import Any, TextIO
 
 from app.core.config import load_config
 from app.core.health import resolve_db_path
-from app.core.secrets import load_env_settings
+from app.core.secrets import (
+    llm_api_keys_from_env,
+    load_env_settings,
+    resolve_provider_credentials,
+    secret_values,
+)
 from app.llm.models_cli import build_routed_provider
 from app.runtime import paths as runtime_paths
 from app.tools import ToolContext, ToolRegistry, build_tool_registry
@@ -121,21 +126,18 @@ def _bootstrap_chat_runtime(
     cfg_path = Path(config_path or runtime_paths.config_path(base))
     config = load_config(cfg_path)
     env = load_env_settings(runtime_paths.env_path(base))
+    env = resolve_provider_credentials(env, config.providers)
     db_path = resolve_db_path(runtime_paths.db_path(base))
     llm = provider or build_routed_provider(
         config.llm,
-        api_key=env.openai_api_key,
+        api_keys=llm_api_keys_from_env(env),
     )
     registry = build_tool_registry(
         allowlist=list(config.tools.allowlist),
         root=base,
         config_path=cfg_path,
     )
-    secrets = tuple(
-        value
-        for value in (env.openai_api_key, env.telegram_bot_token, env.telegram_chat_id)
-        if value
-    )
+    secrets = secret_values(env)
 
     def _prompt_yes(prompt: str) -> bool:
         print(prompt, file=output)

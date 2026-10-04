@@ -157,7 +157,8 @@ data:
 
     # Optional isolated browser service (#87). Disabled by default.
     # To use: skill enable browser → set enabled: true → browser start/test.
-    # Downloads always denied; fake backend only when explicitly configured.
+    # Downloads are always denied (allow_downloads=true is rejected).
+    # Fake/fixture backend only when SIGNAL_AGENT_BROWSER_BACKEND=fake (or backend: fake).
     browser:
       enabled: false
       headless: true
@@ -208,3 +209,27 @@ data:
         max_retries: 2
         request_delay_seconds: 0.2
         batch_size: 100
+
+    # Vendor credentials are resolved from environment variable names, never literals.
+    providers:
+      openai:
+        api_key_env: OPENAI_API_KEY
+      anthropic:
+        api_key_env: ANTHROPIC_API_KEY
+      perplexity:
+        api_key_env: PERPLEXITY_API_KEY
+      codex:
+        api_key_env: CODEX_API_KEY
+
+    # Enable the research skill to expose research_web; fake stays offline.
+    search:
+      provider: fake  # fake | perplexity
+      model: sonar
+      max_results: 5
+      timeout_seconds: 20
+
+    # Separate from the local lifecycle daemon (app/runtime).
+    # agent-run requires tools.permissions.tools.runtime_execute: ask or allow.
+    runtime:
+      default: builtin  # builtin | codex | fake
+      # model: <Codex model identifier>  # optional; CLI default otherwise

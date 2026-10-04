@@ -11,7 +11,9 @@ from app.core.health import resolve_db_path, summarize_run_health
 from app.core.secrets import (
     has_openai_api_key,
     has_telegram_credentials,
+    llm_api_keys_from_env,
     load_env_settings,
+    resolve_provider_credentials,
 )
 from app.llm import supported_llm_providers
 from app.tools import DEFAULT_TOOL_ALLOWLIST, build_tool_registry
@@ -38,6 +40,7 @@ class StatusReport:
     browser_detail: str
     mcp_available: bool
     langchain_available: bool
+    llm_key_configured: bool = False
     tool_allowlist: list[str] = field(default_factory=list)
     health_overall: str = "UNKNOWN"
     worker_status: str = "unknown"
@@ -57,6 +60,7 @@ class StatusReport:
             "provider": self.provider,
             "model": self.model,
             "openai_key_configured": self.openai_key_configured,
+            "llm_key_configured": self.llm_key_configured,
             "telegram_configured": self.telegram_configured,
             "telegram_enabled": self.telegram_enabled,
             "browser_ready": self.browser_ready,
@@ -95,6 +99,8 @@ def collect_status(
         last_tick_ok = bool(last_tick_ok)
 
     config_fields = _load_config_fields(cfg_path, details)
+    if config_fields.get("providers") is not None:
+        env = resolve_provider_credentials(env, config_fields["providers"])
     db = resolve_db_path(runtime_paths.db_path(root))
     db_ok = db.is_file()
     health_overall = _health_overall(db) if db_ok else "UNKNOWN"
@@ -137,6 +143,9 @@ def collect_status(
         provider=str(config_fields["provider"]),
         model=str(config_fields["model"]),
         openai_key_configured=has_openai_api_key(env),
+        llm_key_configured=bool(
+            llm_api_keys_from_env(env).get(config_fields["provider"])
+        ),
         telegram_configured=has_telegram_credentials(env),
         telegram_enabled=bool(config_fields["telegram_enabled"]),
         browser_ready=browser_ready,
@@ -153,6 +162,13 @@ def collect_status(
 
 
 def format_status_report(report: StatusReport) -> str:
+    key_status = (
+        "not required"
+        if report.provider == "fake"
+        else "set"
+        if report.llm_key_configured
+        else "missing"
+    )
     tick = "n/a"
     if report.last_tick_at:
         tick_ok = (
@@ -172,8 +188,7 @@ def format_status_report(report: StatusReport) -> str:
         f"{report.config_path} "
         f"({'ok' if report.config_ok else 'missing/invalid'})",
         f"Database: {report.db_path} ({'ok' if report.db_ok else 'missing'})",
-        f"LLM: provider={report.provider} model={report.model} "
-        f"api_key={'set' if report.openai_key_configured else 'missing'}",
+        f"LLM: provider={report.provider} model={report.model} api_key={key_status}",
         f"Telegram: enabled={report.telegram_enabled} "
         f"credentials={'set' if report.telegram_configured else 'missing'}",
         f"Browser: {'ready' if report.browser_ready else 'not ready'} "
@@ -217,6 +232,7 @@ def _load_config_fields(
         details.append(f"config_error:{type(exc).__name__}")
         return fields
     fields["config_ok"] = True
+    fields["providers"] = config.providers
     fields["provider"] = config.llm.provider
     fields["model"] = config.llm.model
     fields["telegram_enabled"] = config.notifiers.telegram.enabled

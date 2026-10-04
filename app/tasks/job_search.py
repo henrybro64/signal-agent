@@ -26,6 +26,7 @@ from app.core import (
     upsert_signal,
 )
 from app.core.db import SignalStatus
+from app.core.secrets import resolve_provider_credentials
 from app.notifiers import build_telegram_notifier
 from app.scorers import (
     JobRuleScore,
@@ -109,6 +110,7 @@ class JobSearchTask(BaseTask):
                 raise ValueError("Task 'job_search' is disabled in config")
 
             env = load_env_settings()
+            env = resolve_provider_credentials(env, config.providers)
             validate_llm_scoring_secrets(
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,

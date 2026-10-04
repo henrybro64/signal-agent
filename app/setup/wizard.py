@@ -12,7 +12,9 @@ from typing import Any
 
 import yaml
 
+from app.core.config import load_config
 from app.core.db import init_db
+from app.core.secrets import secret_env_keys
 from app.llm import supported_llm_providers
 from app.runtime import paths as runtime_paths
 from app.setup.browser import detect_browser
@@ -195,15 +197,15 @@ def show_config_redacted(
     if not env_map:
         lines.append("(missing)")
     else:
-        secret_keys = {
-            "OPENAI_API_KEY",
-            "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_CHAT_ID",
-            "LINKEDIN_EMAIL_IMAP_PASSWORD",
-        }
+        providers = None
+        try:
+            providers = load_config(cfg_path).providers
+        except (OSError, ValueError):
+            pass
+        secret_keys = secret_env_keys(providers)
         for key in sorted(env_map):
             value = env_map[key]
-            if key in secret_keys:
+            if key in secret_keys or providers is None:
                 shown = "***" if value else "(empty)"
             else:
                 shown = value or "(empty)"
@@ -219,10 +221,15 @@ def _interactive_collect(
     confirm: ConfirmFn,
 ) -> SetupOptions:
     providers = ", ".join(sorted(supported_llm_providers()))
-    provider = prompt(
-        f"LLM provider [{providers}]",
-        opts.provider,
-    ).strip().lower() or opts.provider
+    provider = (
+        prompt(
+            f"LLM provider [{providers}]",
+            opts.provider,
+        )
+        .strip()
+        .lower()
+        or opts.provider
+    )
     model = prompt("LLM model", opts.model).strip() or opts.model
     llm_enabled = confirm(
         "Enable LLM scoring by default?",

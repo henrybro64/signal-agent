@@ -13,6 +13,11 @@ from app.core import load_config, load_env_settings
 from app.core.db import TaskRunStatus, finish_task_run, init_db, start_task_run
 from app.core.health import resolve_db_path
 from app.core.logging import get_logger, log_event
+from app.core.secrets import (
+    llm_api_keys_from_env,
+    resolve_provider_credentials,
+    secret_values,
+)
 from app.llm import FakeLLMProvider
 from app.llm.models_cli import build_routed_provider
 from app.tools import ToolContext, build_tool_registry
@@ -75,6 +80,7 @@ class JobResearchAgentTask(BaseTask):
             raise ValueError("Task 'job_research_agent' is disabled in config")
 
         env = load_env_settings()
+        env = resolve_provider_credentials(env, config.providers)
         db_path = resolve_db_path()
         init_db(db_path)
 
@@ -121,15 +127,7 @@ class JobResearchAgentTask(BaseTask):
             allowlist=allowlist,
             include_telegram=telegram_enabled,
         )
-        secrets = tuple(
-            value
-            for value in (
-                env.openai_api_key,
-                env.telegram_bot_token,
-                env.telegram_chat_id,
-            )
-            if value
-        )
+        secrets = secret_values(env)
         # Unattended task path: ask→deny; honor config.tools.permissions.
         policy = policy_from_app_config(
             config,
@@ -155,10 +153,10 @@ class JobResearchAgentTask(BaseTask):
                 provider=task_cfg.llm_provider or config.llm.provider,
                 model=task_cfg.llm_model or config.llm.model,
             )
-        if config.scoring.llm_enabled and env.openai_api_key:
+        if config.scoring.llm_enabled:
             provider = build_routed_provider(
                 llm_cfg,
-                api_key=env.openai_api_key,
+                api_keys=llm_api_keys_from_env(env),
             )
         elif llm_cfg.provider == "fake" or config.llm.provider == "fake":
             provider = FakeLLMProvider(

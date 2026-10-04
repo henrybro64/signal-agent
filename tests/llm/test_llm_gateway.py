@@ -253,10 +253,10 @@ def test_create_llm_provider_openai_and_fake() -> None:
 
 def test_create_llm_provider_rejects_unknown_and_ollama() -> None:
     with pytest.raises(LLMProviderError, match="Unknown LLM provider"):
-        create_llm_provider(provider="anthropic")
+        create_llm_provider(provider="unknown")
     with pytest.raises(LLMProviderError, match="not implemented"):
         create_llm_provider(provider="ollama")
-    assert supported_llm_providers() == frozenset({"openai", "fake"})
+    assert supported_llm_providers() == frozenset({"openai", "anthropic", "fake"})
 
 
 def test_openai_logs_do_not_include_api_key_or_prompt() -> None:

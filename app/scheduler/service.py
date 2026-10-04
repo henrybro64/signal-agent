@@ -12,7 +12,11 @@ from typing import Any
 
 from app.core.config import load_config
 from app.core.logging import get_logger, log_event
-from app.core.secrets import load_env_settings
+from app.core.secrets import (
+    load_env_settings,
+    resolve_provider_credentials,
+    secret_values,
+)
 from app.runtime import paths as runtime_paths
 from app.tools.permissions import (
     build_permission_policy,
@@ -137,6 +141,7 @@ def build_unattended_permission_policy(
     env = load_env_settings(runtime_paths.env_path(root))
     try:
         config = load_config(config_path)
+        env = resolve_provider_credentials(env, config.providers)
         policy_cfg = permission_policy_config_from_tools(
             config.tools.permissions,
             audit_log_path=str(root / "logs" / "permissions-audit.jsonl"),
@@ -155,15 +160,7 @@ def build_unattended_permission_policy(
     return build_permission_policy(
         policy_cfg,
         interactive=False,
-        secrets=tuple(
-            value
-            for value in (
-                env.openai_api_key,
-                env.telegram_bot_token,
-                env.telegram_chat_id,
-            )
-            if value
-        ),
+        secrets=secret_values(env),
         root=root,
     )
 

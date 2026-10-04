@@ -24,6 +24,24 @@ class StructuredOutputSpec:
 
 
 @dataclass(slots=True, frozen=True)
+class ToolDefinition:
+    """Optional tool/function definition for providers that support tools."""
+
+    name: str
+    description: str = ""
+    parameters: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class LLMUsage:
+    """Token/usage metadata when a provider returns it."""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class LLMRequest:
     """Provider-agnostic generation request.
 
@@ -38,7 +56,11 @@ class LLMRequest:
     temperature: float | None = None
     timeout_seconds: float | None = None
     structured_output: StructuredOutputSpec | None = None
+    tools: tuple[ToolDefinition, ...] = ()
+    stream: bool = False
     store: bool = False
+    # Opaque provider-specific knobs; adapters may ignore unknown keys.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)
@@ -48,4 +70,6 @@ class LLMResponse:
     text: str
     model: str | None = None
     provider: str | None = None
+    usage: LLMUsage | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] | None = field(default=None, repr=False)

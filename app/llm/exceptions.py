@@ -29,3 +29,7 @@ class LLMNetworkError(LLMProviderError):
 
 class LLMResponseError(LLMError):
     """Raised when a provider response is missing or malformed."""
+
+
+class UnsupportedCapabilityError(LLMError):
+    """Raised when a request needs a capability the provider does not support."""
