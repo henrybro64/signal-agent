@@ -116,6 +116,11 @@ def test_codex_command_is_fixed_and_context_is_stdin(monkeypatch, tmp_path):
         ('{"type":"error"}', 0),
         ("{}", 0),
         ("not json", 0),
+        ("[]", 0),
+        ('{"type":"item.completed"}', 0),
+        ('{"type":"item.completed","item":{"type":"agent_message","text":" "}}', 0),
+        ('{"type":"turn.completed"}', 0),
+        ('{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}', 0),
         (codex_events(), 1),
         (
             json.dumps(

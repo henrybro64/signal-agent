@@ -58,7 +58,8 @@ class AnthropicProvider:
         self.api_url = api_url
         self.session = session or requests.Session()
 
-    def capabilities(self) -> ProviderCapabilities:
+    @staticmethod
+    def capabilities() -> ProviderCapabilities:
         return ANTHROPIC_CAPABILITIES
 
     def generate(self, request: LLMRequest) -> LLMResponse:
@@ -120,28 +121,7 @@ class AnthropicProvider:
             raise LLMNetworkError("Anthropic network request failed") from None
 
         duration_ms = int((time.perf_counter() - started) * 1000)
-        if response.status_code >= 400:
-            _log_failure(
-                model=model,
-                status="http_error",
-                duration_ms=duration_ms,
-                http_status=response.status_code,
-            )
-            if response.status_code in {401, 403}:
-                raise LLMAuthError(
-                    f"Anthropic authentication failed with status "
-                    f"{response.status_code}"
-                )
-            if response.status_code == 429:
-                raise LLMRateLimitError("Anthropic rate limit exceeded")
-            if response.status_code == 404:
-                raise LLMProviderError(
-                    f"Anthropic model unsupported or not found "
-                    f"(status {response.status_code})"
-                )
-            raise LLMProviderError(
-                f"Anthropic request failed with status {response.status_code}"
-            )
+        _check_http_status(response.status_code, model, duration_ms)
 
         try:
             response_payload = response.json()
@@ -174,6 +154,27 @@ class AnthropicProvider:
             usage=_extract_usage(response_payload),
             raw=response_payload,
         )
+
+
+def _check_http_status(status_code: int, model: str, duration_ms: int) -> None:
+    if status_code >= 400:
+        _log_failure(
+            model=model,
+            status="http_error",
+            duration_ms=duration_ms,
+            http_status=status_code,
+        )
+        if status_code in {401, 403}:
+            raise LLMAuthError(
+                f"Anthropic authentication failed with status {status_code}"
+            )
+        if status_code == 429:
+            raise LLMRateLimitError("Anthropic rate limit exceeded")
+        if status_code == 404:
+            raise LLMProviderError(
+                f"Anthropic model unsupported or not found (status {status_code})"
+            )
+        raise LLMProviderError(f"Anthropic request failed with status {status_code}")
 
 
 def _resolve_messages(request: LLMRequest) -> tuple[str, list[dict[str, str]]]:

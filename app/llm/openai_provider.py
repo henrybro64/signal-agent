@@ -57,7 +57,8 @@ class OpenAIProvider:
         self.api_url = api_url
         self.session = session or requests.Session()
 
-    def capabilities(self) -> ProviderCapabilities:
+    @staticmethod
+    def capabilities() -> ProviderCapabilities:
         return OPENAI_CAPABILITIES
 
     def generate(self, request: LLMRequest) -> LLMResponse:

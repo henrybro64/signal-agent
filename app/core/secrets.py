@@ -110,16 +110,26 @@ def resolve_provider_credentials(
     providers: ProvidersConfig,
 ) -> EnvSettings:
     """Resolve explicit aliases without falling back to another credential."""
-    keys = {}
-    for name in ("openai", "anthropic", "perplexity", "codex"):
-        env_name = getattr(providers, name).api_key_env
-        field_name = f"{name}_api_key"
-        keys[field_name] = (
-            getattr(env, field_name)
-            if env_name == f"{name.upper()}_API_KEY"
-            else os.getenv(env_name) or None
-        )
-    return replace(env, **keys, extra_secrets=secret_values(env))
+
+    def resolve(name: str, env_name: str, current: str | None) -> str | None:
+        if env_name == f"{name.upper()}_API_KEY":
+            return current
+        return os.getenv(env_name) or None
+
+    return replace(
+        env,
+        openai_api_key=resolve(
+            "openai", providers.openai.api_key_env, env.openai_api_key
+        ),
+        anthropic_api_key=resolve(
+            "anthropic", providers.anthropic.api_key_env, env.anthropic_api_key
+        ),
+        perplexity_api_key=resolve(
+            "perplexity", providers.perplexity.api_key_env, env.perplexity_api_key
+        ),
+        codex_api_key=resolve("codex", providers.codex.api_key_env, env.codex_api_key),
+        extra_secrets=secret_values(env),
+    )
 
 
 def has_openai_api_key(env: EnvSettings) -> bool:

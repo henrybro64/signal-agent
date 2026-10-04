@@ -94,46 +94,12 @@ class RoutedLLMProvider:
         for index, ref in enumerate(chain):
             attempts = max(1, self.max_retries + 1)
             for attempt in range(1, attempts + 1):
-                remaining = None if deadline is None else deadline - monotonic()
-                if remaining is not None and remaining <= 0:
-                    self.last_failure_class = "timeout"
-                    raise LLMTimeoutError("LLM routing timeout budget exhausted")
+                remaining = self._remaining_timeout(deadline)
                 try:
                     provider = self._provider_for(ref)
-                    routed = replace(
-                        request,
-                        model=ref.model,
-                        temperature=(
-                            self.temperature
-                            if request.temperature is None
-                            else request.temperature
-                        ),
-                        timeout_seconds=(
-                            self.timeout_seconds
-                            if request.timeout_seconds is None
-                            else remaining
-                        ),
-                    )
+                    routed = self._route_request(request, ref, remaining)
                     response = provider.generate(routed)
-                    self.last_served = ref
-                    self.last_failure_class = None
-                    if index > 0:
-                        log_event(
-                            _LOGGER,
-                            event="llm_fallback_used",
-                            message="served by configured fallback",
-                            provider=ref.provider,
-                            model=ref.model,
-                            primary=str(self.primary),
-                        )
-                    else:
-                        log_event(
-                            _LOGGER,
-                            event="llm_primary_used",
-                            message="served by primary model",
-                            provider=ref.provider,
-                            model=ref.model,
-                        )
+                    self._record_success(ref, fallback=index > 0)
                     return response
                 except LLMError as exc:
                     only_unsupported = only_unsupported and isinstance(
@@ -154,6 +120,48 @@ class RoutedLLMProvider:
         raise LLMProviderError(
             "All providers/fallbacks failed: " + "; ".join(errors[-5:])
         ) from last_exc
+
+    def _remaining_timeout(self, deadline: float | None) -> float | None:
+        remaining = None if deadline is None else deadline - monotonic()
+        if remaining is not None and remaining <= 0:
+            self.last_failure_class = "timeout"
+            raise LLMTimeoutError("LLM routing timeout budget exhausted")
+        return remaining
+
+    def _route_request(
+        self, request: LLMRequest, ref: ModelRef, remaining: float | None
+    ) -> LLMRequest:
+        return replace(
+            request,
+            model=ref.model,
+            temperature=(
+                self.temperature if request.temperature is None else request.temperature
+            ),
+            timeout_seconds=(
+                self.timeout_seconds if request.timeout_seconds is None else remaining
+            ),
+        )
+
+    def _record_success(self, ref: ModelRef, *, fallback: bool) -> None:
+        self.last_served = ref
+        self.last_failure_class = None
+        if fallback:
+            log_event(
+                _LOGGER,
+                event="llm_fallback_used",
+                message="served by configured fallback",
+                provider=ref.provider,
+                model=ref.model,
+                primary=str(self.primary),
+            )
+        else:
+            log_event(
+                _LOGGER,
+                event="llm_primary_used",
+                message="served by primary model",
+                provider=ref.provider,
+                model=ref.model,
+            )
 
 
 def classify_provider_failure(exc: BaseException | None) -> str:

@@ -162,23 +162,8 @@ def collect_status(
 
 
 def format_status_report(report: StatusReport) -> str:
-    key_status = (
-        "not required"
-        if report.provider == "fake"
-        else "set"
-        if report.llm_key_configured
-        else "missing"
-    )
-    tick = "n/a"
-    if report.last_tick_at:
-        tick_ok = (
-            "ok"
-            if report.last_tick_ok
-            else "error"
-            if report.last_tick_ok is False
-            else "unknown"
-        )
-        tick = f"{report.last_tick_at} ({tick_ok})"
+    key_status = _format_key_status(report)
+    tick = _format_last_tick(report)
     lines = [
         f"Runtime: {'running' if report.runtime_running else 'stopped'}"
         + (f" (pid={report.runtime_pid})" if report.runtime_pid else ""),
@@ -202,6 +187,21 @@ def format_status_report(report: StatusReport) -> str:
     if report.details:
         lines.append("Notes: " + "; ".join(report.details))
     return "\n".join(lines)
+
+
+def _format_key_status(report: StatusReport) -> str:
+    if report.provider == "fake":
+        return "not required"
+    return "set" if report.llm_key_configured else "missing"
+
+
+def _format_last_tick(report: StatusReport) -> str:
+    if not report.last_tick_at:
+        return "n/a"
+    tick_ok = "unknown"
+    if report.last_tick_ok is not None:
+        tick_ok = "ok" if report.last_tick_ok else "error"
+    return f"{report.last_tick_at} ({tick_ok})"
 
 
 def _derive_worker_status(runtime_running: bool, state: dict[str, Any]) -> str:

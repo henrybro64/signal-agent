@@ -132,38 +132,13 @@ def _parse_events(output: str, request: RuntimeRequest) -> RuntimeResult:
     messages: list[str] = []
     completed = False
     for line in output.splitlines():
-        try:
-            event: Any = json.loads(line)
-        except ValueError:
-            raise RuntimeProviderError("Codex returned malformed events") from None
-        if not isinstance(event, dict):
-            raise RuntimeProviderError("Codex returned malformed events")
+        event = _decode_event(line)
         kind = event.get("type")
-        if kind not in {
-            "thread.started",
-            "turn.started",
-            "turn.completed",
-            "error",
-            "turn.failed",
-            "item.started",
-            "item.updated",
-            "item.completed",
-        }:
-            raise RuntimeProviderError("Codex returned an unknown event")
-        if kind in {"error", "turn.failed"}:
-            raise RuntimeProviderError("Codex reported execution failure")
         if kind == "turn.completed":
             completed = True
         if kind in {"item.started", "item.updated", "item.completed"}:
-            item = event.get("item")
-            if not isinstance(item, dict):
-                raise RuntimeProviderError("Codex returned a malformed item")
-            if item.get("type") not in {"agent_message", "reasoning"}:
-                raise RuntimeProviderError("Codex reported an unexpected tool action")
-            if kind == "item.completed" and item.get("type") == "agent_message":
-                text = item.get("text")
-                if not isinstance(text, str) or not text.strip():
-                    raise RuntimeProviderError("Codex returned an empty analysis")
+            text = _event_message(event)
+            if text is not None:
                 messages.append(text)
     if not completed or not messages:
         raise RuntimeProviderError("Codex did not complete an analysis")
@@ -173,3 +148,41 @@ def _parse_events(output: str, request: RuntimeRequest) -> RuntimeResult:
         runtime="codex",
         actions_taken=request.allowed_actions,
     )
+
+
+def _decode_event(line: str) -> dict[str, Any]:
+    try:
+        event: Any = json.loads(line)
+    except ValueError:
+        raise RuntimeProviderError("Codex returned malformed events") from None
+    if not isinstance(event, dict):
+        raise RuntimeProviderError("Codex returned malformed events")
+    kind = event.get("type")
+    if kind not in {
+        "thread.started",
+        "turn.started",
+        "turn.completed",
+        "error",
+        "turn.failed",
+        "item.started",
+        "item.updated",
+        "item.completed",
+    }:
+        raise RuntimeProviderError("Codex returned an unknown event")
+    if kind in {"error", "turn.failed"}:
+        raise RuntimeProviderError("Codex reported execution failure")
+    return event
+
+
+def _event_message(event: dict[str, Any]) -> str | None:
+    item = event.get("item")
+    if not isinstance(item, dict):
+        raise RuntimeProviderError("Codex returned a malformed item")
+    if item.get("type") not in {"agent_message", "reasoning"}:
+        raise RuntimeProviderError("Codex reported an unexpected tool action")
+    if event.get("type") == "item.completed" and item.get("type") == "agent_message":
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeProviderError("Codex returned an empty analysis")
+        return text
+    return None
