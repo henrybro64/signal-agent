@@ -13,7 +13,6 @@ def assert_close(actual: float, expected: float) -> None:
     assert math.isclose(actual, expected, rel_tol=0.0, abs_tol=1e-9)
 
 
-
 def test_load_config_reads_sample_file() -> None:
     config = load_config(CONFIG_PATH)
 
@@ -494,9 +493,7 @@ def test_app_config_from_dict_defaults_stock_watchlist_when_omitted() -> None:
     assert config.tasks.stock_watchlist.themes == {}
 
 
-def test_app_config_from_dict_accepts_disabled_stock_watchlist_without_fields() -> (
-    None
-):
+def test_app_config_from_dict_accepts_disabled_stock_watchlist_without_fields() -> None:
     payload = _base_config_dict()
     tasks = payload["tasks"]
     assert isinstance(tasks, dict)
@@ -896,3 +893,57 @@ def test_load_env_settings_treats_blank_values_as_missing(
     assert env.openai_api_key is None
     assert env.telegram_bot_token is None
     assert env.telegram_chat_id is None
+
+
+def _minimal_config_dict(**overrides: object) -> dict:
+    payload: dict = {
+        "agent": {"timezone": "UTC", "digest_time": "09:00"},
+        "tasks": {
+            "job_search": {
+                "enabled": True,
+                "sources": ["job104"],
+                "keywords": ["python"],
+            },
+            "tw_stock_movers": {
+                "enabled": True,
+                "top_n": 5,
+                "timezone": "UTC",
+            },
+        },
+        "notifiers": {"telegram": {"enabled": False}},
+        "scoring": {
+            "freshness_weight": 0.5,
+            "priority_weight": 0.5,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_tools_permissions_must_be_mapping() -> None:
+    with pytest.raises(ConfigError, match="tools.permissions' must be a mapping"):
+        AppConfig.from_dict(_minimal_config_dict(tools={"permissions": True}))
+
+
+def test_string_llm_fallbacks_validate_provider() -> None:
+    with pytest.raises(ConfigError, match="fallbacks\\[0\\].provider"):
+        AppConfig.from_dict(
+            _minimal_config_dict(
+                llm={
+                    "provider": "fake",
+                    "model": "primary",
+                    "fallbacks": ["typo/backup"],
+                }
+            )
+        )
+    config = AppConfig.from_dict(
+        _minimal_config_dict(
+            llm={
+                "provider": "fake",
+                "model": "primary",
+                "fallbacks": ["fake/backup"],
+            }
+        )
+    )
+    assert config.llm.fallbacks[0].provider == "fake"
+    assert config.llm.fallbacks[0].model == "backup"

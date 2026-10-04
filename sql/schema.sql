@@ -5,7 +5,8 @@
 -- PRAGMA user_version. Do not duplicate DDL here; edit/add migration files
 -- instead.
 --
--- Current baseline: app/sql/migrations/002_agent_memory.sql (schema version 2).
--- Prior: app/sql/migrations/001_initial.sql (schema version 1).
--- Next change: add app/sql/migrations/003_<description>.sql and keep init_db()
+-- Current baseline: app/sql/migrations/003_schedules.sql (schema version 3).
+-- Prior: app/sql/migrations/002_agent_memory.sql (schema version 2),
+--         app/sql/migrations/001_initial.sql (schema version 1).
+-- Next change: add app/sql/migrations/004_<description>.sql and keep init_db()
 -- as the only entrypoint used by tasks.

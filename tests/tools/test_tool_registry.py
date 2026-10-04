@@ -102,20 +102,41 @@ def test_telegram_tool_disabled_by_default_and_redacts_secrets() -> None:
         context=ToolContext(telegram_enabled=False),
     )
     assert disabled.ok is False
-    assert disabled.metadata["code"] == "tool_disabled"
+    assert disabled.metadata["code"] in {"tool_disabled", "permission_denied"}
+
+    from app.tools.permissions import (
+        PermissionPolicyConfig,
+        build_permission_policy,
+    )
 
     sent: list[str] = []
+    # telegram_enabled alone must not bypass tools.permissions; allow explicitly.
+    allow_notify = build_permission_policy(
+        PermissionPolicyConfig(classes={"notify": "allow", "read": "allow"})
+    )
     enabled = registry.invoke(
         "send_telegram_message",
         {"text": "hello sk-secret-value"},
         context=ToolContext(
             telegram_enabled=True,
+            permission_policy=allow_notify,
             send_telegram=sent.append,
             secrets_to_redact=("sk-secret-value",),
         ),
     )
     assert enabled.ok is True
     assert sent == ["hello sk-secret-value"]
+
+    blocked_without_policy = registry.invoke(
+        "send_telegram_message",
+        {"text": "nope"},
+        context=ToolContext(
+            telegram_enabled=True,
+            send_telegram=sent.append,
+        ),
+    )
+    assert blocked_without_policy.ok is False
+    assert blocked_without_policy.metadata["code"] == "permission_denied"
 
     redacted = redact_mapping(
         {"bot_token": "123:abc", "text": "x sk-secret-value"},
@@ -126,10 +147,13 @@ def test_telegram_tool_disabled_by_default_and_redacts_secrets() -> None:
 
 
 def test_registry_timeout_returns_promptly() -> None:
+    from app.tools.permissions import PermissionClass
+
     class SlowTool:
         name = "search_jobs"
         description = "slow"
         input_schema = {"type": "object", "properties": {}}
+        permission = PermissionClass.READ
 
         @staticmethod
         def invoke(arguments, *, context):
@@ -140,6 +164,7 @@ def test_registry_timeout_returns_promptly() -> None:
         name = "query_recent_runs"
         description = "boom"
         input_schema = {"type": "object", "properties": {}}
+        permission = PermissionClass.READ
 
         @staticmethod
         def invoke(arguments, *, context):
@@ -192,12 +217,15 @@ def test_safe_log_fields_omit_secret_values() -> None:
 def test_timeout_sets_cancel_event() -> None:
     import threading
 
+    from app.tools.permissions import PermissionClass
+
     seen: list[bool] = []
 
     class SlowTool:
         name = "search_jobs"
         description = "slow"
         input_schema = {"type": "object", "properties": {}}
+        permission = PermissionClass.READ
 
         @staticmethod
         def invoke(arguments, *, context):

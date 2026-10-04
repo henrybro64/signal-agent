@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from app.core import SignalItem
 from app.core.config import LlmConfig, ScoringConfig
 from app.core.secrets import EnvSettings
-from app.llm import create_llm_provider
+from app.llm.models_cli import build_routed_provider
 
 from .job_llm_scorer import JobLLMScorer, JobLLMScorerError
 from .job_rule_scorer import JobRuleScore, JobRuleScorer
@@ -141,12 +141,11 @@ def build_job_score_pipeline(
     llm_scorer: JobLLMScorer | None = None
     gateway = llm_config or LlmConfig(model=config.llm_model)
     if config.llm_enabled:
-        provider = create_llm_provider(
-            provider=gateway.provider,
+        # Always route through RoutedLLMProvider so retries/fallback logging and
+        # failure-class preservation stay consistent even with an empty chain.
+        provider = build_routed_provider(
+            gateway,
             api_key=env.openai_api_key or "",
-            model=gateway.model,
-            timeout_seconds=gateway.timeout_seconds,
-            temperature=gateway.temperature,
         )
         llm_scorer = JobLLMScorer(
             provider=provider,

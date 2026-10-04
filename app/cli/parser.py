@@ -103,12 +103,107 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("task_name", help="Task name (see `signal-agent tasks`)")
 
     sub.add_parser("tasks", parents=[shared], help="List available tasks")
-    sub.add_parser(
+
+    models_p = sub.add_parser(
         "models",
         parents=[shared],
-        help="List configured/supported LLM providers",
+        help="Inspect/set LLM models and run health checks",
     )
+    models_sub = models_p.add_subparsers(dest="models_command")
+    models_sub.add_parser(
+        "status",
+        parents=[shared],
+        help="Show default model and fallbacks",
+    )
+    models_set = models_sub.add_parser(
+        "set",
+        parents=[shared],
+        help="Set default provider/model (provider/model)",
+    )
+    models_set.add_argument("model_id", help="e.g. fake/gpt-4o-mini")
+    models_fb = models_sub.add_parser(
+        "fallback",
+        parents=[shared],
+        help="Manage fallback models",
+    )
+    models_fb_sub = models_fb.add_subparsers(dest="models_fallback_command")
+    models_fb_add = models_fb_sub.add_parser(
+        "add",
+        parents=[shared],
+        help="Add a fallback provider/model",
+    )
+    models_fb_add.add_argument("model_id", help="e.g. fake/backup-model")
+    models_sub.add_parser(
+        "test",
+        parents=[shared],
+        help="Run a tiny provider health request",
+    )
+
     sub.add_parser("tools", parents=[shared], help="List allowlisted agent tools")
+
+    sub.add_parser(
+        "schedules",
+        parents=[shared],
+        help="List persistent schedules",
+    )
+    schedule_p = sub.add_parser(
+        "schedule",
+        parents=[shared],
+        help="Manage persistent schedules",
+    )
+    schedule_sub = schedule_p.add_subparsers(dest="schedule_command")
+    schedule_add = schedule_sub.add_parser(
+        "add",
+        parents=[shared],
+        help="Add a recurring or one-shot schedule",
+    )
+    schedule_add.add_argument("--name", required=True)
+    schedule_add.add_argument("--task", required=True, dest="schedule_task")
+    schedule_add.add_argument(
+        "--timezone",
+        default="Asia/Taipei",
+        help="IANA timezone (required explicitly; default Asia/Taipei)",
+    )
+    schedule_add.add_argument(
+        "--cron",
+        default="",
+        help="Cron (5-field) or every:<minutes>",
+    )
+    schedule_add.add_argument(
+        "--run-at",
+        default="",
+        help="One-shot ISO-8601 timestamp with timezone",
+    )
+    schedule_add.add_argument("--allow-overlap", action="store_true")
+    schedule_add.add_argument("--dry-run", action="store_true")
+    schedule_add.add_argument("--max-retries", type=int, default=2)
+    schedule_add.add_argument("--backoff-seconds", type=float, default=30.0)
+    schedule_enable = schedule_sub.add_parser(
+        "enable",
+        parents=[shared],
+        help="Enable a schedule",
+    )
+    schedule_enable.add_argument("schedule_id")
+    schedule_disable = schedule_sub.add_parser(
+        "disable",
+        parents=[shared],
+        help="Disable a schedule",
+    )
+    schedule_disable.add_argument("schedule_id")
+    schedule_run = schedule_sub.add_parser(
+        "run",
+        parents=[shared],
+        help="Run a schedule immediately",
+    )
+    schedule_run.add_argument("schedule_id")
+    schedule_run.add_argument("--dry-run", action="store_true")
+    schedule_history = schedule_sub.add_parser(
+        "history",
+        parents=[shared],
+        help="Show recent runs for a schedule",
+    )
+    schedule_history.add_argument("schedule_id")
+    schedule_history.add_argument("--limit", type=int, default=20)
 
     logs = sub.add_parser(
         "logs",

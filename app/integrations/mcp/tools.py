@@ -49,13 +49,21 @@ class McpToolGateway:
         context: ToolContext | None = None,
     ) -> None:
         self.config = config or McpServerConfig()
-        self.registry = registry or build_tool_registry(
-            allowlist=self.config.allowlist
-        )
-        self.context = context or ToolContext(
-            timeout_seconds=self.config.request_timeout_seconds,
-            telegram_enabled=False,
-        )
+        self.registry = registry or build_tool_registry(allowlist=self.config.allowlist)
+        if context is None:
+            from app.tools.permissions import policy_from_app_config
+
+            self.context = ToolContext(
+                timeout_seconds=self.config.request_timeout_seconds,
+                telegram_enabled=False,
+                interactive=False,
+                permission_policy=policy_from_app_config(
+                    None,
+                    interactive=False,
+                ),
+            )
+        else:
+            self.context = context
         self._lock = threading.Lock()
         self._request_count = 0
 
@@ -103,6 +111,8 @@ class McpToolGateway:
             fetch_movers=self.context.fetch_movers,
             query_runs=self.context.query_runs,
             secrets_to_redact=self.context.secrets_to_redact,
+            interactive=False,
+            permission_policy=self.context.permission_policy,
         )
         result = self.registry.invoke(name, arguments or {}, context=ctx)
         duration_ms = int((time.perf_counter() - started) * 1000)

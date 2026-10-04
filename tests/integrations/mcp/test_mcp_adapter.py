@@ -95,11 +95,13 @@ def test_mcp_tool_timeout_maps_to_error() -> None:
 
     from app.tools import ToolRegistry, builtin_tools
     from app.tools.models import ToolResult
+    from app.tools.permissions import PermissionClass
 
     class SlowTool:
         name = "query_recent_runs"
         description = "slow"
         input_schema = {"type": "object", "properties": {}}
+        permission = PermissionClass.READ
 
         @staticmethod
         def invoke(arguments, *, context):

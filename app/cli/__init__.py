@@ -62,6 +62,9 @@ def main(argv: list[str] | None = None) -> int:
 
         parser.print_help()
         return 0
+    except KeyError as exc:
+        print(f"Unknown schedule id: {exc.args[0]}", file=sys.stderr)
+        return 1
     except (FileNotFoundError, ValueError) as exc:
         # ConfigError/HealthError/SecretError/TelegramNotifierError subclass
         # ValueError; listing them alongside ValueError triggers overlapping-
@@ -71,36 +74,34 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch_command(args: Any) -> int:
-    command = args.command
-    if command == "setup":
-        return _cmd_setup(args)
-    if command == "config":
-        return _cmd_config(args)
-    if command == "doctor":
-        return _cmd_doctor(args)
-    if command == "start":
-        return _cmd_start(args)
-    if command == "stop":
-        return _cmd_stop(args)
-    if command == "restart":
-        return _cmd_restart(args)
-    if command == "status":
-        return _cmd_status(args)
-    if command == "chat":
-        return _cmd_chat(args)
-    if command == "run":
-        return _cmd_run(args)
-    if command == "tasks":
-        print("\n".join(list_tasks()))
-        return 0
-    if command == "models":
-        return _cmd_models(args)
-    if command == "tools":
-        return _cmd_tools(args)
-    if command == "logs":
-        return _cmd_logs(args)
-    print(f"Unknown command: {command}", file=sys.stderr)
-    return 2
+    handlers = {
+        "setup": _cmd_setup,
+        "config": _cmd_config,
+        "doctor": _cmd_doctor,
+        "start": _cmd_start,
+        "stop": _cmd_stop,
+        "restart": _cmd_restart,
+        "status": _cmd_status,
+        "chat": _cmd_chat,
+        "run": _cmd_run,
+        "tasks": _cmd_tasks,
+        "models": _cmd_models,
+        "tools": _cmd_tools,
+        "schedules": _cmd_schedules,
+        "schedule": _cmd_schedule,
+        "logs": _cmd_logs,
+    }
+    command = getattr(args, "command", None)
+    handler = handlers.get(command) if isinstance(command, str) else None
+    if handler is None:
+        print(f"Unknown command: {command}", file=sys.stderr)
+        return 2
+    return handler(args)
+
+
+def _cmd_tasks(_args: Any) -> int:
+    print("\n".join(list_tasks()))
+    return 0
 
 
 def _cmd_setup(args: Any) -> int:
@@ -138,9 +139,7 @@ def _cmd_config(args: Any) -> int:
         print("Usage: signal-agent config show", file=sys.stderr)
         return 2
     print(
-        redact_setup_text(
-            show_config_redacted(root=args.root, config_path=args.config)
-        )
+        redact_setup_text(show_config_redacted(root=args.root, config_path=args.config))
     )
     return 0
 
@@ -223,16 +222,157 @@ def _cmd_run(args: Any) -> int:
 
 
 def _cmd_models(args: Any) -> int:
-    from app.core.config import load_config
     from app.llm import supported_llm_providers
+    from app.llm.models_cli import (
+        add_fallback_model,
+        check_model_health,
+        format_models_status,
+        set_default_model,
+    )
 
-    providers = ", ".join(sorted(supported_llm_providers()))
-    print(f"supported_providers: {providers}")
-    try:
-        config = load_config(args.config)
-        print(f"configured: provider={config.llm.provider} model={config.llm.model}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"configured: unavailable ({type(exc).__name__})")
+    sub = getattr(args, "models_command", None)
+    if sub in {None, "status"}:
+        providers = ", ".join(sorted(supported_llm_providers()))
+        print(f"supported_providers: {providers}")
+        print(format_models_status(root=args.root, config_path=args.config))
+        return 0
+    if sub == "set":
+        selected = set_default_model(
+            args.model_id,
+            root=args.root,
+            config_path=args.config,
+        )
+        print(f"default model set to {selected}")
+        return 0
+    if sub == "fallback":
+        fb = getattr(args, "models_fallback_command", None)
+        if fb != "add":
+            print(
+                "Usage: signal-agent models fallback add <provider/model>",
+                file=sys.stderr,
+            )
+            return 2
+        items = add_fallback_model(
+            args.model_id,
+            root=args.root,
+            config_path=args.config,
+        )
+        print("fallbacks:")
+        for item in items:
+            print(f"- {item}")
+        return 0
+    if sub == "test":
+        result = check_model_health(root=args.root, config_path=args.config)
+        if result["ok"]:
+            print(f"models test: ok served={result['served']}")
+            return 0
+        print(
+            "models test: failed "
+            f"class={result.get('failure_class')} "
+            f"error={result.get('error_type')}: {result.get('error')}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"Unknown models command: {sub}", file=sys.stderr)
+    return 2
+
+
+def _cmd_schedules(args: Any) -> int:
+    from app.runtime import paths as runtime_paths
+    from app.scheduler import ScheduleStore, format_schedules
+
+    store = ScheduleStore(runtime_paths.db_path(args.root))
+    print(format_schedules(store.list()))
+    return 0
+
+
+def _cmd_schedule(args: Any) -> int:
+    from app.runtime import paths as runtime_paths
+    from app.scheduler import ScheduleStore
+
+    store = ScheduleStore(runtime_paths.db_path(args.root))
+    handlers = {
+        "add": _schedule_add,
+        "enable": _schedule_enable,
+        "disable": _schedule_disable,
+        "run": _schedule_run,
+        "history": _schedule_history,
+    }
+    sub = getattr(args, "schedule_command", None)
+    handler = handlers.get(sub) if isinstance(sub, str) else None
+    if handler is None:
+        print(
+            "Usage: signal-agent schedule add|enable|disable|run|history ...",
+            file=sys.stderr,
+        )
+        return 2
+    return handler(args, store=store)
+
+
+def _schedule_add(args: Any, *, store: Any) -> int:
+    from app.scheduler import format_schedules
+
+    task_name = str(args.schedule_task)
+    known = list_tasks()
+    if task_name not in known:
+        raise ValueError(
+            f"Unknown task {task_name!r}; choose one of: {', '.join(known)}"
+        )
+    schedule = store.add(
+        name=args.name,
+        task_name=task_name,
+        timezone=args.timezone,
+        cron=args.cron or None,
+        run_at=args.run_at or None,
+        allow_overlap=bool(args.allow_overlap),
+        dry_run=bool(args.dry_run),
+        max_retries=args.max_retries,
+        backoff_seconds=args.backoff_seconds,
+    )
+    print(format_schedules([schedule]))
+    return 0
+
+
+def _schedule_enable(args: Any, *, store: Any) -> int:
+    from app.scheduler import format_schedules
+
+    print(format_schedules([store.set_enabled(args.schedule_id, enabled=True)]))
+    return 0
+
+
+def _schedule_disable(args: Any, *, store: Any) -> int:
+    from app.scheduler import format_schedules
+
+    print(format_schedules([store.set_enabled(args.schedule_id, enabled=False)]))
+    return 0
+
+
+def _schedule_run(args: Any, **_kwargs: Any) -> int:
+    from app.scheduler import run_schedule_now
+
+    status = run_schedule_now(
+        args.schedule_id,
+        root=args.root,
+        config_path=args.config,
+        dry_run=bool(args.dry_run) or None,
+    )
+    print(f"schedule run: {status}")
+    return 0 if status in {"started_ok", "skipped_disabled"} else 1
+
+
+def _schedule_history(args: Any, *, store: Any) -> int:
+    if store.get(args.schedule_id) is None:
+        raise KeyError(args.schedule_id)
+    rows = store.history(args.schedule_id, limit=args.limit)
+    if not rows:
+        print("(no runs)")
+        return 0
+    for row in rows:
+        print(
+            f"{row.run_id}  {row.status}  attempt={row.attempt}  "
+            f"started={row.started_at}  finished={row.finished_at or '-'}  "
+            f"error={row.error or '-'}"
+        )
     return 0
 
 

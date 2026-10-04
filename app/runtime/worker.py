@@ -81,7 +81,23 @@ def run_worker_tick(
         except Exception as exc:  # noqa: BLE001
             failures.append(f"tool:{type(exc).__name__}")
 
-        detail = f"health={health_status}"
+        schedule_detail = "schedules=0"
+        try:
+            from app.scheduler import run_schedule_tick
+
+            tick = run_schedule_tick(
+                root=base,
+                config_path=cfg,
+                db_path=db,
+            )
+            schedule_detail = (
+                f"schedules_due={tick.due},started={tick.started},"
+                f"failed={tick.failed}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"scheduler:{type(exc).__name__}")
+
+        detail = f"health={health_status};{schedule_detail}"
         ok = not failures
         log_event(
             _LOGGER,
