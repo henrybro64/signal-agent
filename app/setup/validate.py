@@ -79,7 +79,47 @@ def validate_local_setup(
         browser.detail,
         severity="info" if browser.ready else "warning",
     )
+    _validate_skills(report, root=root, config_path=cfg_path)
     return report
+
+
+def _validate_skills(
+    report: ValidationReport,
+    *,
+    root: str | Path | None,
+    config_path: Path,
+) -> None:
+    try:
+        from app.skills import (
+            list_skills,
+            load_builtin_manifests,
+        )
+
+        load_builtin_manifests()
+        infos = list_skills(root=root, config_path=config_path)
+        missing = [
+            f"{info.manifest.name}({','.join(info.missing_extras)})"
+            for info in infos
+            if info.enabled and info.missing_extras
+        ]
+        if missing:
+            report.add(
+                "skills_missing_extras",
+                "Enabled skills missing extras: " + ", ".join(missing),
+                severity="warning",
+            )
+        else:
+            report.add(
+                "skills",
+                f"{sum(1 for i in infos if i.enabled)}/{len(infos)} skills enabled",
+                severity="info",
+            )
+    except Exception as exc:  # noqa: BLE001
+        report.add(
+            "skills_invalid",
+            f"Skill manifest validation failed: {exc}",
+            severity="error",
+        )
 
 
 def format_validation_report(report: ValidationReport) -> str:

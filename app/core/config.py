@@ -142,6 +142,28 @@ class ToolsConfig:
 
 
 @dataclass(slots=True)
+class BrowserConfig:
+    """Optional isolated browser service (#87)."""
+
+    enabled: bool = False
+    headless: bool = True
+    backend: str | None = None
+    allowed_domains: list[str] = field(default_factory=list)
+    denied_domains: list[str] = field(default_factory=list)
+    navigation_timeout_seconds: float = 15.0
+    max_page_bytes: int = 500_000
+    allow_downloads: bool = False
+    allow_javascript: bool = False
+
+
+@dataclass(slots=True)
+class SkillsConfig:
+    """Enabled built-in skills (#89). ``None`` means default built-ins."""
+
+    enabled: list[str] | None = None
+
+
+@dataclass(slots=True)
 class ThemeMappingConfig:
     label: str
     keywords: list[str]
@@ -282,6 +304,8 @@ class AppConfig:
     llm: LlmConfig = field(default_factory=LlmConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
+    skills: SkillsConfig = field(default_factory=SkillsConfig)
 
     @classmethod
     def from_dict(
@@ -340,6 +364,16 @@ class AppConfig:
         memory = _optional_mapping(
             data,
             "memory",
+            source_name=source_name,
+        )
+        browser = _optional_mapping(
+            data,
+            "browser",
+            source_name=source_name,
+        )
+        skills = _optional_mapping(
+            data,
+            "skills",
             source_name=source_name,
         )
         notifiers = _require_mapping(data, "notifiers", source_name=source_name)
@@ -501,6 +535,8 @@ class AppConfig:
             llm=llm_config,
             tools=_parse_tools_config(tools, source_name=source_name),
             memory=_parse_memory_config(memory, source_name=source_name),
+            browser=_parse_browser_config(browser, source_name=source_name),
+            skills=_parse_skills_config(skills, source_name=source_name),
         )
 
 
@@ -652,6 +688,127 @@ def _parse_job_research_agent_config(
         llm_provider=llm_provider or None,
         llm_model=llm_model or None,
     )
+
+
+def _parse_browser_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> BrowserConfig:
+    defaults = BrowserConfig()
+    if not data:
+        return defaults
+    parent = "browser"
+    timeout = _optional_float(
+        data,
+        "navigation_timeout_seconds",
+        default=defaults.navigation_timeout_seconds,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout,
+        config_path=f"{parent}.navigation_timeout_seconds",
+        source_name=source_name,
+    )
+    max_bytes = _optional_int(
+        data,
+        "max_page_bytes",
+        default=defaults.max_page_bytes,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    if max_bytes <= 0:
+        raise ConfigError(
+            f"Config value '{parent}.max_page_bytes' must be > 0 in {source_name}"
+        )
+    allowed = data.get("allowed_domains")
+    if allowed is None:
+        allowed_domains: list[str] = []
+    elif not isinstance(allowed, list) or not all(
+        isinstance(item, str) and item.strip() for item in allowed
+    ):
+        raise ConfigError(
+            f"Config value '{parent}.allowed_domains' must be a list of "
+            f"non-empty strings in {source_name}"
+        )
+    else:
+        allowed_domains = [item.strip() for item in allowed]
+    denied = data.get("denied_domains")
+    if denied is None:
+        denied_domains: list[str] = []
+    elif not isinstance(denied, list) or not all(
+        isinstance(item, str) and item.strip() for item in denied
+    ):
+        raise ConfigError(
+            f"Config value '{parent}.denied_domains' must be a list of "
+            f"non-empty strings in {source_name}"
+        )
+    else:
+        denied_domains = [item.strip() for item in denied]
+    backend = _optional_str(
+        data,
+        "backend",
+        default="",
+        parent_path=parent,
+        source_name=source_name,
+    ).strip() or None
+    return BrowserConfig(
+        enabled=_optional_bool(
+            data,
+            "enabled",
+            default=False,
+            parent_path=parent,
+            source_name=source_name,
+        ),
+        headless=_optional_bool(
+            data,
+            "headless",
+            default=True,
+            parent_path=parent,
+            source_name=source_name,
+        ),
+        backend=backend,
+        allowed_domains=allowed_domains,
+        denied_domains=denied_domains,
+        navigation_timeout_seconds=timeout,
+        max_page_bytes=max_bytes,
+        allow_downloads=_optional_bool(
+            data,
+            "allow_downloads",
+            default=False,
+            parent_path=parent,
+            source_name=source_name,
+        ),
+        allow_javascript=_optional_bool(
+            data,
+            "allow_javascript",
+            default=False,
+            parent_path=parent,
+            source_name=source_name,
+        ),
+    )
+
+
+def _parse_skills_config(
+    data: dict[str, Any] | None,
+    *,
+    source_name: str,
+) -> SkillsConfig:
+    if not data:
+        return SkillsConfig()
+    parent = "skills"
+    enabled_raw = data.get("enabled")
+    if enabled_raw is None:
+        return SkillsConfig(enabled=None)
+    if not isinstance(enabled_raw, list) or not all(
+        isinstance(item, str) and item.strip() for item in enabled_raw
+    ):
+        raise ConfigError(
+            f"Config value '{parent}.enabled' must be a list of non-empty "
+            f"strings in {source_name}"
+        )
+    return SkillsConfig(enabled=[item.strip() for item in enabled_raw])
 
 
 def _parse_memory_config(

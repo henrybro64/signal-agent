@@ -217,6 +217,100 @@ def build_parser() -> argparse.ArgumentParser:
         help="Follow log output (Ctrl-C to stop)",
     )
 
+    browser_p = sub.add_parser(
+        "browser",
+        parents=[shared],
+        help="Optional isolated browser service",
+    )
+    browser_sub = browser_p.add_subparsers(dest="browser_command")
+    browser_sub.add_parser(
+        "status",
+        parents=[shared],
+        help="Show browser readiness and profile",
+    )
+    browser_sub.add_parser(
+        "start",
+        parents=[shared],
+        help="Start/prepare the isolated browser profile",
+    )
+    browser_sub.add_parser(
+        "stop",
+        parents=[shared],
+        help="Stop the browser service",
+    )
+    browser_test = browser_sub.add_parser(
+        "test",
+        parents=[shared],
+        help="Open a local fixture page through the browser backend",
+    )
+    browser_test.add_argument(
+        "--url",
+        default="",
+        help="Optional URL (defaults to offline fixture)",
+    )
+
+    service_p = sub.add_parser(
+        "service",
+        parents=[shared],
+        help="Installable systemd --user background service",
+    )
+    service_sub = service_p.add_subparsers(dest="service_command")
+    service_install = service_sub.add_parser(
+        "install",
+        parents=[shared],
+        help="Install (and optionally enable) the user service",
+    )
+    service_install.add_argument(
+        "--xdg",
+        action="store_true",
+        help="Use XDG config/data/state paths instead of the repo checkout",
+    )
+    service_install.add_argument(
+        "--no-enable",
+        action="store_true",
+        help="Write the unit file only (do not systemctl enable)",
+    )
+    service_sub.add_parser(
+        "status",
+        parents=[shared],
+        help="Show systemd user-service and runtime status",
+    )
+    service_sub.add_parser(
+        "uninstall",
+        parents=[shared],
+        help="Disable and remove the user service unit",
+    )
+
+    sub.add_parser(
+        "skills",
+        parents=[shared],
+        help="List built-in skills and enablement",
+    )
+    skill_p = sub.add_parser(
+        "skill",
+        parents=[shared],
+        help="Inspect or enable/disable a built-in skill",
+    )
+    skill_sub = skill_p.add_subparsers(dest="skill_command")
+    skill_info = skill_sub.add_parser(
+        "info",
+        parents=[shared],
+        help="Show one skill manifest",
+    )
+    skill_info.add_argument("skill_name")
+    skill_enable = skill_sub.add_parser(
+        "enable",
+        parents=[shared],
+        help="Enable a built-in skill",
+    )
+    skill_enable.add_argument("skill_name")
+    skill_disable = skill_sub.add_parser(
+        "disable",
+        parents=[shared],
+        help="Disable a built-in skill",
+    )
+    skill_disable.add_argument("skill_name")
+
     # Legacy flags kept for backward compatibility; prefer subcommands.
     parser.add_argument(
         "--task",

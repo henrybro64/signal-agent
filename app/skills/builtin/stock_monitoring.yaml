@@ -1,0 +1,26 @@
+api_version: 1
+name: stock_monitoring
+version: "1.0.0"
+description: >
+  Taiwan stock mover digests, watchlist alerts, and market assistant research
+  workflows during market hours.
+tools:
+  - get_tw_stock_movers
+  - send_telegram_message
+tasks:
+  - tw_stock_movers
+  - stock_watchlist
+  - tw_market_assistant
+workflows: []
+required_permissions:
+  - read
+  - notify
+python_extras: []
+config_schema:
+  type: object
+  properties:
+    tasks.tw_stock_movers.enabled:
+      type: boolean
+compatibility:
+  min_api_version: 1
+  max_api_version: 1

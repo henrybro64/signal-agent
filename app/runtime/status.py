@@ -79,6 +79,7 @@ def collect_status(
 ) -> StatusReport:
     """Build a redaction-safe status snapshot."""
 
+    from app.browser import browser_status
     from app.setup.browser import detect_browser
 
     cfg_path = Path(config_path or runtime_paths.config_path(root))
@@ -97,12 +98,29 @@ def collect_status(
     db = resolve_db_path(runtime_paths.db_path(root))
     db_ok = db.is_file()
     health_overall = _health_overall(db) if db_ok else "UNKNOWN"
-    browser = detect_browser()
+    try:
+        browser = browser_status(root=root, config_path=cfg_path)
+        # Ready means the browser *service* can operate — not merely that a
+        # Chromium binary exists on PATH.
+        browser_ready = browser.ready
+        browser_detail = (
+            f"{browser.detail}; service="
+            f"{'running' if browser.running else 'stopped'}; "
+            f"backend={browser.backend}; enabled={browser.enabled}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        detection = detect_browser()
+        browser_ready = False
+        browser_detail = f"{detection.detail}; status_error={type(exc).__name__}"
     mcp_available, langchain_available = _detect_optional_extras()
 
     allowlist = config_fields["allowlist"]
     try:
-        build_tool_registry(allowlist=allowlist)
+        build_tool_registry(
+            allowlist=allowlist,
+            root=root,
+            config_path=cfg_path,
+        )
     except Exception as exc:  # noqa: BLE001
         details.append(f"tools_error:{type(exc).__name__}")
 
@@ -121,8 +139,8 @@ def collect_status(
         openai_key_configured=has_openai_api_key(env),
         telegram_configured=has_telegram_credentials(env),
         telegram_enabled=bool(config_fields["telegram_enabled"]),
-        browser_ready=browser.ready,
-        browser_detail=browser.detail,
+        browser_ready=browser_ready,
+        browser_detail=browser_detail,
         mcp_available=mcp_available,
         langchain_available=langchain_available,
         tool_allowlist=list(allowlist),

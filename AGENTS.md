@@ -26,7 +26,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
 | M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
 | M7 | LangChain-ready platform evolution #60–#67 | **Complete** on `main` |
-| M8 | OpenClaw-like productization #81–#86 | **In progress** — #81–#83 on `main`; #84–#86 local (permissions/scheduler/models) |
+| M8 | OpenClaw-like productization #81–#89 | **In progress** — #81–#86 on `main`; #87–#89 local (browser/service/skills) |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -40,6 +40,9 @@ signal-agent/
 ├── app/setup/              # first-run wizard, doctor validation (#81)
 ├── app/chat/               # interactive bounded chat loop (#83)
 ├── app/scheduler/          # persistent schedules + worker tick (#85)
+├── app/browser/            # optional isolated browser service + tools (#87)
+├── app/service/            # systemd --user install helpers (#88)
+├── app/skills/             # built-in skill manifests (#89)
 ├── config.yaml             # non-secret runtime settings
 ├── .env.example            # secret names only
 ├── Dockerfile
@@ -146,6 +149,9 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 | `runtime` | Local start/stop/status/logs lifecycle | Multi-node orchestration |
 | `chat` | Interactive plan-act-observe REPL | Unrestricted shell/SQL/browser tools |
 | `scheduler` | Persistent cron/one-shot schedules + overlap/retry | Reimplement task orchestration |
+| `browser` | Isolated Chromium/fake backend + bounded browse tools | Arbitrary JS, login automation, CAPTCHA bypass |
+| `service` | systemd --user unit render/install for local runtime | Duplicate daemon separate from `app.runtime` |
+| `skills` | Versioned built-in manifests + enable/disable | Marketplace / untrusted plugin download |
 | `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |
 | `notifiers` | Outbound delivery | Business ranking rules |
 | `profiles` | Packaged preference text for scorers | Secrets |
@@ -293,9 +299,12 @@ OpenClaw-like productization. Preserve legacy CLI flags and deterministic tasks.
 1. #81  Setup / config / doctor wizard — DONE (on main)
 2. #82  Runtime lifecycle (start/stop/status/logs) — DONE (on main)
 3. #83  Interactive chat REPL — DONE (on main)
-4. #84  Tool permission policy + human approval gates — local
-5. #85  Scheduler + persistent task management CLI — local
-6. #86  Model management, health checks, fallbacks — local
+4. #84  Tool permission policy + human approval gates — DONE (on main)
+5. #85  Scheduler + persistent task management CLI — DONE (on main)
+6. #86  Model management, health checks, fallbacks — DONE (on main)
+7. #87  Optional browser tool service — local
+8. #88  Installable systemd user service — local
+9. #89  Skill/plugin manifest system — local
 ```
 
 | Issue | Preferred packages / entry points |
@@ -303,6 +312,18 @@ OpenClaw-like productization. Preserve legacy CLI flags and deterministic tasks.
 | #84 | `app/tools/permissions.py`, registry gate, `tools.permissions` in config |
 | #85 | `app/scheduler/`, migration `003_schedules.sql`, runtime worker tick |
 | #86 | `app/llm/router.py`, `app/llm/models_cli.py`, `signal-agent models …` |
+| #87 | `app/browser/`, `browser_*` tools, `signal-agent browser …` |
+| #88 | `app/service/`, `signal-agent service install\|status\|uninstall` |
+| #89 | `app/skills/builtin/*.yaml`, `signal-agent skills` / `skill …` |
+
+### Adding a new built-in skill (#89)
+
+1. Add `app/skills/builtin/<name>.yaml` with `api_version`, tools/tasks,
+   `required_permissions`, and compatibility bounds.
+2. Implement or reuse tools under `app/tools/` (explicit permission class).
+3. Wire the tool into `builtin_tools()` / skill manifest `tools:` list.
+4. Do **not** load manifests from arbitrary user directories.
+5. Add tests for validation, enable/disable, and tool registration.
 
 ## How to pick up work
 

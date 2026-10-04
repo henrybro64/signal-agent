@@ -45,6 +45,10 @@ signal-agent models test
 signal-agent schedules
 signal-agent schedule add --name movers --task tw_stock_movers \
   --timezone Asia/Taipei --cron '*/30 9-13 * * 1-5'
+signal-agent skills
+signal-agent skill enable browser   # then set browser.enabled: true
+signal-agent browser start && signal-agent browser test
+signal-agent service install --no-enable   # systemd --user unit (Ubuntu)
 signal-agent start   # long-running worker (survives individual tick failures)
 signal-agent stop
 
