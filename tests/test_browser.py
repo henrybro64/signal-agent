@@ -135,29 +135,23 @@ def test_missing_chromium_does_not_silently_fake(
 def test_redirect_hop_must_be_allowlisted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.browser import backend as browser_backend
     from app.browser.backend import resolve_allowed_url
 
-    class _Resp:
-        def __enter__(self):
-            return self
+    def _redirect_probe(url: str, **_kwargs):  # noqa: ANN001
+        return browser_backend._ProbeResult(
+            url=url,
+            status=302,
+            location="https://evil.example/",
+        )
 
-        def __exit__(self, *args):  # noqa: ANN002
-            return False
-
-        def geturl(self) -> str:
-            return "https://evil.example/"
-
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda *args, **kwargs: _Resp(),
-    )
+    monkeypatch.setattr(browser_backend, "_http_probe", _redirect_probe)
     with pytest.raises(BrowserPolicyError, match="not in browser.allowed_domains"):
         resolve_allowed_url(
             "https://example.com/",
             policy=BrowserPolicy(allowed_domains=["example.com"]),
             network=True,
         )
-
 
 def test_downloads_not_supported() -> None:
     backend = FakeBrowserBackend(fixtures={FIXTURE_URL: ("t", "ok")})

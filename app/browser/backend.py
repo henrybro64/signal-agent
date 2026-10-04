@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import http.client
 import os
 import subprocess
 import tempfile
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -15,6 +14,19 @@ from urllib.parse import urljoin, urlparse
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
 
 _MAX_REDIRECTS = 5
+
+
+@dataclass(slots=True, frozen=True)
+class _ProbeResult:
+    """One hop of an http(s) probe (redirects are never followed)."""
+
+    url: str
+    status: int
+    location: str | None = None
+
+
+class _ProbeNetworkError(Exception):
+    """Transport failure while probing a URL (offline, DNS, timeout, …)."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -209,45 +221,56 @@ def resolve_allowed_url(
     for _ in range(_MAX_REDIRECTS):
         policy.assert_url_allowed(current)
         try:
-            final = _http_probe(
+            result = _http_probe(
                 current,
                 method="HEAD",
                 timeout_seconds=policy.navigation_timeout_seconds,
             )
-            policy.assert_url_allowed(final)
-            return final
-        except urllib.error.HTTPError as exc:
-            if exc.code in {403, 405, 501}:
-                return _probe_with_get(current, policy=policy)
-            if 300 <= exc.code < 400:
-                location = exc.headers.get("Location")
-                if not location:
-                    raise BrowserPolicyError(
-                        f"Redirect from {current!r} missing Location header"
-                    ) from exc
-                current = urljoin(current, location)
-                continue
-            raise BrowserPolicyError(
-                f"URL probe failed for {current!r}: HTTP {exc.code}"
-            ) from exc
-        except urllib.error.URLError:
+        except _ProbeNetworkError:
             # Offline / blocked networks: original URL already validated.
             return current
+        if result.status in {403, 405, 501}:
+            return _probe_with_get(current, policy=policy)
+        if 300 <= result.status < 400:
+            if not result.location:
+                raise BrowserPolicyError(
+                    f"Redirect from {current!r} missing Location header"
+                )
+            current = urljoin(current, result.location)
+            continue
+        if result.status >= 400:
+            raise BrowserPolicyError(
+                f"URL probe failed for {current!r}: HTTP {result.status}"
+            )
+        policy.assert_url_allowed(current)
+        return current
     raise BrowserPolicyError(f"Too many redirects while resolving {url!r}")
 
 
 def _probe_with_get(url: str, *, policy: BrowserPolicy) -> str:
     try:
-        final = _http_probe(
+        result = _http_probe(
             url,
             method="GET",
             timeout_seconds=policy.navigation_timeout_seconds,
             read_prefix=64,
         )
+    except _ProbeNetworkError:
+        return url
+    if 300 <= result.status < 400:
+        if not result.location:
+            raise BrowserPolicyError(
+                f"Redirect from {url!r} missing Location header"
+            )
+        final = urljoin(url, result.location)
         policy.assert_url_allowed(final)
         return final
-    except urllib.error.URLError:
-        return url
+    if result.status >= 400:
+        raise BrowserPolicyError(
+            f"URL probe failed for {url!r}: HTTP {result.status}"
+        )
+    policy.assert_url_allowed(url)
+    return url
 
 
 def _http_probe(
@@ -256,29 +279,53 @@ def _http_probe(
     method: str,
     timeout_seconds: float,
     read_prefix: int = 0,
-) -> str:
-    """Open an http(s) URL after an explicit scheme audit."""
+) -> _ProbeResult:
+    """Probe one http(s) hop via ``http.client`` (no ``urlopen`` / auto-follow)."""
 
-    # Inline startswith check so static analyzers (DeepSource PTC-W6004 /
-    # Bandit B310) can see the scheme gate in the same function as urlopen.
+    # Inline startswith + urlparse scheme gates keep the audit in this function.
     lowered = url.lower()
     if not lowered.startswith(("http://", "https://")):
         raise BrowserPolicyError(
             "URL scheme is not allowed for network probe (http/https only)"
         )
-    request = urllib.request.Request(
-        url,
-        method=method,
-        headers={"User-Agent": "signal-agent-browser/1.0"},
-    )
-    with urllib.request.urlopen(  # noqa: S310  # skipcq: PTC-W6004
-        request,
-        timeout=min(5.0, timeout_seconds),
-    ) as response:
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        raise BrowserPolicyError(
+            "URL scheme is not allowed for network probe (http/https only)"
+        )
+    host = parsed.hostname
+    if not host:
+        raise BrowserPolicyError(f"URL missing host for network probe: {url!r}")
+    port = parsed.port or (443 if scheme == "https" else 80)
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    timeout = min(5.0, timeout_seconds)
+    conn: http.client.HTTPConnection
+    if scheme == "https":
+        conn = http.client.HTTPSConnection(host, port, timeout=timeout)
+    else:
+        conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        conn.request(
+            method,
+            path,
+            headers={"User-Agent": "signal-agent-browser/1.0"},
+        )
+        response = conn.getresponse()
+        location = response.getheader("Location")
+        # Drain the body so keep-alive sockets close cleanly; content unused.
         if read_prefix > 0:
             response.read(read_prefix)
-        return response.geturl() or url
-
+        else:
+            response.read()
+        return _ProbeResult(url=url, status=int(response.status), location=location)
+    except (OSError, http.client.HTTPException) as exc:
+        # TimeoutError is an OSError subclass on modern Python — catch once.
+        raise _ProbeNetworkError(str(exc)) from exc
+    finally:
+        conn.close()
 
 def _run_chromium_bounded(
     cmd: list[str],
