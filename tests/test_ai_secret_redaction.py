@@ -69,7 +69,8 @@ def test_registry_collects_secrets_even_if_caller_omits_inventory(
         permission = PermissionClass.READ
         input_schema = {"type": "object"}
 
-        def invoke(self, arguments, *, context):
+        @staticmethod
+        def invoke(arguments, *, context):
             return ToolResult(ok=True, data={"text": " ".join(keys.values())})
 
     context = ToolContext(

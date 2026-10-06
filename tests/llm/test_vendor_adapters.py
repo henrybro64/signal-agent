@@ -235,8 +235,12 @@ def test_router_retains_unsupported_error_when_all_adapters_reject():
 
 
 def test_router_total_timeout_prevents_late_fallback(monkeypatch):
-    clock = iter([0.0, 0.0, 11.0])
-    monkeypatch.setattr("app.llm.router.monotonic", lambda: next(clock))
+    # Holds the final tick so an extra monotonic() call cannot exhaust the clock.
+    ticks = [0.0, 0.0, 11.0]
+    monkeypatch.setattr(
+        "app.llm.router.monotonic",
+        lambda: ticks.pop(0) if len(ticks) > 1 else ticks[0],
+    )
     calls = []
 
     def factory(**kwargs):

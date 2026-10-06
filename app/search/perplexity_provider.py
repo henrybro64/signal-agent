@@ -55,7 +55,7 @@ class PerplexitySearchProvider:
             if request.timeout_seconds is None
             else request.timeout_seconds
         )
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {
