@@ -8,7 +8,12 @@ from typing import Any
 import yaml
 
 from app.core.config import LlmConfig, load_config
-from app.core.secrets import load_env_settings
+from app.core.secrets import (
+    llm_api_keys_from_env,
+    load_env_settings,
+    resolve_provider_credentials,
+    secret_values,
+)
 from app.llm import LLMRequest, create_llm_provider, supported_llm_providers
 from app.llm.exceptions import LLMError
 from app.llm.router import ModelRef, RoutedLLMProvider, classify_provider_failure
@@ -94,7 +99,10 @@ def check_model_health(
 
     config = load_config(config_path or runtime_paths.config_path(root))
     env = load_env_settings(runtime_paths.env_path(root))
-    router = provider or build_routed_provider(config.llm, api_key=env.openai_api_key)
+    env = resolve_provider_credentials(env, config.providers)
+    router = provider or build_routed_provider(
+        config.llm, api_keys=llm_api_keys_from_env(env)
+    )
     try:
         response = router.generate(
             LLMRequest(
@@ -113,12 +121,8 @@ def check_model_health(
             "failure_class": None,
         }
     except LLMError as exc:
-        message = str(exc)[:200]
-        for secret in (
-            env.openai_api_key,
-            env.telegram_bot_token,
-            env.telegram_chat_id,
-        ):
+        message = str(exc)
+        for secret in secret_values(env):
             if secret:
                 message = message.replace(secret, "***")
         # Belt-and-suspenders for accidental key-shaped fragments in errors.
@@ -133,14 +137,15 @@ def check_model_health(
             "served": None,
             "failure_class": failure_class,
             "error_type": type(exc).__name__,
-            "error": message,
+            "error": message[:200],
         }
 
 
 def build_routed_provider(
     llm: LlmConfig,
     *,
-    api_key: str | None,
+    api_key: str | None = None,
+    api_keys: dict[str, str | None] | None = None,
     provider_factory: Any = create_llm_provider,
 ) -> RoutedLLMProvider:
     return RoutedLLMProvider(
@@ -149,6 +154,7 @@ def build_routed_provider(
             ModelRef(provider=item.provider, model=item.model) for item in llm.fallbacks
         ],
         api_key=api_key,
+        api_keys=api_keys or {},
         timeout_seconds=llm.timeout_seconds,
         temperature=llm.temperature,
         max_retries=llm.max_retries,

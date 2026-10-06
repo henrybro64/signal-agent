@@ -34,10 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup.add_argument("--non-interactive", action="store_true")
     setup.add_argument("--provider", default="fake")
-    setup.add_argument("--model", default="gpt-4o-mini")
+    setup.add_argument("--model", default="")
     setup.add_argument("--llm-enabled", action="store_true")
     setup.add_argument("--telegram-enabled", action="store_true")
     setup.add_argument("--openai-api-key", default="")
+    setup.add_argument("--anthropic-api-key", default="")
     setup.add_argument("--telegram-bot-token", default="")
     setup.add_argument("--telegram-chat-id", default="")
     setup.add_argument("--force", action="store_true")
@@ -101,6 +102,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_p = sub.add_parser("run", parents=[shared], help="Run one named task")
     run_p.add_argument("task_name", help="Task name (see `signal-agent tasks`)")
+
+    agent_run = sub.add_parser(
+        "agent-run",
+        parents=[shared],
+        help="Bounded coding analysis through the configured runtime",
+    )
+    agent_run.add_argument(
+        "goal", help="Goal and selected code context; no automatic file access"
+    )
+    agent_run.add_argument(
+        "--action",
+        choices=["analyze", "summarize", "plan", "propose_patch"],
+        default="analyze",
+    )
+    agent_run.add_argument("--timeout", type=float, default=30.0)
 
     sub.add_parser("tasks", parents=[shared], help="List available tasks")
 

@@ -1,0 +1,19 @@
+api_version: 1
+name: research
+version: "1.0.0"
+description: Optional web research through the configured search provider.
+tools:
+  - research_web
+tasks: []
+workflows: []
+required_permissions:
+  - read
+python_extras: []
+config_schema:
+  type: object
+  properties:
+    search.provider:
+      type: string
+compatibility:
+  min_api_version: 1
+  max_api_version: 1

@@ -16,6 +16,7 @@ from app.core.health import (
     summarize_run_health,
 )
 from app.core.logging import get_logger, log_event
+from app.core.secrets import resolve_provider_credentials, secret_values
 from app.notifiers import (
     TelegramNotifierError,
     build_default_test_message,
@@ -71,9 +72,7 @@ def send_telegram_test_message(text: str) -> None:
 
     env = load_env_settings()
     notifier = build_telegram_notifier(env=env)
-    message = text or build_default_test_message(
-        signal_agent_env=env.signal_agent_env
-    )
+    message = text or build_default_test_message(signal_agent_env=env.signal_agent_env)
     notifier.send_message(message)
     print("telegram test message sent")
 
@@ -134,16 +133,9 @@ def run_mcp_serve_command(
             configure_logging(stream=sys.stderr, force=True)
 
         app_config = load_config(config_path)
-        env = load_env_settings()
+        env = resolve_provider_credentials(load_env_settings(), app_config.providers)
         db_path = resolve_db_path()
-        secrets = tuple(
-            value
-            for value in (
-                env.openai_api_key,
-                env.telegram_bot_token,
-            )
-            if value
-        )
+        secrets = secret_values(env)
         context = ToolContext(
             config=app_config,
             env=env,

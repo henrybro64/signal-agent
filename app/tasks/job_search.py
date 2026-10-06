@@ -11,7 +11,6 @@ from typing import ClassVar
 from app.config import (
     load_config,
     load_env_settings,
-    validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
 from app.core import (
@@ -26,6 +25,7 @@ from app.core import (
     upsert_signal,
 )
 from app.core.db import SignalStatus
+from app.core.secrets import resolve_provider_credentials
 from app.notifiers import build_telegram_notifier
 from app.scorers import (
     JobRuleScore,
@@ -109,11 +109,10 @@ class JobSearchTask(BaseTask):
                 raise ValueError("Task 'job_search' is disabled in config")
 
             env = load_env_settings()
-            validate_llm_scoring_secrets(
-                llm_enabled=config.scoring.llm_enabled,
-                env=env,
-                provider=config.llm.provider,
-            )
+            env = resolve_provider_credentials(env, config.providers)
+            # No LLM credential preflight here: the router walks the fallback
+            # chain and the scorer fails open to rules, so a missing primary
+            # key must degrade this digest rather than abort it.
 
             profiles = list(config.tasks.job_search.profiles)
             if not profiles:

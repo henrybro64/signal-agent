@@ -333,3 +333,27 @@ OpenClaw-like productization. Preserve legacy CLI flags and deterministic tasks.
 4. Update README/config/examples when behavior changes; update this guide if the
    map or order changes.
 5. Open a PR that references the issue.
+
+## Vendor-neutral AI extension (#93)
+
+- `app/llm/` owns OpenAI/Anthropic/fake reasoning, capability gates, local schema
+  validation, usage normalization, and cross-vendor routing. Configuration and
+  model management use the factory's provider catalog, including
+  `default_model_for_provider()`: a provider switch without an explicit model
+  must resolve that vendor's own model id, never another vendor's.
+- Adapters must drop request options their vendor rejects rather than fail the
+  call. The Anthropic adapter sends no sampling parameters for this reason.
+- Credential preflights must consider the whole `llm.provider` + `llm.fallbacks`
+  chain. Scoring tasks must not abort on a missing key; the router fails over
+  and the scorer falls open to rules. `doctor` reports per-provider gaps instead.
+- `app/search/` owns generic research and Perplexity/fake adapters;
+  `app/tools/research_tools.py` exposes the optional `research` skill.
+- `app/runtimes/` owns bounded coding-analysis runtimes (builtin/Codex/fake),
+  separate from the local daemon in `app/runtime/`. `agent-run` consumes the
+  configured runtime and enforces the existing execution permission/audit policy.
+- Codex uses the installed CLI in an isolated read-only workspace with shell
+  tools disabled. Only supplied context is analyzed; repository paths and
+  mutations remain out of scope. Do not restore the placeholder HTTP endpoint.
+- `app/core/secrets.py` owns provider credential aliases and the shared secret
+  redaction inventory. New integrations must extend both together.
+- Operator and extension guidance: `docs/vendor-neutral-ai.md`.

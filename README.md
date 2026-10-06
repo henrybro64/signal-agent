@@ -728,14 +728,20 @@ env = load_env_settings()
 ```
 
 - Put local secrets in `.env`, not in `config.yaml` or committed files.
-- Set `OPENAI_API_KEY` in `.env` before enabling `scoring.llm_enabled: true`
-  with `llm.provider: openai` (default). The offline `llm.provider: fake`
-  path does not require an OpenAI key.
+- Set `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY` for `llm.provider: anthropic`)
+  in `.env` before enabling `scoring.llm_enabled: true`. The offline
+  `llm.provider: fake` path needs no cloud key. `signal-agent doctor` checks
+  the primary provider and every entry in `llm.fallbacks`.
+- A missing key does not abort `job_search`: the router tries the fallback
+  chain and the scorer falls open to rule-based scoring.
 - Set `llm.model` in `config.yaml` to choose which model the gateway uses for
   the optional LLM scorer. `scoring.llm_model` remains a supported alias and
   is kept in sync; setting both to different values raises `ConfigError`.
-- Optional `llm:` gateway settings also control provider (`openai` / `fake`),
-  timeout, and temperature.
+  Omitting `llm.model` selects the chosen vendor's own default model.
+- Optional `llm:` gateway settings also control provider (`openai` /
+  `anthropic` / `fake`), timeout, and temperature. `llm.temperature` applies to
+  OpenAI only; current Anthropic models reject non-default sampling values, so
+  the Anthropic adapter never sends them.
 - Optional agent extras: `pip install -e '.[langchain]'` adds `langchain-core`
   and `langgraph` for `--langchain-smoke` and the LangGraph path inside
   `job_research_agent`. `pip install -e '.[mcp]'` adds the MCP SDK for
@@ -879,3 +885,10 @@ python3 -m ruff format .
 
 The `Makefile` defaults to `python3`, which matches typical Ubuntu setups. To
 use a different interpreter, run `make test PYTHON=python3.12`.
+
+### Vendor-neutral AI adapters
+
+OpenAI and Anthropic share the existing LLM gateway and provider-specific fallback
+credentials. Optional Perplexity research uses the `research` skill; bounded coding
+analysis uses `signal-agent agent-run` with the built-in, Codex CLI, or fake runtime.
+See [configuration, permissions, limitations, and adapter development](docs/vendor-neutral-ai.md).

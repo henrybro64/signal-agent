@@ -16,7 +16,13 @@ from app.notifiers import build_telegram_notifier
 
 from .config import ConfigError, load_config
 from .logging import get_logger, log_event
-from .secrets import EnvSettings, SecretError, load_env_settings
+from .secrets import (
+    EnvSettings,
+    SecretError,
+    load_env_settings,
+    resolve_provider_credentials,
+    secret_values,
+)
 
 _MAX_ERROR_SUMMARY_LENGTH = 200
 _REDACTION_FALLBACK = "***"
@@ -71,16 +77,18 @@ def notify_task_failure(
     """Send a best-effort Telegram alert for one top-level task failure."""
 
     settings = _resolve_failure_alert_settings(config_path)
-    error_summary = summarize_error(error)
+    env = load_env_settings()
+    try:
+        env = resolve_provider_credentials(env, load_config(config_path).providers)
+    except (OSError, ValueError):
+        pass
+    error_summary = summarize_error(error, env=env)
 
     if not settings.enabled:
         return FailureAlertOutcome(
             status="skipped_disabled",
             error_summary=error_summary,
         )
-
-    env = load_env_settings()
-    error_summary = summarize_error(error, env=env)
 
     try:
         notifier = build_telegram_notifier(env=env)
@@ -307,17 +315,7 @@ def _redact_secret_values(text: str, env: EnvSettings) -> str:
 
 
 def _iter_secret_values(env: EnvSettings) -> tuple[str, ...]:
-    return tuple(
-        value
-        for value in (
-            env.openai_api_key,
-            env.telegram_bot_token,
-            env.telegram_chat_id,
-            env.linkedin_email_imap_username,
-            env.linkedin_email_imap_password,
-        )
-        if value
-    )
+    return secret_values(env)
 
 
 def _log_task_failure_alert(

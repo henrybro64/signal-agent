@@ -13,6 +13,7 @@ from app.config import (
     load_env_settings,
     validate_llm_scoring_secrets,
 )
+from app.core.secrets import resolve_provider_credentials
 
 from .base import BaseTask
 from .fetch import DB_PATH_ENV_VAR, DEFAULT_DB_PATH
@@ -35,10 +36,14 @@ class DummyTask(BaseTask):
         try:
             config = load_config(self.config_path)
             env = load_env_settings()
+            env = resolve_provider_credentials(env, config.providers)
             validate_llm_scoring_secrets(
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
                 provider=config.llm.provider,
+                fallback_providers=[
+                    item.provider for item in config.llm.fallbacks
+                ],
             )
             telegram_ready = has_telegram_credentials(env)
 

@@ -102,6 +102,7 @@ llm:
   provider: {provider}
   model: {model}
   timeout_seconds: 20
+  # OpenAI only; the Anthropic adapter never sends sampling parameters.
   temperature: 0.2
 
 # Optional agent tool registry defaults. Telegram stays off the allowlist.
@@ -147,6 +148,7 @@ sources:
 DEFAULT_ENV_TEMPLATE = """\
 # Local secrets for signal-agent. Do not commit this file.
 OPENAI_API_KEY={openai_api_key}
+ANTHROPIC_API_KEY={anthropic_api_key}
 TELEGRAM_BOT_TOKEN={telegram_bot_token}
 TELEGRAM_CHAT_ID={telegram_chat_id}
 SIGNAL_AGENT_ENV=development

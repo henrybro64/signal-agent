@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from app.config import load_config, load_env_settings, validate_llm_scoring_secrets
 from app.core import finish_signal_run, start_signal_run, upsert_signal
+from app.core.secrets import resolve_provider_credentials
 from app.sources import build_job_search_sources
 
 from .base import BaseTask
@@ -41,10 +42,14 @@ class FetchTask(BaseTask):
         try:
             config = load_config(self.config_path)
             env = load_env_settings()
+            env = resolve_provider_credentials(env, config.providers)
             validate_llm_scoring_secrets(
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
                 provider=config.llm.provider,
+                fallback_providers=[
+                    item.provider for item in config.llm.fallbacks
+                ],
             )
 
             sources = build_job_search_sources(
@@ -129,8 +134,7 @@ class FetchTask(BaseTask):
                     for source_name, message in failed_sources
                 )
                 raise ValueError(
-                    "All configured job-search sources failed: "
-                    f"{failure_summary}"
+                    f"All configured job-search sources failed: {failure_summary}"
                 )
 
             self.emit_log(
@@ -170,8 +174,7 @@ class FetchTask(BaseTask):
             ]
             if unsupported_sources:
                 lines.append(
-                    "skipped unsupported sources: "
-                    + ", ".join(unsupported_sources)
+                    "skipped unsupported sources: " + ", ".join(unsupported_sources)
                 )
             for source_name, message in failed_sources:
                 lines.append(f"source failed: {source_name}: {message}")

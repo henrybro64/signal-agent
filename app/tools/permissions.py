@@ -41,6 +41,8 @@ DEFAULT_CLASS_POLICY: dict[PermissionClass, PolicyAction] = {
 
 BUILTIN_TOOL_PERMISSIONS: dict[str, PermissionClass] = {
     "search_jobs": PermissionClass.READ,
+    "research_web": PermissionClass.READ,
+    "runtime_execute": PermissionClass.EXECUTE,
     "get_tw_stock_movers": PermissionClass.READ,
     "query_recent_runs": PermissionClass.READ,
     "send_telegram_message": PermissionClass.NOTIFY,

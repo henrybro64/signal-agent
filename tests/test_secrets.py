@@ -202,3 +202,43 @@ def test_validate_linkedin_email_source_secrets_requires_configuration() -> None
         match="LinkedIn email source requires LINKEDIN_EMAIL_SOURCE_PATH",
     ):
         validate_linkedin_email_source_secrets(env)
+
+
+def test_validate_llm_scoring_secrets_accepts_credentialed_fallback() -> None:
+    """A usable fallback is enough; the router walks the whole chain."""
+
+    env = EnvSettings(openai_api_key="sk-openai", signal_agent_env="test")
+
+    validate_llm_scoring_secrets(
+        llm_enabled=True,
+        env=env,
+        provider="anthropic",
+        fallback_providers=["openai"],
+    )
+
+
+def test_validate_llm_scoring_secrets_requires_one_key_in_chain() -> None:
+    env = EnvSettings(signal_agent_env="test")
+
+    with pytest.raises(
+        SecretError,
+        match="set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY",
+    ):
+        validate_llm_scoring_secrets(
+            llm_enabled=True,
+            env=env,
+            provider="openai",
+            fallback_providers=["anthropic"],
+        )
+
+
+def test_validate_llm_scoring_secrets_rejects_unknown_chain_provider() -> None:
+    env = EnvSettings(openai_api_key="sk-openai", signal_agent_env="test")
+
+    with pytest.raises(SecretError, match="Unsupported llm.provider 'ollama'"):
+        validate_llm_scoring_secrets(
+            llm_enabled=True,
+            env=env,
+            provider="openai",
+            fallback_providers=["ollama"],
+        )

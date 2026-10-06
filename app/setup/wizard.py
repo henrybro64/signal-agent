@@ -12,8 +12,10 @@ from typing import Any
 
 import yaml
 
+from app.core.config import load_config
 from app.core.db import init_db
-from app.llm import supported_llm_providers
+from app.core.secrets import secret_env_keys
+from app.llm import default_model_for_provider, supported_llm_providers
 from app.runtime import paths as runtime_paths
 from app.setup.browser import detect_browser
 from app.setup.templates import DEFAULT_CONFIG_TEMPLATE, DEFAULT_ENV_TEMPLATE
@@ -22,13 +24,20 @@ from app.setup.validate import ValidationReport, validate_local_setup
 PromptFn = Callable[[str, str], str]
 ConfirmFn = Callable[[str, bool], bool]
 
+# Canonical .env keys the wizard prompts for and writes, per LLM provider.
+_PROVIDER_ENV_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
 
 @dataclass(slots=True)
 class SetupOptions:
     provider: str = "fake"
-    model: str = "gpt-4o-mini"
+    model: str = ""
     llm_enabled: bool = False
     openai_api_key: str = ""
+    anthropic_api_key: str = ""
     telegram_enabled: bool = False
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -195,15 +204,15 @@ def show_config_redacted(
     if not env_map:
         lines.append("(missing)")
     else:
-        secret_keys = {
-            "OPENAI_API_KEY",
-            "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_CHAT_ID",
-            "LINKEDIN_EMAIL_IMAP_PASSWORD",
-        }
+        providers = None
+        try:
+            providers = load_config(cfg_path).providers
+        except (OSError, ValueError):
+            pass
+        secret_keys = secret_env_keys(providers)
         for key in sorted(env_map):
             value = env_map[key]
-            if key in secret_keys:
+            if key in secret_keys or providers is None:
                 shown = "***" if value else "(empty)"
             else:
                 shown = value or "(empty)"
@@ -219,26 +228,35 @@ def _interactive_collect(
     confirm: ConfirmFn,
 ) -> SetupOptions:
     providers = ", ".join(sorted(supported_llm_providers()))
-    provider = prompt(
-        f"LLM provider [{providers}]",
-        opts.provider,
-    ).strip().lower() or opts.provider
-    model = prompt("LLM model", opts.model).strip() or opts.model
+    provider = (
+        prompt(
+            f"LLM provider [{providers}]",
+            opts.provider,
+        )
+        .strip()
+        .lower()
+        or opts.provider
+    )
+    default_model = (
+        opts.model if provider == opts.provider else _default_model_for(provider)
+    )
+    model = prompt("LLM model", default_model).strip() or default_model
     llm_enabled = confirm(
         "Enable LLM scoring by default?",
         opts.llm_enabled,
     )
-    openai_key = opts.openai_api_key
-    if provider == "openai":
-        current = "(set)" if existing_env.get("OPENAI_API_KEY") else "(empty)"
+    credentials = {
+        "openai": opts.openai_api_key,
+        "anthropic": opts.anthropic_api_key,
+    }
+    env_name = _PROVIDER_ENV_KEYS.get(provider)
+    if env_name is not None:
+        current = "(set)" if credentials[provider] else "(empty)"
         entered = secret_prompt(
-            f"OPENAI_API_KEY {current} — enter to keep, or paste new value",
+            f"{env_name} {current} — enter to keep, or paste new value",
             "",
         )
-        if entered.strip():
-            openai_key = entered.strip()
-        else:
-            openai_key = existing_env.get("OPENAI_API_KEY", "")
+        credentials[provider] = entered.strip() or credentials[provider]
 
     telegram_enabled = confirm(
         "Enable Telegram notifications?",
@@ -268,7 +286,8 @@ def _interactive_collect(
         provider=provider,
         model=model,
         llm_enabled=llm_enabled,
-        openai_api_key=openai_key,
+        openai_api_key=credentials["openai"],
+        anthropic_api_key=credentials["anthropic"],
         telegram_enabled=telegram_enabled,
         telegram_bot_token=bot,
         telegram_chat_id=chat,
@@ -293,6 +312,9 @@ def _merge_options(
         model=model,
         llm_enabled=llm_enabled,
         openai_api_key=opts.openai_api_key or existing_env.get("OPENAI_API_KEY", ""),
+        anthropic_api_key=(
+            opts.anthropic_api_key or existing_env.get("ANTHROPIC_API_KEY", "")
+        ),
         telegram_enabled=telegram_enabled,
         telegram_bot_token=(
             opts.telegram_bot_token or existing_env.get("TELEGRAM_BOT_TOKEN", "")
@@ -313,10 +335,10 @@ def _resolve_merge_flags(
 ) -> tuple[str, str, bool, bool]:
     if opts.non_interactive:
         provider = opts.provider or str(llm.get("provider") or "fake")
-        model = opts.model or str(llm.get("model") or "gpt-4o-mini")
+        model = opts.model or _model_for_saved_provider(provider, llm)
         return provider, model, opts.llm_enabled, opts.telegram_enabled
     provider = str(llm.get("provider") or opts.provider or "fake")
-    model = str(llm.get("model") or opts.model or "gpt-4o-mini")
+    model = str(llm.get("model") or opts.model or _default_model_for(provider))
     llm_enabled = bool(scoring.get("llm_enabled", opts.llm_enabled))
     telegram_enabled = bool(telegram.get("enabled", opts.telegram_enabled))
     return provider, model, llm_enabled, telegram_enabled
@@ -326,13 +348,33 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _validate_provider_model(provider: str, model: str) -> None:
+def _model_for_saved_provider(provider: str, llm: dict[str, Any]) -> str:
+    """Reuse the saved model only while the provider is unchanged."""
+
+    saved = str(llm.get("model") or "")
+    if saved and provider == llm.get("provider"):
+        return saved
+    return _default_model_for(provider)
+
+
+def _default_model_for(provider: str) -> str:
+    """Provider default model, reporting bad input as a setup error."""
+
+    _assert_supported_provider(provider)
+    return default_model_for_provider(provider)
+
+
+def _assert_supported_provider(provider: str) -> None:
     providers = supported_llm_providers()
     if provider not in providers:
         raise ValueError(
             f"Unsupported provider {provider!r}; "
             f"supported: {', '.join(sorted(providers))}"
         )
+
+
+def _validate_provider_model(provider: str, model: str) -> None:
+    _assert_supported_provider(provider)
     if not model.strip():
         raise ValueError("model must be a non-empty string")
 
@@ -377,6 +419,7 @@ def _update_existing_config(path: Path, opts: SetupOptions) -> None:
 def _write_env(path: Path, opts: SetupOptions) -> None:
     text = DEFAULT_ENV_TEMPLATE.format(
         openai_api_key=opts.openai_api_key,
+        anthropic_api_key=opts.anthropic_api_key,
         telegram_bot_token=opts.telegram_bot_token,
         telegram_chat_id=opts.telegram_chat_id,
     )
@@ -398,6 +441,7 @@ def _update_existing_env(
     current = _load_env_file(path)
     updates = {
         "OPENAI_API_KEY": opts.openai_api_key,
+        "ANTHROPIC_API_KEY": opts.anthropic_api_key,
         "TELEGRAM_BOT_TOKEN": opts.telegram_bot_token,
         "TELEGRAM_CHAT_ID": opts.telegram_chat_id,
         "SIGNAL_AGENT_ENV": current.get("SIGNAL_AGENT_ENV") or "development",
@@ -492,7 +536,8 @@ def _default_confirm(message: str, default: bool) -> bool:
 
 
 _SECRET_LINE_RE = re.compile(
-    r"(OPENAI_API_KEY|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|"
+    r"(OPENAI_API_KEY|ANTHROPIC_API_KEY|PERPLEXITY_API_KEY|CODEX_API_KEY|"
+    r"TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|"
     r"LINKEDIN_EMAIL_IMAP_PASSWORD)=([^\s]+)"
 )
 

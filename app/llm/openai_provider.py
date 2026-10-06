@@ -11,6 +11,8 @@ import requests
 
 from app.core.logging import get_logger, log_event
 
+from .capabilities import OPENAI_CAPABILITIES, ProviderCapabilities
+from .capability_gate import assert_request_supported
 from .exceptions import (
     LLMAuthError,
     LLMNetworkError,
@@ -19,7 +21,8 @@ from .exceptions import (
     LLMResponseError,
     LLMTimeoutError,
 )
-from .models import LLMRequest, LLMResponse, StructuredOutputSpec
+from .models import LLMRequest, LLMResponse, LLMUsage, StructuredOutputSpec
+from .structured import validate_output
 
 DEFAULT_OPENAI_RESPONSES_URL: Final[str] = "https://api.openai.com/v1/responses"
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
@@ -46,7 +49,7 @@ class OpenAIProvider:
         session: requests.Session | None = None,
     ) -> None:
         if not api_key.strip():
-            raise LLMProviderError("OpenAI API key must be a non-empty string")
+            raise LLMAuthError("OpenAI API key must be a non-empty string")
         self._api_key = api_key
         self.default_model = default_model
         self.default_timeout_seconds = default_timeout_seconds
@@ -54,7 +57,16 @@ class OpenAIProvider:
         self.api_url = api_url
         self.session = session or requests.Session()
 
+    @staticmethod
+    def capabilities() -> ProviderCapabilities:
+        return OPENAI_CAPABILITIES
+
     def generate(self, request: LLMRequest) -> LLMResponse:
+        assert_request_supported(
+            request,
+            self.capabilities(),
+            provider_name=self.name,
+        )
         model = request.model or self.default_model
         temperature = (
             self.default_temperature
@@ -93,12 +105,12 @@ class OpenAIProvider:
                 json=payload,
                 timeout=timeout,
             )
-        except requests.Timeout as exc:
+        except requests.Timeout:
             _log_failure(model=model, status="timeout")
-            raise LLMTimeoutError("OpenAI request timed out") from exc
-        except requests.RequestException as exc:
+            raise LLMTimeoutError("OpenAI request timed out") from None
+        except requests.RequestException:
             _log_failure(model=model, status="network_error")
-            raise LLMNetworkError("OpenAI network request failed") from exc
+            raise LLMNetworkError("OpenAI network request failed") from None
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         if response.status_code >= 400:
@@ -110,8 +122,7 @@ class OpenAIProvider:
             )
             if response.status_code in {401, 403}:
                 raise LLMAuthError(
-                    f"OpenAI authentication failed with status "
-                    f"{response.status_code}"
+                    f"OpenAI authentication failed with status {response.status_code}"
                 )
             if response.status_code == 429:
                 raise LLMRateLimitError("OpenAI rate limit exceeded")
@@ -126,13 +137,13 @@ class OpenAIProvider:
 
         try:
             response_payload = response.json()
-        except ValueError as exc:
+        except ValueError:
             _log_failure(
                 model=model,
                 status="invalid_json",
                 duration_ms=duration_ms,
             )
-            raise LLMResponseError("OpenAI response was not valid JSON") from exc
+            raise LLMResponseError("OpenAI response was not valid JSON") from None
 
         if not isinstance(response_payload, dict):
             raise LLMResponseError("OpenAI response payload was not an object")
@@ -146,6 +157,9 @@ class OpenAIProvider:
                 duration_ms=duration_ms,
             )
             raise
+
+        if request.structured_output is not None:
+            validate_output(text, request.structured_output)
 
         log_event(
             _LOGGER,
@@ -162,6 +176,7 @@ class OpenAIProvider:
             text=text,
             model=model,
             provider=self.name,
+            usage=_extract_usage(response_payload),
             raw=response_payload,
         )
 
@@ -197,18 +212,14 @@ def _resolve_prompt_parts(
                 instructions_parts.append(content)
                 continue
             if role not in _SUPPORTED_INPUT_ROLES:
-                supported = ", ".join(
-                    ["system", *sorted(_SUPPORTED_INPUT_ROLES)]
-                )
+                supported = ", ".join(["system", *sorted(_SUPPORTED_INPUT_ROLES)])
                 raise LLMProviderError(
                     f"Unsupported chat message role {message.role!r}; "
                     f"supported: {supported}"
                 )
             input_items.append({"role": role, "content": content})
         if not any(item["role"] == "user" for item in input_items):
-            raise LLMProviderError(
-                "LLM request messages must include user content"
-            )
+            raise LLMProviderError("LLM request messages must include user content")
         instructions = "\n\n".join(instructions_parts)
         if len(input_items) == 1 and input_items[0]["role"] == "user":
             return instructions, input_items[0]["content"]
@@ -247,6 +258,36 @@ def _extract_output_text(payload: dict[str, object]) -> str:
                 return json.dumps(parsed, ensure_ascii=False)
 
     raise LLMResponseError("OpenAI response did not include parsable text")
+
+
+def _extract_usage(payload: dict[str, object]) -> LLMUsage | None:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    if any(
+        value is not None and (type(value) is not int or value < 0)
+        for value in (
+            usage.get(key)
+            for key in (
+                "input_tokens",
+                "output_tokens",
+                "total_tokens",
+                "prompt_tokens",
+                "completion_tokens",
+            )
+        )
+    ):
+        raise LLMResponseError("Provider returned invalid usage metadata")
+    input_tokens = usage.get("input_tokens", usage.get("prompt_tokens"))
+    output_tokens = usage.get("output_tokens", usage.get("completion_tokens"))
+    total_tokens = usage.get("total_tokens")
+    if input_tokens is None and output_tokens is None and total_tokens is None:
+        return None
+    return LLMUsage(
+        input_tokens=int(input_tokens) if input_tokens is not None else None,
+        output_tokens=int(output_tokens) if output_tokens is not None else None,
+        total_tokens=int(total_tokens) if total_tokens is not None else None,
+    )
 
 
 def _log_failure(

@@ -831,7 +831,7 @@ def test_app_config_from_dict_rejects_invalid_llm_provider() -> None:
                     "freshness_weight": 0.5,
                     "priority_weight": 0.5,
                 },
-                "llm": {"provider": "anthropic"},
+                "llm": {"provider": "unknown"},
             }
         )
 
@@ -947,3 +947,34 @@ def test_string_llm_fallbacks_validate_provider() -> None:
     )
     assert config.llm.fallbacks[0].provider == "fake"
     assert config.llm.fallbacks[0].model == "backup"
+
+
+def test_app_config_defaults_model_to_selected_vendor() -> None:
+    """A provider-only llm block must not inherit the OpenAI model id."""
+
+    config = AppConfig.from_dict(
+        {
+            "agent": {"timezone": "UTC", "digest_time": "09:00"},
+            "tasks": {
+                "job_search": {
+                    "enabled": True,
+                    "sources": ["job104"],
+                    "keywords": ["python"],
+                },
+                "tw_stock_movers": {
+                    "enabled": True,
+                    "top_n": 5,
+                    "timezone": "UTC",
+                },
+            },
+            "notifiers": {"telegram": {"enabled": False}},
+            "scoring": {
+                "freshness_weight": 0.5,
+                "priority_weight": 0.5,
+            },
+            "llm": {"provider": "anthropic"},
+        }
+    )
+
+    assert config.llm.model == "claude-sonnet-4-5"
+    assert config.scoring.llm_model == "claude-sonnet-4-5"
