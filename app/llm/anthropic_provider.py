@@ -29,13 +29,19 @@ from .structured import validate_output
 
 DEFAULT_ANTHROPIC_MESSAGES_URL: Final[str] = "https://api.anthropic.com/v1/messages"
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
-_DEFAULT_TEMPERATURE: Final[float] = 0.2
 _ANTHROPIC_VERSION: Final[str] = "2023-06-01"
 _LOGGER = get_logger("llm.anthropic")
 
 
 class AnthropicProvider:
-    """Call Anthropic's Messages API without exposing SDK types."""
+    """Call Anthropic's Messages API without exposing SDK types.
+
+    Sampling controls (``temperature``/``top_p``/``top_k``) are intentionally
+    never sent. Claude Opus 4.5 and later reject non-default values, so
+    forwarding the gateway default would make those models unusable. The
+    adapter therefore accepts no temperature and ignores ``request.temperature``
+    instead of failing requests.
+    """
 
     name = "anthropic"
 
@@ -45,7 +51,6 @@ class AnthropicProvider:
         api_key: str,
         default_model: str = "claude-sonnet-4-5",
         default_timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
-        default_temperature: float = _DEFAULT_TEMPERATURE,
         api_url: str = DEFAULT_ANTHROPIC_MESSAGES_URL,
         session: requests.Session | None = None,
     ) -> None:
@@ -54,7 +59,6 @@ class AnthropicProvider:
         self._api_key = api_key
         self.default_model = default_model
         self.default_timeout_seconds = default_timeout_seconds
-        self.default_temperature = default_temperature
         self.api_url = api_url
         self.session = session or requests.Session()
 
@@ -69,11 +73,6 @@ class AnthropicProvider:
             provider_name=self.name,
         )
         model = request.model or self.default_model
-        temperature = (
-            self.default_temperature
-            if request.temperature is None
-            else request.temperature
-        )
         timeout = (
             self.default_timeout_seconds
             if request.timeout_seconds is None
@@ -94,7 +93,6 @@ class AnthropicProvider:
             "model": model,
             "messages": messages,
             "max_tokens": 1024,
-            "temperature": temperature,
         }
         if system:
             payload["system"] = system

@@ -300,22 +300,43 @@ def test_job_search_task_rejects_disabled_config(tmp_path: Path) -> None:
         JobSearchTask(str(config_path)).run()
 
 
-def test_job_search_task_requires_openai_key_when_llm_enabled(
+def test_job_search_task_falls_open_to_rules_without_primary_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """A missing LLM key must degrade the digest to rules, not abort the task."""
+
     config_path = _write_config(
         tmp_path,
         source_names=["static_jobs"],
         llm_enabled=True,
+        llm_min_rule_score=0,
     )
+    db_path = tmp_path / "signals.sqlite3"
+    notifier = FakeTelegramNotifier()
+    monkeypatch.setattr(job_search_task_module, "DEFAULT_DB_PATH", db_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-456")
+    monkeypatch.setitem(
+        job_search_task_module.build_job_search_sources_for_profile.__globals__[
+            "SOURCE_FACTORIES"
+        ],
+        "static_jobs",
+        lambda _config: StaticJobSource(_sample_jobs()[:1]),
+    )
+    monkeypatch.setattr(
+        job_search_task_module,
+        "build_telegram_notifier",
+        lambda *, env: notifier,
+    )
 
-    with pytest.raises(
-        SecretError,
-        match="OPENAI_API_KEY is required when scoring.llm_enabled is true",
-    ):
-        JobSearchTask(str(config_path)).run()
+    JobSearchTask(str(config_path)).run()
+
+    captured = capsys.readouterr()
+    assert '"scoring_method": "rule_fallback"' in captured.out
+    assert len(notifier.messages) == 1
 
 
 def test_job_search_task_allows_fake_llm_provider_without_openai_key(

@@ -16,7 +16,13 @@ from .exceptions import LLMProviderError
 from .fake_provider import FakeLLMProvider
 from .openai_provider import DEFAULT_OPENAI_RESPONSES_URL, OpenAIProvider
 
-_SUPPORTED_PROVIDERS: Final[frozenset[str]] = frozenset({"openai", "anthropic", "fake"})
+_DEFAULT_MODELS: Final[Mapping[str, str]] = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-5",
+    "fake": "gpt-4o-mini",
+}
+# Derived so a new provider cannot be supported without a default model.
+_SUPPORTED_PROVIDERS: Final[frozenset[str]] = frozenset(_DEFAULT_MODELS)
 _DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
 _DEFAULT_TEMPERATURE: Final[float] = 0.2
 
@@ -25,7 +31,7 @@ def create_llm_provider(
     *,
     provider: str = "openai",
     api_key: str | None = None,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     temperature: float = _DEFAULT_TEMPERATURE,
     session: requests.Session | None = None,
@@ -52,16 +58,18 @@ def create_llm_provider(
             f"Unknown LLM provider {provider!r}; supported: {supported}"
         )
 
+    model = model if model is not None else default_model_for_provider(name)
     resolved_key = _resolve_api_key(name, api_key=api_key, api_keys=api_keys)
 
     if name == "fake":
         return FakeLLMProvider(default_model=model)
     if name == "anthropic":
+        # Anthropic rejects non-default sampling controls on current models,
+        # so the gateway temperature is deliberately not forwarded.
         return AnthropicProvider(
             api_key=resolved_key or "",
             default_model=model,
             default_timeout_seconds=timeout_seconds,
-            default_temperature=temperature,
             api_url=api_url or DEFAULT_ANTHROPIC_MESSAGES_URL,
             session=session,
         )
@@ -73,6 +81,24 @@ def create_llm_provider(
         api_url=api_url or DEFAULT_OPENAI_RESPONSES_URL,
         session=session,
     )
+
+
+def default_model_for_provider(provider: str) -> str:
+    """Return the gateway default model for an implemented provider.
+
+    Callers that switch vendors without naming a model must land on that
+    vendor's own model id; a shared default would send an OpenAI model id to
+    Anthropic and fail every request.
+    """
+
+    name = provider.strip().lower()
+    try:
+        return _DEFAULT_MODELS[name]
+    except KeyError:
+        supported = ", ".join(sorted(_SUPPORTED_PROVIDERS))
+        raise LLMProviderError(
+            f"Unknown LLM provider {provider!r}; supported: {supported}"
+        ) from None
 
 
 def supported_llm_providers() -> frozenset[str]:

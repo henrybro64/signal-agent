@@ -124,6 +124,7 @@ def _cmd_setup(args: Any) -> int:
         model=args.model,
         llm_enabled=bool(args.llm_enabled),
         openai_api_key=args.openai_api_key,
+        anthropic_api_key=args.anthropic_api_key,
         telegram_enabled=bool(args.telegram_enabled),
         telegram_bot_token=args.telegram_bot_token,
         telegram_chat_id=args.telegram_chat_id,

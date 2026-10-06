@@ -34,10 +34,23 @@ providers:
     api_key_env: OPENAI_API_KEY
 ```
 
-Put the keys in `.env` or the process environment. Custom environment names are
-resolved explicitly: a missing alias does not fall back to another key. Every
-fallback gets its own vendor credential. Configuration output, logs, failure
-alerts, and tool/chat traces use a shared redaction inventory, including aliases.
+Put the keys in `.env` or the process environment. `signal-agent setup` collects
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the selected provider
+(`--anthropic-api-key` non-interactively), and omitting a model selects that
+vendor's own default instead of an identifier from another vendor. Custom
+environment names are resolved explicitly: a missing alias does not fall back to
+another key. Every fallback gets its own vendor credential, and `doctor`
+validates the primary and each fallback so a chain cannot pass while being unable
+to fail over. Configuration output, logs, failure alerts, and tool/chat traces
+use a shared redaction inventory, including aliases.
+
+`scoring.llm_enabled` tasks do not require the primary credential up front: the
+router walks the fallback chain and job scoring falls open to rules, so a single
+missing key degrades a digest instead of aborting it.
+
+`llm.temperature` is applied by the OpenAI adapter. Claude Opus 4.5 and later
+reject non-default sampling values, so the Anthropic adapter sends no
+`temperature`, `top_p`, or `top_k` and ignores `LLMRequest.temperature`.
 
 The adapters declare their implemented capabilities. Text and structured JSON
 are supported; native tool calls, streaming, and vision are rejected before HTTP

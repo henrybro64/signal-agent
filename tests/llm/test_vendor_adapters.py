@@ -12,7 +12,12 @@ from app.core.secrets import (
     llm_api_keys_from_env,
     resolve_provider_credentials,
 )
-from app.llm import FakeLLMProvider, LLMRequest, StructuredOutputSpec
+from app.llm import (
+    FakeLLMProvider,
+    LLMRequest,
+    StructuredOutputSpec,
+    default_model_for_provider,
+)
 from app.llm.anthropic_provider import AnthropicProvider
 from app.llm.exceptions import (
     LLMAuthError,
@@ -246,3 +251,35 @@ def test_router_total_timeout_prevents_late_fallback(monkeypatch):
     with pytest.raises(LLMTimeoutError, match="budget"):
         router.generate(LLMRequest(input="test", timeout_seconds=10))
     assert calls == ["openai"]
+
+
+def test_anthropic_omits_sampling_parameters(monkeypatch, session):
+    """Claude Opus 4.5+ reject non-default sampling, so never send any."""
+
+    monkeypatch.setattr("app.llm.anthropic_provider.requests.Session", lambda: session)
+    router = build_routed_provider(
+        LlmConfig(provider="anthropic", model="claude-opus-4-5"),
+        api_keys={"anthropic": "a"},
+    )
+
+    router.generate(LLMRequest(input="hello", temperature=0.7))
+
+    body = session.post.call_args.kwargs["json"]
+    assert "temperature" not in body
+    assert "top_p" not in body
+    assert "top_k" not in body
+
+
+def test_provider_switch_without_model_uses_vendor_default(session):
+    provider = create_llm_provider(
+        provider="anthropic",
+        api_keys={"anthropic": "a"},
+        session=session,
+    )
+
+    provider.generate(LLMRequest(input="hello"))
+
+    assert session.post.call_args.kwargs["json"]["model"] == "claude-sonnet-4-5"
+    assert default_model_for_provider("openai") == "gpt-4o-mini"
+    with pytest.raises(LLMProviderError, match="Unknown LLM provider"):
+        default_model_for_provider("ollama")

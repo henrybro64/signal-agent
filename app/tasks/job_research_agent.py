@@ -18,7 +18,7 @@ from app.core.secrets import (
     resolve_provider_credentials,
     secret_values,
 )
-from app.llm import FakeLLMProvider
+from app.llm import FakeLLMProvider, default_model_for_provider
 from app.llm.models_cli import build_routed_provider
 from app.tools import ToolContext, build_tool_registry
 from app.tools.permissions import policy_from_app_config
@@ -151,7 +151,13 @@ class JobResearchAgentTask(BaseTask):
             llm_cfg = replace(
                 config.llm,
                 provider=task_cfg.llm_provider or config.llm.provider,
-                model=task_cfg.llm_model or config.llm.model,
+                model=task_cfg.llm_model
+                or (
+                    default_model_for_provider(task_cfg.llm_provider)
+                    if task_cfg.llm_provider
+                    and task_cfg.llm_provider != config.llm.provider
+                    else config.llm.model
+                ),
             )
         if config.scoring.llm_enabled:
             provider = build_routed_provider(

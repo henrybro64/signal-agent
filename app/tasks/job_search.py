@@ -11,7 +11,6 @@ from typing import ClassVar
 from app.config import (
     load_config,
     load_env_settings,
-    validate_llm_scoring_secrets,
     validate_telegram_notifier_secrets,
 )
 from app.core import (
@@ -111,11 +110,9 @@ class JobSearchTask(BaseTask):
 
             env = load_env_settings()
             env = resolve_provider_credentials(env, config.providers)
-            validate_llm_scoring_secrets(
-                llm_enabled=config.scoring.llm_enabled,
-                env=env,
-                provider=config.llm.provider,
-            )
+            # No LLM credential preflight here: the router walks the fallback
+            # chain and the scorer fails open to rules, so a missing primary
+            # key must degrade this digest rather than abort it.
 
             profiles = list(config.tasks.job_search.profiles)
             if not profiles:

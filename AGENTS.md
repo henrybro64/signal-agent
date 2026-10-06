@@ -338,7 +338,14 @@ OpenClaw-like productization. Preserve legacy CLI flags and deterministic tasks.
 
 - `app/llm/` owns OpenAI/Anthropic/fake reasoning, capability gates, local schema
   validation, usage normalization, and cross-vendor routing. Configuration and
-  model management use the factory's provider catalog.
+  model management use the factory's provider catalog, including
+  `default_model_for_provider()`: a provider switch without an explicit model
+  must resolve that vendor's own model id, never another vendor's.
+- Adapters must drop request options their vendor rejects rather than fail the
+  call. The Anthropic adapter sends no sampling parameters for this reason.
+- Credential preflights must consider the whole `llm.provider` + `llm.fallbacks`
+  chain. Scoring tasks must not abort on a missing key; the router fails over
+  and the scorer falls open to rules. `doctor` reports per-provider gaps instead.
 - `app/search/` owns generic research and Perplexity/fake adapters;
   `app/tools/research_tools.py` exposes the optional `research` skill.
 - `app/runtimes/` owns bounded coding-analysis runtimes (builtin/Codex/fake),

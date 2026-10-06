@@ -1239,6 +1239,8 @@ def _parse_llm_config(
 ) -> LlmConfig:
     """Parse optional ``llm:`` gateway defaults; omit section for defaults."""
 
+    from app.llm.factory import default_model_for_provider
+
     if not data:
         return LlmConfig()
 
@@ -1364,7 +1366,7 @@ def _parse_llm_config(
         model=_optional_str(
             data,
             "model",
-            default="gpt-4o-mini",
+            default=default_model_for_provider(provider),
             parent_path=_LLM_CONFIG_PATH,
             source_name=source_name,
         ),
@@ -1403,7 +1405,7 @@ def _reconcile_llm_model_settings(
         return replace(scoring, llm_model=llm.model), llm
     if scoring_model_explicit and not llm_model_explicit:
         return scoring, replace(llm, model=scoring.llm_model)
-    return scoring, llm
+    return replace(scoring, llm_model=llm.model), llm
 
 
 def _parse_stock_watchlist_task_config(

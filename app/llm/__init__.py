@@ -17,7 +17,11 @@ from .exceptions import (
     LLMTimeoutError,
     UnsupportedCapabilityError,
 )
-from .factory import create_llm_provider, supported_llm_providers
+from .factory import (
+    create_llm_provider,
+    default_model_for_provider,
+    supported_llm_providers,
+)
 from .fake_provider import FakeLLMProvider
 from .models import (
     LLMMessage,
@@ -55,5 +59,6 @@ __all__ = [
     "StructuredOutputSpec",
     "classify_provider_failure",
     "create_llm_provider",
+    "default_model_for_provider",
     "supported_llm_providers",
 ]

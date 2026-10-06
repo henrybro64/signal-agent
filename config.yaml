@@ -121,6 +121,8 @@ llm:
   provider: openai
   model: gpt-4o-mini
   timeout_seconds: 20
+  # Applied by the OpenAI adapter; current Anthropic models reject non-default
+  # sampling values, so the Anthropic adapter never sends temperature.
   temperature: 0.2
   max_retries: 1
   # Optional ordered fallbacks used by RoutedLLMProvider (#86).

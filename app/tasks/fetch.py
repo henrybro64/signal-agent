@@ -47,6 +47,9 @@ class FetchTask(BaseTask):
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
                 provider=config.llm.provider,
+                fallback_providers=[
+                    item.provider for item in config.llm.fallbacks
+                ],
             )
 
             sources = build_job_search_sources(

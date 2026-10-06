@@ -41,6 +41,9 @@ class DummyTask(BaseTask):
                 llm_enabled=config.scoring.llm_enabled,
                 env=env,
                 provider=config.llm.provider,
+                fallback_providers=[
+                    item.provider for item in config.llm.fallbacks
+                ],
             )
             telegram_ready = has_telegram_credentials(env)
 

@@ -5,10 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.core.config import load_config
+from app.core.config import AppConfig, load_config
 from app.core.db import init_db, read_schema_version
 from app.core.migrations import latest_migration_version
 from app.core.secrets import (
+    EnvSettings,
     has_telegram_credentials,
     llm_api_keys_from_env,
     load_env_settings,
@@ -71,7 +72,7 @@ def validate_local_setup(
     _validate_provider_model(report, config)
     env = load_env_settings(dotenv_path)
     env = resolve_provider_credentials(env, config.providers)
-    _validate_openai_credentials(report, config, env)
+    _validate_llm_credentials(report, config, env)
     _validate_telegram(report, config, env)
     _validate_database(report, root)
 
@@ -145,24 +146,43 @@ def _validate_provider_model(report: ValidationReport, config: object) -> None:
         report.add("invalid_model", "llm.model must be a non-empty string")
 
 
-def _validate_openai_credentials(
+def _validate_llm_credentials(
     report: ValidationReport,
-    config: object,
-    env: object,
+    config: AppConfig,
+    env: EnvSettings,
 ) -> None:
-    provider = str(getattr(getattr(config, "llm", None), "provider", "") or "")
-    if provider == "fake":
-        return
-    if llm_api_keys_from_env(env).get(provider):  # type: ignore[arg-type]
-        return
-    # Chat always constructs the configured provider, so a missing OpenAI key
-    # is a readiness failure even when scoring.llm_enabled is false.
-    report.add(
-        f"{provider}_key_missing",
-        f"{getattr(config.providers, provider).api_key_env} required "
-        f"when llm.provider={provider} "
-        "(needed for chat and optional LLM scoring)",
-    )
+    """Require a credential for the primary and every configured fallback.
+
+    A cross-vendor fallback can only serve traffic with its own key, so
+    checking the primary alone would pass a chain that cannot fail over.
+    """
+
+    roles: dict[str, str] = {}
+    for provider in (
+        config.llm.provider,
+        *(item.provider for item in config.llm.fallbacks),
+    ):
+        if provider == "fake":
+            continue
+        roles.setdefault(
+            provider,
+            "primary" if provider == config.llm.provider else "fallback",
+        )
+    keys = llm_api_keys_from_env(env)
+    for provider, role in sorted(roles.items()):
+        if keys.get(provider):
+            continue
+        report.add(
+            f"{provider}_key_missing",
+            f"{_provider_key_env(config, provider)} required for "
+            f"{role} llm provider {provider!r} "
+            "(needed for chat and optional LLM scoring)",
+        )
+
+
+def _provider_key_env(config: AppConfig, provider: str) -> str:
+    credential = getattr(config.providers, provider, None)
+    return getattr(credential, "api_key_env", "") or f"{provider.upper()}_API_KEY"
 
 
 def _validate_telegram(

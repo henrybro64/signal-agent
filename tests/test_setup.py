@@ -115,7 +115,12 @@ def test_setup_force_replaces_malformed_yaml(tmp_path: Path) -> None:
     assert payload["llm"]["provider"] == "fake"
 
 
-def test_doctor_fails_when_openai_key_missing(tmp_path: Path) -> None:
+def test_doctor_fails_when_openai_key_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # load_dotenv() leaks keys into os.environ, so clear before asserting.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     run_setup(
         root=tmp_path,
         options=SetupOptions(
@@ -210,3 +215,58 @@ def test_detect_browser_override(
     detection = detect_browser()
     assert detection.ready
     assert detection.executable == str(fake)
+
+
+def test_setup_collects_anthropic_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selecting anthropic must persist its key and a Claude default model."""
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    result = run_setup(
+        root=tmp_path,
+        options=SetupOptions(
+            provider="anthropic",
+            anthropic_api_key="sk-ant-secret",
+            llm_enabled=True,
+            non_interactive=True,
+            force=True,
+        ),
+    )
+
+    payload = yaml.safe_load(result.config_path.read_text(encoding="utf-8"))
+    assert payload["llm"]["provider"] == "anthropic"
+    assert payload["llm"]["model"] == "claude-sonnet-4-5"
+    assert "ANTHROPIC_API_KEY=sk-ant-secret" in result.env_path.read_text(
+        encoding="utf-8"
+    )
+    assert result.validation.ok
+
+
+def test_doctor_fails_when_fallback_provider_key_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    run_setup(
+        root=tmp_path,
+        options=SetupOptions(
+            provider="openai",
+            openai_api_key="sk-primary",
+            non_interactive=True,
+            force=True,
+        ),
+    )
+    cfg_path = tmp_path / "config.yaml"
+    payload = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    payload["llm"]["fallbacks"] = ["anthropic/claude-sonnet-4-5"]
+    cfg_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    report = validate_local_setup(root=tmp_path)
+
+    assert not report.ok
+    assert any(
+        issue.code == "anthropic_key_missing" and "fallback" in issue.message
+        for issue in report.issues
+    )

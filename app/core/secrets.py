@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -160,6 +161,13 @@ def llm_api_keys_from_env(env: EnvSettings) -> dict[str, str | None]:
     }
 
 
+# Canonical credential env var per LLM provider, for operator-facing errors.
+LLM_PROVIDER_ENV_KEYS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
 def has_telegram_credentials(env: EnvSettings) -> bool:
     """Return whether both Telegram secrets are configured."""
 
@@ -184,31 +192,42 @@ def validate_llm_scoring_secrets(
     llm_enabled: bool,
     env: EnvSettings,
     provider: str | None = None,
+    fallback_providers: Sequence[str] = (),
 ) -> None:
-    """Ensure provider credentials exist before enabling LLM-backed scoring.
+    """Ensure the configured provider chain has at least one usable credential.
 
-    The offline ``fake`` gateway provider does not need cloud API keys.
+    The offline ``fake`` gateway provider does not need cloud API keys. A
+    credentialed fallback also satisfies this check: the router walks the whole
+    chain, so demanding the primary key would reject work a fallback can serve.
     """
 
     if not llm_enabled:
         return
-    name = (provider or "openai").strip().lower()
-    if name == "fake":
+    chain = [
+        name.strip().lower()
+        for name in ((provider or "openai"), *fallback_providers)
+        if name and name.strip()
+    ]
+    keys = llm_api_keys_from_env(env)
+    unknown = [name for name in chain if name not in keys]
+    if unknown:
+        raise SecretError(
+            f"Unsupported llm.provider {unknown[0]!r} for LLM scoring credentials"
+        )
+    if any(name == "fake" or keys.get(name) for name in chain):
         return
-    if name == "openai" and not has_openai_api_key(env):
+    ordered = list(dict.fromkeys(chain))
+    if len(ordered) == 1:
         raise SecretError(
-            "OPENAI_API_KEY is required when scoring.llm_enabled is true "
-            "and llm.provider is 'openai'"
+            f"{LLM_PROVIDER_ENV_KEYS[ordered[0]]} is required when "
+            f"scoring.llm_enabled is true and llm.provider is {ordered[0]!r}"
         )
-    if name == "anthropic" and not has_anthropic_api_key(env):
-        raise SecretError(
-            "ANTHROPIC_API_KEY is required when scoring.llm_enabled is true "
-            "and llm.provider is 'anthropic'"
-        )
-    if name not in {"openai", "anthropic", "fake"}:
-        raise SecretError(
-            f"Unsupported llm.provider {name!r} for LLM scoring credentials"
-        )
+    required = ", ".join(LLM_PROVIDER_ENV_KEYS[name] for name in ordered)
+    raise SecretError(
+        "No LLM credentials configured for the provider chain "
+        f"{' -> '.join(ordered)} when scoring.llm_enabled is true; "
+        f"set one of: {required}"
+    )
 
 
 def validate_telegram_notifier_secrets(
