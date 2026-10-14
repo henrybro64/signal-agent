@@ -149,7 +149,11 @@ def run_service_forever(
 
     def _persist_tick(state_payload: dict) -> dict:
         nonlocal tick_failures_total
-        tick = run_worker_tick(root=root, config_path=cfg)
+        tick = run_worker_tick(
+            root=root,
+            config_path=cfg,
+            stop_requested=is_stop_requested,
+        )
         state_payload.update(tick_state_patch(tick))
         if not tick.ok:
             tick_failures_total += 1

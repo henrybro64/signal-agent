@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -226,18 +227,19 @@ class ScheduleStore:
         """
 
         now = _utc_now()
+        owner_pid = os.getpid()
         with self._connect() as connection:
             if resume_retry:
                 claim = connection.execute(
                     """
                     UPDATE schedules
                     SET last_started_at = ?, last_status = ?, next_run_at = NULL,
-                        updated_at = ?
+                        updated_at = ?, last_owner_pid = ?
                     WHERE id = ?
                       AND last_status = 'retrying'
                       AND next_run_at IS NULL
                     """,
-                    (now, "running", now, schedule_id),
+                    (now, "running", now, owner_pid, schedule_id),
                 )
             elif not exclusive:
                 # allow_overlap: concurrent starts are intentional.
@@ -245,24 +247,24 @@ class ScheduleStore:
                     """
                     UPDATE schedules
                     SET last_started_at = ?, last_status = ?, next_run_at = NULL,
-                        updated_at = ?
+                        updated_at = ?, last_owner_pid = ?
                     WHERE id = ?
                     """,
-                    (now, "running", now, schedule_id),
+                    (now, "running", now, owner_pid, schedule_id),
                 )
             elif force:
                 claim = connection.execute(
                     """
                     UPDATE schedules
                     SET last_started_at = ?, last_status = ?, next_run_at = NULL,
-                        updated_at = ?
+                        updated_at = ?, last_owner_pid = ?
                     WHERE id = ?
                       AND (
                         last_status IS NULL
                         OR last_status NOT IN ('running', 'retrying')
                       )
                     """,
-                    (now, "running", now, schedule_id),
+                    (now, "running", now, owner_pid, schedule_id),
                 )
             else:
                 if expected_next_run_at is None:
@@ -271,7 +273,7 @@ class ScheduleStore:
                     """
                     UPDATE schedules
                     SET last_started_at = ?, last_status = ?, next_run_at = NULL,
-                        updated_at = ?
+                        updated_at = ?, last_owner_pid = ?
                     WHERE id = ?
                       AND next_run_at IS NOT NULL
                       AND next_run_at = ?
@@ -280,7 +282,14 @@ class ScheduleStore:
                         OR last_status NOT IN ('running', 'retrying')
                       )
                     """,
-                    (now, "running", now, schedule_id, expected_next_run_at),
+                    (
+                        now,
+                        "running",
+                        now,
+                        owner_pid,
+                        schedule_id,
+                        expected_next_run_at,
+                    ),
                 )
             if claim.rowcount != 1:
                 connection.rollback()
@@ -289,10 +298,17 @@ class ScheduleStore:
                 """
                 INSERT INTO schedule_runs (
                     schedule_id, run_id, status, started_at, finished_at,
-                    attempt, error, dry_run
-                ) VALUES (?, ?, 'running', ?, NULL, ?, NULL, ?)
+                    attempt, error, dry_run, owner_pid
+                ) VALUES (?, ?, 'running', ?, NULL, ?, NULL, ?, ?)
                 """,
-                (schedule_id, run_id, now, attempt, 1 if dry_run else 0),
+                (
+                    schedule_id,
+                    run_id,
+                    now,
+                    attempt,
+                    1 if dry_run else 0,
+                    owner_pid,
+                ),
             )
             raw_row_id = cursor.lastrowid
             if raw_row_id is None:
@@ -389,13 +405,18 @@ class ScheduleStore:
         (for example, immediately after acquiring the exclusive runtime lock).
         """
 
-        return self.reclaim_stale_runs(older_than_seconds=0.0, now=now)
+        return self.reclaim_stale_runs(
+            older_than_seconds=0.0,
+            now=now,
+            skip_live_owners=True,
+        )
 
     def reclaim_stale_runs(
         self,
         *,
         older_than_seconds: float = DEFAULT_STALE_RUNNING_SECONDS,
         now: datetime | None = None,
+        skip_live_owners: bool = False,
     ) -> int:
         """Mark stuck running/retrying rows failed and restore next_run_at."""
 
@@ -406,22 +427,38 @@ class ScheduleStore:
         with self._connect() as connection:
             stuck_runs = connection.execute(
                 """
-                SELECT schedule_id, run_id FROM schedule_runs
+                SELECT schedule_id, run_id, owner_pid FROM schedule_runs
                 WHERE status = 'running' AND started_at <= ?
                 """,
                 (cutoff,),
             ).fetchall()
             stuck_schedules = connection.execute(
                 """
-                SELECT id FROM schedules
+                SELECT id, last_owner_pid FROM schedules
                 WHERE last_status IN ('running', 'retrying')
                   AND last_started_at IS NOT NULL
                   AND last_started_at <= ?
                 """,
                 (cutoff,),
             ).fetchall()
+        live_owned: set[str] = set()
+        if skip_live_owners:
+            self_pid = os.getpid()
+            for row in stuck_runs:
+                owner = row["owner_pid"]
+                if owner is not None and int(owner) != self_pid and _pid_is_alive(
+                    int(owner)
+                ):
+                    live_owned.add(str(row["schedule_id"]))
+            for row in stuck_schedules:
+                owner = row["last_owner_pid"]
+                if owner is not None and int(owner) != self_pid and _pid_is_alive(
+                    int(owner)
+                ):
+                    live_owned.add(str(row["id"]))
         schedule_ids = {str(row["schedule_id"]) for row in stuck_runs}
         schedule_ids.update(str(row["id"]) for row in stuck_schedules)
+        schedule_ids -= live_owned
         for schedule_id in sorted(schedule_ids):
             schedule = self.get(schedule_id)
             if schedule is None:
@@ -533,6 +570,20 @@ def _row_to_schedule(row: sqlite3.Row) -> Schedule:
         updated_at=str(row["updated_at"]),
         metadata=metadata,
     )
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _utc_now() -> str:

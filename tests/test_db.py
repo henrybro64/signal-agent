@@ -496,6 +496,98 @@ def test_upsert_signal_keeps_non_job_rows_with_distinct_urls(tmp_path: Path) -> 
     assert _count_signals(db_path) == 2
 
 
+def test_upsert_signal_matches_legacy_identity_less_hash(tmp_path: Path) -> None:
+    """Pre-#97 hashes must update in place instead of inserting a duplicate."""
+
+    from app.core import db as core_db
+
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+    item = SignalItem(
+        source="manual",
+        item_type="job",
+        title="Agent Engineer",
+        observed_at=OBSERVED_AT,
+        content="Build reliable agent workflows.",
+        metadata={"company": "Example Labs", "location": "Taipei"},
+    )
+    legacy = core_db._legacy_content_hash(item)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO signals (
+                source, item_type, title, content, content_hash, metadata_json,
+                first_seen_at, last_seen_at, status
+            ) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, 'reviewed')
+            """,
+            (
+                item.source,
+                item.item_type,
+                item.title,
+                item.content,
+                legacy,
+                "2026-06-15T12:00:00Z",
+                "2026-06-15T12:00:00Z",
+            ),
+        )
+        connection.commit()
+
+    result = upsert_signal(item, db_path=db_path)
+    row = _fetch_signal(db_path, result.signal_id)
+
+    assert result.action == "updated"
+    assert result.matched_on == "content_hash"
+    assert _count_signals(db_path) == 1
+    assert row["status"] == "reviewed"
+    assert row["content_hash"] == core_db._build_content_hash(item)
+    assert row["content_hash"] != legacy
+
+
+def test_rewrite_legacy_content_hashes_upgrades_stored_rows(
+    tmp_path: Path,
+) -> None:
+    from app.core import db as core_db
+
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+    item = SignalItem(
+        source="manual",
+        item_type="job",
+        title="Agent Engineer",
+        observed_at=OBSERVED_AT,
+        content="Build reliable agent workflows.",
+        metadata={"company": "Example Labs"},
+    )
+    legacy = core_db._legacy_content_hash(item)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO signals (
+                source, item_type, title, content, content_hash, metadata_json,
+                first_seen_at, last_seen_at, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')
+            """,
+            (
+                item.source,
+                item.item_type,
+                item.title,
+                item.content,
+                legacy,
+                '{"company":"Example Labs"}',
+                "2026-06-15T12:00:00Z",
+                "2026-06-15T12:00:00Z",
+            ),
+        )
+        connection.commit()
+
+    with core_db._connect(db_path) as connection:
+        core_db._rewrite_legacy_content_hashes(connection)
+        connection.commit()
+
+    row = _fetch_signal(db_path, 1)
+    assert row["content_hash"] == core_db._build_content_hash(item)
+
+
 def test_upsert_signal_degrades_to_update_on_hash_collision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

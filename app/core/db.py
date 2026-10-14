@@ -93,7 +93,10 @@ def init_db(db_path: str | Path) -> None:
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
     with _connect(resolved_path) as connection:
+        previous = get_schema_version(connection)
         apply_pending_migrations(connection)
+        if previous < 4:
+            _rewrite_legacy_content_hashes(connection)
 
     _DEFAULT_DB_PATH = resolved_path
 
@@ -134,6 +137,7 @@ def upsert_signal(
             url=url,
             external_id=external_id,
             content_hash=content_hash,
+            legacy_content_hash=_legacy_content_hash(item),
         )
 
         if existing_row is None:
@@ -872,6 +876,7 @@ def _find_existing_signal(
     url: str | None,
     external_id: str | None,
     content_hash: str | None,
+    legacy_content_hash: str | None = None,
 ) -> tuple[sqlite3.Row | None, DedupMatch | None]:
     # Snapshot-backed market signals use external IDs when present; otherwise
     # fall back to the normal URL/content-hash dedup path for custom sources.
@@ -932,6 +937,19 @@ def _find_existing_signal(
         ).fetchone()
         if row is not None:
             return row, "content_hash"
+        # Existing DBs may still store the pre-#97 hash (type/title/content).
+        # Match that once so the UPDATE below rewrites it; skipping this would
+        # insert a duplicate and re-notify on the first post-upgrade fetch.
+        if (
+            legacy_content_hash is not None
+            and legacy_content_hash != content_hash
+        ):
+            row = connection.execute(
+                "SELECT * FROM signals WHERE content_hash = ? ORDER BY id LIMIT 1",
+                (legacy_content_hash,),
+            ).fetchone()
+            if row is not None:
+                return row, "content_hash"
 
     return None, None
 
@@ -957,6 +975,23 @@ def _build_content_hash(item: SignalItem) -> str:
         payload_data["company"] = str(metadata.get("company") or "").strip()
         payload_data["location"] = str(metadata.get("location") or "").strip()
 
+    return _hash_payload(payload_data)
+
+
+def _legacy_content_hash(item: SignalItem) -> str:
+    """Hash used before #97, for matching unmigrated identity-less rows."""
+
+    payload_data = {
+        "item_type": item.item_type.strip(),
+        "title": item.title.strip(),
+        "content": (item.content or "").strip(),
+    }
+    if item.item_type in {"tw_stock_mover", "stock_watchlist_alert"}:
+        payload_data["external_id"] = (item.external_id or "").strip()
+    return _hash_payload(payload_data)
+
+
+def _hash_payload(payload_data: dict[str, str]) -> str:
     payload = json.dumps(
         payload_data,
         ensure_ascii=False,
@@ -964,6 +999,54 @@ def _build_content_hash(item: SignalItem) -> str:
         sort_keys=True,
     )
     return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _rewrite_legacy_content_hashes(connection: sqlite3.Connection) -> None:
+    """Rewrite stored hashes to the current identity-aware payload (#97)."""
+
+    if not _table_has_signals(connection):
+        return
+    rows = connection.execute("SELECT * FROM signals").fetchall()
+    for row in rows:
+        item = _signal_item_from_row(row)
+        new_hash = _build_content_hash(item)
+        if row["content_hash"] == new_hash:
+            continue
+        try:
+            connection.execute(
+                "UPDATE signals SET content_hash = ? WHERE id = ?",
+                (new_hash, row["id"]),
+            )
+        except sqlite3.IntegrityError:
+            # Two distinct rows now share a hash; leave the stored value and
+            # let upsert_signal's IntegrityError fallback refresh in place.
+            continue
+
+
+def _table_has_signals(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type = 'table' AND name = 'signals'
+        LIMIT 1
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _signal_item_from_row(row: sqlite3.Row) -> SignalItem:
+    raw_metadata = json.loads(row["metadata_json"] or "{}")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    return SignalItem(
+        source=str(row["source"]),
+        item_type=str(row["item_type"]),
+        title=str(row["title"]),
+        observed_at=_parse_timestamp(str(row["last_seen_at"])),
+        url=row["url"],
+        external_id=row["external_id"],
+        content=row["content"],
+        metadata=metadata,
+    )
 
 
 def _coerce_utc(value: datetime) -> datetime:

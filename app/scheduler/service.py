@@ -78,17 +78,17 @@ def run_schedule_tick(
             message="reclaimed stale schedule runs",
             reclaimed=reclaimed,
         )
-    due = store.due(now=moment)
-    result.due = len(due)
+    due_schedules: list[Schedule] = store.due(now=moment)
+    result.due = len(due_schedules)
     runner = task_runner or _default_task_runner
     should_stop = stop_requested or _never_stop
     resolved_db = Path(db_path or runtime_paths.db_path(base))
-    for index, schedule in enumerate(due):
+    for index, schedule in enumerate(due_schedules):
         if should_stop():
             # Shutdown pre-empts the rest of this tick. These schedules were
             # never claimed, so they keep their due next_run_at and run on the
             # next tick; counting them as started failures would be a lie.
-            pending = due[index:]
+            pending: list[Schedule] = due_schedules[index:]
             result.skipped += len(pending)
             if result.details is not None:
                 result.details.extend(

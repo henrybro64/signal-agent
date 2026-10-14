@@ -258,6 +258,57 @@ def test_reclaim_orphaned_runs_ignores_age(tmp_path: Path) -> None:
     assert store.has_running(schedule.id) is False
 
 
+def test_reclaim_orphaned_runs_skips_live_manual_owner(tmp_path: Path) -> None:
+    """A live `schedule run` process must not be reclaimed at daemon start (#98)."""
+
+    import subprocess
+
+    db = _prepare(tmp_path)
+    store = ScheduleStore(db)
+    schedule = store.add(
+        name="manual-live",
+        task_name="dummy",
+        timezone="Asia/Taipei",
+        cron="every:5",
+    )
+    recent = (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    child = subprocess.Popen(["sleep", "60"])
+    try:
+        with store._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO schedule_runs (
+                    schedule_id, run_id, status, started_at, attempt, dry_run,
+                    owner_pid
+                ) VALUES (?, 'live-manual-run', 'running', ?, 1, 0, ?)
+                """,
+                (schedule.id, recent, child.pid),
+            )
+            connection.execute(
+                "UPDATE schedules SET next_run_at = NULL, last_started_at = ?, "
+                "last_status = 'running', last_owner_pid = ? WHERE id = ?",
+                (recent, child.pid, schedule.id),
+            )
+            connection.commit()
+
+        assert store.reclaim_orphaned_runs() == 0
+        still = store.get(schedule.id)
+        assert still is not None
+        assert still.last_status == "running"
+        assert still.next_run_at is None
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+
+    assert store.reclaim_orphaned_runs() == 1
+    recovered = store.get(schedule.id)
+    assert recovered is not None
+    assert recovered.last_status == "failed"
+    assert recovered.next_run_at is not None
+
+
 def test_retry_backoff_respects_runtime_stop(tmp_path: Path) -> None:
     """Backoff must not block shutdown for the full retry sleep (#98)."""
 
