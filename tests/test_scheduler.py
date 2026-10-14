@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -224,8 +225,8 @@ def test_reclaim_orphaned_runs_ignores_age(tmp_path: Path) -> None:
         timezone="Asia/Taipei",
         cron="every:5",
     )
-    recent = (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace(
-        "+00:00", "Z"
+    recent = (
+        (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace("+00:00", "Z")
     )
     with store._connect() as connection:
         connection.execute(
@@ -271,8 +272,8 @@ def test_reclaim_orphaned_runs_skips_live_manual_owner(tmp_path: Path) -> None:
         timezone="Asia/Taipei",
         cron="every:5",
     )
-    recent = (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace(
-        "+00:00", "Z"
+    recent = (
+        (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace("+00:00", "Z")
     )
     child = subprocess.Popen(["sleep", "60"])
     try:
@@ -324,9 +325,7 @@ def test_retry_backoff_respects_runtime_stop(tmp_path: Path) -> None:
         max_retries=2,
         backoff_seconds=30.0,
     )
-    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace(
-        "+00:00", "Z"
-    )
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
     with store._connect() as connection:
         connection.execute(
             "UPDATE schedules SET next_run_at = ? WHERE id = ?",
@@ -375,9 +374,7 @@ def test_tick_stop_skips_remaining_due_schedules(tmp_path: Path) -> None:
 
     db = _prepare(tmp_path)
     store = ScheduleStore(db)
-    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace(
-        "+00:00", "Z"
-    )
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
     for name in ("sched-a", "sched-b", "sched-c"):
         schedule = store.add(
             name=name,
@@ -511,6 +508,86 @@ def test_atomic_claim_prevents_double_start(tmp_path: Path) -> None:
     assert second is None
 
 
+def test_cron_sunday_seven_dom_dow_or_and_validation(tmp_path: Path) -> None:
+    """Sunday=7, DOM+DOW OR semantics, and reject never-run crons (#101)."""
+
+    after = datetime(2026, 10, 14, 12, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    sunday = compute_next_run(
+        cron="0 9 * * 7",
+        after=after,
+        timezone_name="Asia/Taipei",
+    )
+    assert sunday is not None
+    local_sunday = sunday.astimezone(ZoneInfo("Asia/Taipei"))
+    assert local_sunday.weekday() == 6  # Sunday
+    assert (local_sunday.hour, local_sunday.minute) == (9, 0)
+
+    # Both DOM and DOW restricted → OR (next Monday, not next Mon-the-1st).
+    either = compute_next_run(
+        cron="0 9 1 * 1",
+        after=after,
+        timezone_name="Asia/Taipei",
+    )
+    assert either is not None
+    local_either = either.astimezone(ZoneInfo("Asia/Taipei"))
+    assert (local_either.year, local_either.month, local_either.day) == (
+        2026,
+        10,
+        19,
+    )
+    assert local_either.weekday() == 0  # Monday
+
+    with pytest.raises(ValueError, match="out of range"):
+        compute_next_run(
+            cron="0 25 * * *",
+            after=after,
+            timezone_name="Asia/Taipei",
+        )
+    with pytest.raises(ValueError, match="out of range"):
+        compute_next_run(
+            cron="60 9 * * *",
+            after=after,
+            timezone_name="Asia/Taipei",
+        )
+
+    started = time.perf_counter()
+    missing = compute_next_run(
+        cron="0 9 31 2 *",
+        after=after,
+        timezone_name="Asia/Taipei",
+    )
+    elapsed = time.perf_counter() - started
+    assert missing is None
+    assert elapsed < 0.25
+
+    with pytest.raises(ValueError, match="every minutes"):
+        compute_next_run(
+            cron="every:abc",
+            after=after,
+            timezone_name="Asia/Taipei",
+        )
+
+    monday_in_feb = compute_next_run(
+        cron="0 9 31 2 1",
+        after=after,
+        timezone_name="Asia/Taipei",
+    )
+    assert monday_in_feb is not None
+    local_mon = monday_in_feb.astimezone(ZoneInfo("Asia/Taipei"))
+    assert local_mon.month == 2
+    assert local_mon.weekday() == 0
+
+    db = _prepare(tmp_path)
+    store = ScheduleStore(db)
+    with pytest.raises(ValueError, match="never matches"):
+        store.add(
+            name="feb-31",
+            task_name="dummy",
+            timezone="Asia/Taipei",
+            cron="0 9 31 2 *",
+        )
+
+
 def test_cron_dst_gap_and_leap_day_horizon() -> None:
     tz = ZoneInfo("America/New_York")
     after_gap = datetime(2026, 3, 8, 1, 30, tzinfo=tz)
@@ -532,6 +609,32 @@ def test_cron_dst_gap_and_leap_day_horizon() -> None:
     )
     assert leap is not None
     assert (leap.year, leap.month, leap.day, leap.hour) == (2028, 2, 29, 9)
+
+
+def test_cron_dst_fold_picks_later_occurrence() -> None:
+    """A fold=1 after must not return the earlier repeated wall time."""
+
+    tz = ZoneInfo("America/New_York")
+    after_second = datetime(2026, 11, 1, 1, 10, tzinfo=tz, fold=1)
+    nxt = compute_next_run(
+        cron="30 1 * * *",
+        after=after_second,
+        timezone_name="America/New_York",
+    )
+    assert nxt is not None
+    assert nxt.fold == 1
+    assert (nxt.hour, nxt.minute) == (1, 30)
+    assert nxt.astimezone(UTC) > after_second.astimezone(UTC)
+
+    after_first = datetime(2026, 11, 1, 0, 50, tzinfo=tz)
+    first = compute_next_run(
+        cron="30 1 * * *",
+        after=after_first,
+        timezone_name="America/New_York",
+    )
+    assert first is not None
+    assert first.fold == 0
+    assert (first.hour, first.minute) == (1, 30)
 
 
 def test_schedule_cli_rejects_unknown_task_and_id(

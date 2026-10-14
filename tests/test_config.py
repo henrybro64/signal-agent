@@ -68,6 +68,7 @@ def test_load_config_reads_sample_file() -> None:
     assert config.sources.job104.page_limit == 1
     assert config.sources.linkedin_email.lookback_days == 14
     assert config.sources.linkedin_email.imap_mailbox is None
+    assert_close(config.sources.linkedin_email.timeout_seconds, 30.0)
     assert config.sources.twse.batch_size == 100
     assert_close(config.sources.tpex.request_delay_seconds, 0.2)
 
@@ -239,6 +240,7 @@ def test_app_config_from_dict() -> None:
     assert_close(config.sources.indeed.request_delay_seconds, 1.0)
     assert config.sources.linkedin_email.lookback_days == 14
     assert config.sources.linkedin_email.imap_mailbox is None
+    assert_close(config.sources.linkedin_email.timeout_seconds, 30.0)
     assert config.sources.twse.batch_size == 100
     assert_close(config.sources.tpex.timeout_seconds, 10.0)
     assert len(config.tasks.job_search.profiles) == 1
@@ -409,6 +411,7 @@ def test_app_config_from_dict_reads_custom_sources_settings() -> None:
                 "linkedin_email": {
                     "lookback_days": 7,
                     "imap_mailbox": "LinkedIn",
+                    "timeout_seconds": 45,
                 },
                 "twse": {
                     "timeout_seconds": 8,
@@ -429,6 +432,7 @@ def test_app_config_from_dict_reads_custom_sources_settings() -> None:
     assert config.sources.job104.page_limit == 3
     assert config.sources.linkedin_email.lookback_days == 7
     assert config.sources.linkedin_email.imap_mailbox == "LinkedIn"
+    assert_close(config.sources.linkedin_email.timeout_seconds, 45.0)
     assert_close(config.sources.twse.timeout_seconds, 8.0)
     assert config.sources.twse.max_retries == 1
     assert_close(config.sources.twse.request_delay_seconds, 0.5)
@@ -463,6 +467,10 @@ def test_app_config_from_dict_reads_custom_sources_settings() -> None:
         (
             {"linkedin_email": {"imap_mailbox": "   "}},
             "sources.linkedin_email.imap_mailbox",
+        ),
+        (
+            {"linkedin_email": {"timeout_seconds": 0}},
+            "sources.linkedin_email.timeout_seconds",
         ),
         (
             {"twse": {"batch_size": 0}},

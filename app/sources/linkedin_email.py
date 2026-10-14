@@ -25,6 +25,13 @@ from .base import BaseSource
 
 _DEFAULT_IMAP_MAILBOX = "INBOX"
 _DEFAULT_LOOKBACK_DAYS = 14
+_DEFAULT_TIMEOUT_SECONDS = 30.0
+# LinkedIn job-alert senders seen in the wild; keep SEARCH narrow (#102).
+_LINKEDIN_JOB_ALERT_SENDERS = (
+    "jobs-noreply@linkedin.com",
+    "jobalerts-noreply@linkedin.com",
+    "jobs-listings@linkedin.com",
+)
 _LINKEDIN_JOB_URL_RE = re.compile(
     r"https?://www\.linkedin\.com/jobs/view/(?P<job_id>\d+)[^\"'\s<)]*",
     re.IGNORECASE,
@@ -69,24 +76,23 @@ class LinkedInEmailSource(BaseSource):
     imap_password: str | None = None
     imap_mailbox: str = _DEFAULT_IMAP_MAILBOX
     lookback_days: int = _DEFAULT_LOOKBACK_DAYS
+    timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS
 
     name: ClassVar[str] = "linkedin_email"
 
     def __post_init__(self) -> None:
         self.keywords = [
-            keyword.strip()
-            for keyword in self.keywords
-            if keyword.strip()
+            keyword.strip() for keyword in self.keywords if keyword.strip()
         ]
         self.locations = [
-            location.strip()
-            for location in self.locations
-            if location.strip()
+            location.strip() for location in self.locations if location.strip()
         ]
         self.email_paths = [Path(path).expanduser() for path in self.email_paths]
         self.imap_mailbox = self.imap_mailbox.strip() or _DEFAULT_IMAP_MAILBOX
         if self.lookback_days <= 0:
             raise ValueError("lookback_days must be greater than zero")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
 
     @classmethod
     def from_config(
@@ -103,9 +109,7 @@ class LinkedInEmailSource(BaseSource):
         settings = config.sources.linkedin_email
         email_paths: list[Path] = []
         if resolved_env.linkedin_email_source_path:
-            source_path = Path(
-                resolved_env.linkedin_email_source_path
-            ).expanduser()
+            source_path = Path(resolved_env.linkedin_email_source_path).expanduser()
             if source_path.is_dir():
                 email_paths = sorted(source_path.glob("*.eml"))
             else:
@@ -127,10 +131,9 @@ class LinkedInEmailSource(BaseSource):
             imap_password=resolved_env.linkedin_email_imap_password,
             imap_mailbox=resolved_mailbox,
             lookback_days=(
-                settings.lookback_days
-                if lookback_days is None
-                else lookback_days
+                settings.lookback_days if lookback_days is None else lookback_days
             ),
+            timeout_seconds=settings.timeout_seconds,
         )
 
     def fetch(self) -> list[SignalItem]:
@@ -189,8 +192,7 @@ class LinkedInEmailSource(BaseSource):
                 )
             if email_path.is_dir():
                 messages.extend(
-                    child.read_bytes()
-                    for child in sorted(email_path.glob("*.eml"))
+                    child.read_bytes() for child in sorted(email_path.glob("*.eml"))
                 )
                 continue
             messages.append(email_path.read_bytes())
@@ -213,39 +215,27 @@ class LinkedInEmailSource(BaseSource):
         since_text = (datetime.now(UTC) - timedelta(days=self.lookback_days)).strftime(
             "%d-%b-%Y"
         )
-
+        search_criteria = _linkedin_imap_search_criteria(since_text)
+        phase = "connect"
         try:
-            with imaplib.IMAP4_SSL(host) as client:
+            with imaplib.IMAP4_SSL(host, timeout=self.timeout_seconds) as client:
+                phase = "login"
                 client.login(username, password)
-                client.select(self.imap_mailbox)
-                status, data = client.search(None, "SINCE", since_text)
-                if status != "OK":
+                phase = "select"
+                select_status, _select_data = client.select(self.imap_mailbox)
+                if select_status != "OK":
                     raise LinkedInEmailSourceError(
-                        "LinkedIn email IMAP search failed"
+                        f"LinkedIn email IMAP mailbox not found: {self.imap_mailbox!r}"
                     )
+                phase = "search"
+                status, data = client.search(None, search_criteria)
+                if status != "OK":
+                    raise LinkedInEmailSourceError("LinkedIn email IMAP search failed")
 
-                messages: list[bytes] = []
-                for message_id in data[0].split():
-                    fetch_status, fetch_data = client.fetch(message_id, "(RFC822)")
-                    if fetch_status != "OK":
-                        continue
-                    for part in fetch_data:
-                        if isinstance(part, tuple) and len(part) == 2:
-                            raw_message = part[1]
-                            if isinstance(raw_message, bytes):
-                                email_message = message_from_bytes(
-                                    raw_message,
-                                    policy=policy.default,
-                                )
-                                if _looks_like_linkedin_job_alert(email_message):
-                                    messages.append(raw_message)
-                return messages
-        except SecretError:
-            raise
+                message_ids = data[0].split() if data and data[0] else []
+                return _fetch_linkedin_alert_bodies(client, message_ids)
         except imaplib.IMAP4.error as exc:
-            raise LinkedInEmailSourceError(
-                f"LinkedIn email IMAP login failed: {exc}"
-            ) from exc
+            raise _imap_phase_error(phase, exc) from exc
         except OSError as exc:
             raise LinkedInEmailSourceError(
                 f"LinkedIn email IMAP connection failed: {exc}"
@@ -276,17 +266,72 @@ class LinkedInEmailSource(BaseSource):
 
         if self.locations:
             location_text = " ".join(
-                value
-                for value in [job.location, job.snippet]
-                if value is not None
+                value for value in [job.location, job.snippet] if value is not None
             ).casefold()
             if location_text and not any(
-                location.casefold() in location_text
-                for location in self.locations
+                location.casefold() in location_text for location in self.locations
             ):
                 return False
 
         return True
+
+
+def _fetch_linkedin_alert_bodies(
+    client: imaplib.IMAP4,
+    message_ids: list[bytes],
+) -> list[bytes]:
+    messages: list[bytes] = []
+    for message_id in message_ids:
+        fetch_status, fetch_data = client.fetch(
+            message_id.decode("ascii"),
+            "(RFC822)",
+        )
+        if fetch_status != "OK":
+            continue
+        raw_message = _rfc822_payload(fetch_data)
+        if raw_message is None:
+            continue
+        email_message = message_from_bytes(raw_message, policy=policy.default)
+        if _looks_like_linkedin_job_alert(email_message):
+            messages.append(raw_message)
+    return messages
+
+
+def _rfc822_payload(fetch_data: object) -> bytes | None:
+    if not isinstance(fetch_data, list):
+        return None
+    for part in fetch_data:
+        if not isinstance(part, tuple) or len(part) != 2:
+            continue
+        raw_message = part[1]
+        if isinstance(raw_message, bytes):
+            return raw_message
+    return None
+
+
+def _imap_phase_error(phase: str, exc: BaseException) -> LinkedInEmailSourceError:
+    label = {
+        "login": "login",
+        "select": "mailbox select",
+        "search": "search",
+    }.get(phase, phase)
+    return LinkedInEmailSourceError(f"LinkedIn email IMAP {label} failed: {exc}")
+
+
+def _linkedin_imap_search_criteria(since_text: str) -> str:
+    """Build IMAP SEARCH criteria: SINCE + known LinkedIn alert senders.
+
+    One parenthesized list so imaplib (and future argument quoting) sends a
+    single SEARCH parenthesized-list, not a quoted atom. Space is AND.
+    """
+
+    senders = _LINKEDIN_JOB_ALERT_SENDERS
+    if not senders:
+        return f"(SINCE {since_text})"
+    sender_clause = f'FROM "{senders[0]}"'
+    for sender in senders[1:]:
+        sender_clause = f'OR {sender_clause} FROM "{sender}"'
+    return f"(SINCE {since_text} {sender_clause})"
 
 
 def _extract_message_body(
@@ -399,7 +444,7 @@ def _extract_jobs_from_text(text: str) -> list[_ParsedJob]:
             continue
         url = _normalize_linkedin_job_url(url_match.group(0))
         job_id = url_match.group("job_id")
-        context = lines[max(0, index - 4):index]
+        context = lines[max(0, index - 4) : index]
         if not context:
             continue
         title = context[-1]
@@ -471,10 +516,7 @@ def _extract_text_chunks(html_segment: str) -> list[str]:
     text = _strip_html(normalized)
     chunks = [
         chunk
-        for chunk in (
-            _normalize_text(line)
-            for line in text.splitlines()
-        )
+        for chunk in (_normalize_text(line) for line in text.splitlines())
         if chunk is not None and chunk.casefold() not in _GENERIC_LINK_TEXTS
     ]
     return chunks

@@ -314,6 +314,7 @@ class LinkedInEmailSourceConfig:
     # None means "omit from config" so from_config can fall back to
     # LINKEDIN_EMAIL_IMAP_MAILBOX (default INBOX).
     imap_mailbox: str | None = None
+    timeout_seconds: float = 30.0
 
 
 @dataclass(slots=True)
@@ -1964,16 +1965,29 @@ def _parse_linkedin_email_source_config(
     source_name: str,
 ) -> LinkedInEmailSourceConfig:
     parent_path = "sources.linkedin_email"
+    defaults = LinkedInEmailSourceConfig()
     lookback_days = _optional_int(
         data,
         "lookback_days",
-        default=14,
+        default=defaults.lookback_days,
         parent_path=parent_path,
         source_name=source_name,
     )
     _require_positive_int(
         lookback_days,
         config_path=f"{parent_path}.lookback_days",
+        source_name=source_name,
+    )
+    timeout_seconds = _optional_float(
+        data,
+        "timeout_seconds",
+        default=defaults.timeout_seconds,
+        parent_path=parent_path,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        timeout_seconds,
+        config_path=f"{parent_path}.timeout_seconds",
         source_name=source_name,
     )
     imap_mailbox: str | None = None
@@ -1992,6 +2006,7 @@ def _parse_linkedin_email_source_config(
     return LinkedInEmailSourceConfig(
         lookback_days=lookback_days,
         imap_mailbox=imap_mailbox,
+        timeout_seconds=timeout_seconds,
     )
 
 

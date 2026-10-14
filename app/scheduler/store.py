@@ -119,7 +119,12 @@ class ScheduleStore:
                 after=datetime.now(UTC),
                 timezone_name=timezone,
             )
-            next_run = None if nxt is None else _format(nxt.astimezone(UTC))
+            if nxt is None:
+                raise ValueError(
+                    f"cron expression {cron!r} never matches within the "
+                    "search horizon (no next run)"
+                )
+            next_run = _format(nxt.astimezone(UTC))
         elif run_at:
             next_run = _normalize_iso(run_at)
         sid = schedule_id or str(uuid.uuid4())
