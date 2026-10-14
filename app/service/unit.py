@@ -97,8 +97,10 @@ def _systemd_path_value(path: str, *, field_name: str) -> str:
     """
 
     text = _absolute_keep_symlink(path) if path else path
-    if not text or any(ch.isspace() for ch in text) or any(
-        ch in text for ch in "\"'\\"
+    if (
+        not text
+        or any(ch.isspace() for ch in text)
+        or any(ch in text for ch in "\"'\\")
     ):
         raise ValueError(
             f"{field_name} path must not contain whitespace or quotes: {path!r}"
@@ -114,7 +116,7 @@ def _systemd_exec_arg(value: str) -> str:
     escaped = (
         value.replace("\\", "\\\\")
         .replace('"', '\\"')
-        .replace("$", "\\$")
+        .replace("$", "$$")
         .replace("%", "%%")
     )
     return f'"{escaped}"'

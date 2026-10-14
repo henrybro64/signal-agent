@@ -60,6 +60,13 @@ def test_render_user_unit_has_restart_and_no_secrets() -> None:
                 environment_file=None,
             )
         )
+    dollar_exec = default_exec_start(
+        python_executable="/tmp/py$bin/python",
+        root="/tmp/root$sa",
+        config_path="/tmp/root$sa/config.yaml",
+    )
+    assert "$$" in dollar_exec
+    assert "\\$" not in dollar_exec
 
 
 def test_default_exec_start_preserves_venv_symlink(tmp_path: Path) -> None:

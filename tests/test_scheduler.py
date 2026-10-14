@@ -611,6 +611,32 @@ def test_cron_dst_gap_and_leap_day_horizon() -> None:
     assert (leap.year, leap.month, leap.day, leap.hour) == (2028, 2, 29, 9)
 
 
+def test_cron_dst_fold_picks_later_occurrence() -> None:
+    """A fold=1 after must not return the earlier repeated wall time."""
+
+    tz = ZoneInfo("America/New_York")
+    after_second = datetime(2026, 11, 1, 1, 10, tzinfo=tz, fold=1)
+    nxt = compute_next_run(
+        cron="30 1 * * *",
+        after=after_second,
+        timezone_name="America/New_York",
+    )
+    assert nxt is not None
+    assert nxt.fold == 1
+    assert (nxt.hour, nxt.minute) == (1, 30)
+    assert nxt.astimezone(UTC) > after_second.astimezone(UTC)
+
+    after_first = datetime(2026, 11, 1, 0, 50, tzinfo=tz)
+    first = compute_next_run(
+        cron="30 1 * * *",
+        after=after_first,
+        timezone_name="America/New_York",
+    )
+    assert first is not None
+    assert first.fold == 0
+    assert (first.hour, first.minute) == (1, 30)
+
+
 def test_schedule_cli_rejects_unknown_task_and_id(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

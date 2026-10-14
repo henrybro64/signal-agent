@@ -174,6 +174,7 @@ def _next_calendar_match(
 
     start = (local_after + timedelta(minutes=1)).replace(second=0, microsecond=0)
     limit = start.astimezone(UTC) + timedelta(days=_SEARCH_HORIZON_DAYS)
+    after_utc = local_after.astimezone(UTC)
     minutes = sorted(parsed.minutes)
     hours = sorted(parsed.hours)
     months = sorted(parsed.months)
@@ -197,13 +198,41 @@ def _next_calendar_match(
                     for minute in minutes:
                         if (year, month, day, hour, minute) < start_tuple:
                             continue
-                        candidate = datetime(year, month, day, hour, minute, tzinfo=tz)
-                        if not _is_real_local_wall_time(candidate):
-                            continue
-                        if candidate.astimezone(UTC) > limit:
-                            return None
-                        return candidate
+                        for candidate in _local_candidates(
+                            year, month, day, hour, minute, tz
+                        ):
+                            candidate_utc = candidate.astimezone(UTC)
+                            if candidate_utc <= after_utc:
+                                continue
+                            if candidate_utc > limit:
+                                return None
+                            return candidate
     return None
+
+
+def _local_candidates(
+    year: int,
+    month: int,
+    day: int,
+    hour: int,
+    minute: int,
+    tz: ZoneInfo,
+) -> list[datetime]:
+    """Return real wall times for this slot, both DST folds, in UTC order."""
+
+    found: list[datetime] = []
+    seen_utc: set[datetime] = set()
+    for fold in (0, 1):
+        candidate = datetime(year, month, day, hour, minute, tzinfo=tz, fold=fold)
+        if not _is_real_local_wall_time(candidate):
+            continue
+        instant = candidate.astimezone(UTC)
+        if instant in seen_utc:
+            continue
+        seen_utc.add(instant)
+        found.append(candidate)
+    found.sort(key=lambda item: item.astimezone(UTC))
+    return found
 
 
 def _matching_days(year: int, month: int, parsed: _CronFields) -> list[int]:
@@ -238,4 +267,12 @@ def _is_real_local_wall_time(value: datetime) -> bool:
         round_trip.day,
         round_trip.hour,
         round_trip.minute,
-    ) == (value.year, value.month, value.day, value.hour, value.minute)
+        round_trip.fold,
+    ) == (
+        value.year,
+        value.month,
+        value.day,
+        value.hour,
+        value.minute,
+        value.fold,
+    )
