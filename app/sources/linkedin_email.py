@@ -249,10 +249,6 @@ class LinkedInEmailSource(BaseSource):
                                 if _looks_like_linkedin_job_alert(email_message):
                                     messages.append(raw_message)
                 return messages
-        except SecretError:
-            raise
-        except LinkedInEmailSourceError:
-            raise
         except imaplib.IMAP4.error as exc:
             label = {
                 "login": "login",

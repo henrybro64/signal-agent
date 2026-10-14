@@ -5,6 +5,7 @@ import re
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from pathlib import Path
+from typing import Self
 
 import pytest
 
@@ -226,13 +227,15 @@ def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
             self.selected_mailbox: str | None = None
             self.search_criteria: object | None = None
 
-        def __enter__(self) -> FakeIMAPClient:
+        def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *args: object) -> bool:
+        @staticmethod
+        def __exit__(*_args: object) -> bool:
             return False
 
-        def login(self, username: str, password: str) -> tuple[str, list[bytes]]:
+        @staticmethod
+        def login(username: str, password: str) -> tuple[str, list[bytes]]:
             assert username == "user@example.com"
             assert password == "app-password"
             return ("OK", [b"Logged in"])
@@ -318,16 +321,19 @@ def test_linkedin_email_imap_mailbox_not_found(
             self.host = host
             self.timeout = timeout
 
-        def __enter__(self) -> FakeIMAPClient:
+        def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *args: object) -> bool:
+        @staticmethod
+        def __exit__(*_args: object) -> bool:
             return False
 
-        def login(self, username: str, password: str) -> tuple[str, list[bytes]]:
+        @staticmethod
+        def login(username: str, password: str) -> tuple[str, list[bytes]]:
             return ("OK", [b"Logged in"])
 
-        def select(self, mailbox: str) -> tuple[str, list[bytes]]:
+        @staticmethod
+        def select(mailbox: str) -> tuple[str, list[bytes]]:
             return ("NO", [b"Mailbox does not exist"])
 
     monkeypatch.setattr(
@@ -357,16 +363,19 @@ def test_linkedin_email_imap_login_error_is_labeled_login(
             self.host = host
             self.timeout = timeout
 
-        def __enter__(self) -> FakeIMAPClient:
+        def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *args: object) -> bool:
+        @staticmethod
+        def __exit__(*_args: object) -> bool:
             return False
 
-        def login(self, username: str, password: str) -> tuple[str, list[bytes]]:
+        @staticmethod
+        def login(username: str, password: str) -> tuple[str, list[bytes]]:
             raise imaplib.IMAP4.error("AUTHENTICATIONFAILED")
 
-        def select(self, mailbox: str) -> tuple[str, list[bytes]]:
+        @staticmethod
+        def select(mailbox: str) -> tuple[str, list[bytes]]:
             raise AssertionError("select must not run after login failure")
 
     monkeypatch.setattr(
