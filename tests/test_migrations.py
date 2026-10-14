@@ -114,6 +114,7 @@ def test_list_migrations_discovers_contiguous_packaged_versions() -> None:
     assert migrations[0].name == "001_initial.sql"
     assert "CREATE TABLE IF NOT EXISTS signals" in migrations[0].sql
     assert latest_migration_version() == migrations[-1].version
+    assert migrations[-1].name == "004_content_hash_and_schedule_owner.sql"
     assert list_migration_files()[0][1].name == "001_initial.sql"
 
 
@@ -131,6 +132,12 @@ def test_init_db_sets_schema_version_on_new_database(tmp_path: Path) -> None:
             ).fetchall()
         }
     assert {"signals", "signal_runs", "task_runs"} <= tables
+    with sqlite3.connect(db_path) as connection:
+        schedule_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(schedules)").fetchall()
+        }
+    assert "last_owner_pid" in schedule_columns
 
 
 def test_init_db_is_idempotent(tmp_path: Path) -> None:

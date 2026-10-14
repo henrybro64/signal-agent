@@ -44,6 +44,12 @@ def _request_stop(signum: int, _frame: FrameType | None) -> None:
     )
 
 
+def is_stop_requested() -> bool:
+    """Return True when the runtime received SIGTERM/SIGINT (#98)."""
+
+    return _STOP.requested
+
+
 def acquire_runtime_lock(root: str | Path | None = None):
     """Acquire an exclusive non-blocking lock for this runtime instance."""
 
@@ -92,6 +98,23 @@ def run_service_forever(
     db = runtime_paths.db_path(root)
     init_db(db)
 
+    # Only one runtime holds the flock, so any schedule still marked running /
+    # retrying at startup was orphaned by a prior SIGKILL (#98).
+    from app.scheduler.store import ScheduleStore
+
+    reclaimed = ScheduleStore(db).reclaim_orphaned_runs()
+    if reclaimed:
+        _append_log(
+            log_file,
+            f"reclaimed {reclaimed} orphaned schedule run(s) at startup",
+        )
+        log_event(
+            _LOGGER,
+            event="scheduler_reclaimed_orphaned",
+            message="reclaimed orphaned schedule runs at runtime startup",
+            reclaimed=reclaimed,
+        )
+
     pid = os.getpid()
     runtime_paths.pid_path(root).write_text(f"{pid}\n", encoding="utf-8")
     started = _utc_now()
@@ -126,7 +149,11 @@ def run_service_forever(
 
     def _persist_tick(state_payload: dict) -> dict:
         nonlocal tick_failures_total
-        tick = run_worker_tick(root=root, config_path=cfg)
+        tick = run_worker_tick(
+            root=root,
+            config_path=cfg,
+            stop_requested=is_stop_requested,
+        )
         state_payload.update(tick_state_patch(tick))
         if not tick.ok:
             tick_failures_total += 1

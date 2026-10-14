@@ -93,7 +93,10 @@ def init_db(db_path: str | Path) -> None:
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
     with _connect(resolved_path) as connection:
+        previous = get_schema_version(connection)
         apply_pending_migrations(connection)
+        if previous < 4:
+            _rewrite_legacy_content_hashes(connection)
 
     _DEFAULT_DB_PATH = resolved_path
 
@@ -134,45 +137,36 @@ def upsert_signal(
             url=url,
             external_id=external_id,
             content_hash=content_hash,
+            legacy_content_hash=_legacy_content_hash(item),
         )
 
         if existing_row is None:
-            cursor = connection.execute(
-                """
-                INSERT INTO signals (
-                    source,
-                    item_type,
-                    external_id,
-                    title,
-                    url,
-                    content,
-                    content_hash,
-                    metadata_json,
-                    first_seen_at,
-                    last_seen_at,
-                    status,
-                    score,
-                    reason
+            try:
+                return _insert_signal(
+                    connection,
+                    item=item,
+                    url=url,
+                    external_id=external_id,
+                    content=content,
+                    content_hash=content_hash,
+                    metadata_json=metadata_json,
+                    observed_at_text=observed_at_text,
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item.source,
-                    item.item_type,
-                    external_id,
-                    item.title,
-                    url,
-                    content,
-                    content_hash,
-                    metadata_json,
-                    observed_at_text,
-                    observed_at_text,
-                    "new",
-                    None,
-                    None,
-                ),
-            )
-            return UpsertResult(signal_id=int(cursor.lastrowid or 0), action="inserted")
+            except sqlite3.IntegrityError:
+                # Some existing signal collides on content_hash without being
+                # reachable from the lookups above. Degrade to refreshing that
+                # row rather than failing the caller's task; see
+                # _build_content_hash for the invariant this backstops.
+                # The failed INSERT leaves this connection in an aborted
+                # transaction until we roll it back.
+                connection.rollback()
+                existing_row = connection.execute(
+                    "SELECT * FROM signals WHERE content_hash = ? ORDER BY id LIMIT 1",
+                    (content_hash,),
+                ).fetchone()
+                if existing_row is None:
+                    raise
+                matched_on = "content_hash"
 
         first_seen_at = min(
             _parse_timestamp(existing_row["first_seen_at"]),
@@ -217,6 +211,57 @@ def upsert_signal(
             action="updated",
             matched_on=matched_on,
         )
+
+
+def _insert_signal(
+    connection: sqlite3.Connection,
+    *,
+    item: SignalItem,
+    url: str | None,
+    external_id: str | None,
+    content: str | None,
+    content_hash: str,
+    metadata_json: str,
+    observed_at_text: str,
+) -> UpsertResult:
+    """Insert a brand-new signal row, propagating unique-index rejections."""
+
+    cursor = connection.execute(
+        """
+        INSERT INTO signals (
+            source,
+            item_type,
+            external_id,
+            title,
+            url,
+            content,
+            content_hash,
+            metadata_json,
+            first_seen_at,
+            last_seen_at,
+            status,
+            score,
+            reason
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            item.source,
+            item.item_type,
+            external_id,
+            item.title,
+            url,
+            content,
+            content_hash,
+            metadata_json,
+            observed_at_text,
+            observed_at_text,
+            "new",
+            None,
+            None,
+        ),
+    )
+    return UpsertResult(signal_id=int(cursor.lastrowid or 0), action="inserted")
 
 
 def get_signal_status(
@@ -831,6 +876,7 @@ def _find_existing_signal(
     url: str | None,
     external_id: str | None,
     content_hash: str | None,
+    legacy_content_hash: str | None = None,
 ) -> tuple[sqlite3.Row | None, DedupMatch | None]:
     # Snapshot-backed market signals use external IDs when present; otherwise
     # fall back to the normal URL/content-hash dedup path for custom sources.
@@ -874,18 +920,67 @@ def _find_existing_signal(
         if row is not None:
             return row, "source_external_id"
 
-    if content_hash is not None:
+    # Content-hash is a last-resort fallback only for items that lack both a
+    # URL and an external ID. Matching by hash when either identity field is
+    # present (and merely differs from an older row) silently merges distinct
+    # jobs that share a generic title — see #97.
+    #
+    # The lookup stays unscoped on purpose: content_hash has a global UNIQUE
+    # index, so narrowing it here would reject a collision the index still
+    # enforces and turn the insert below into an IntegrityError.
+    # _build_content_hash() folds source and both identity fields in, so a hash
+    # match already implies the same source.
+    if content_hash is not None and url is None and external_id is None:
         row = connection.execute(
             "SELECT * FROM signals WHERE content_hash = ? ORDER BY id LIMIT 1",
             (content_hash,),
         ).fetchone()
         if row is not None:
             return row, "content_hash"
+        # Existing DBs may still store the pre-#97 hash (type/title/content).
+        # Match that once so the UPDATE below rewrites it; skipping this would
+        # insert a duplicate and re-notify on the first post-upgrade fetch.
+        if (
+            legacy_content_hash is not None
+            and legacy_content_hash != content_hash
+        ):
+            row = connection.execute(
+                "SELECT * FROM signals WHERE content_hash = ? ORDER BY id LIMIT 1",
+                (legacy_content_hash,),
+            ).fetchone()
+            if row is not None:
+                return row, "content_hash"
 
     return None, None
 
 
 def _build_content_hash(item: SignalItem) -> str:
+    # content_hash carries a global UNIQUE index while _find_existing_signal only
+    # matches on it for items that have neither URL nor external id. Every
+    # identity field must therefore be part of the hash: otherwise two distinct
+    # rows collide on a hash the lookup refuses to match, and the write fails
+    # instead of deduping (#97).
+    payload_data = {
+        "item_type": item.item_type.strip(),
+        "title": item.title.strip(),
+        "content": (item.content or "").strip(),
+        "source": item.source.strip(),
+        "url": (item.url or "").strip(),
+        "external_id": (item.external_id or "").strip(),
+    }
+    if item.item_type == "job":
+        # Generic titles ("Software Engineer") repeat across employers, so
+        # identity-less postings need company/location to stay distinct.
+        metadata = item.metadata if isinstance(item.metadata, dict) else {}
+        payload_data["company"] = str(metadata.get("company") or "").strip()
+        payload_data["location"] = str(metadata.get("location") or "").strip()
+
+    return _hash_payload(payload_data)
+
+
+def _legacy_content_hash(item: SignalItem) -> str:
+    """Hash used before #97, for matching unmigrated identity-less rows."""
+
     payload_data = {
         "item_type": item.item_type.strip(),
         "title": item.title.strip(),
@@ -893,7 +988,10 @@ def _build_content_hash(item: SignalItem) -> str:
     }
     if item.item_type in {"tw_stock_mover", "stock_watchlist_alert"}:
         payload_data["external_id"] = (item.external_id or "").strip()
+    return _hash_payload(payload_data)
 
+
+def _hash_payload(payload_data: dict[str, str]) -> str:
     payload = json.dumps(
         payload_data,
         ensure_ascii=False,
@@ -901,6 +999,54 @@ def _build_content_hash(item: SignalItem) -> str:
         sort_keys=True,
     )
     return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _rewrite_legacy_content_hashes(connection: sqlite3.Connection) -> None:
+    """Rewrite stored hashes to the current identity-aware payload (#97)."""
+
+    if not _table_has_signals(connection):
+        return
+    rows = connection.execute("SELECT * FROM signals").fetchall()
+    for row in rows:
+        item = _signal_item_from_row(row)
+        new_hash = _build_content_hash(item)
+        if row["content_hash"] == new_hash:
+            continue
+        try:
+            connection.execute(
+                "UPDATE signals SET content_hash = ? WHERE id = ?",
+                (new_hash, row["id"]),
+            )
+        except sqlite3.IntegrityError:
+            # Two distinct rows now share a hash; leave the stored value and
+            # let upsert_signal's IntegrityError fallback refresh in place.
+            continue
+
+
+def _table_has_signals(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type = 'table' AND name = 'signals'
+        LIMIT 1
+        """
+    ).fetchone()
+    return row is not None
+
+
+def _signal_item_from_row(row: sqlite3.Row) -> SignalItem:
+    raw_metadata = json.loads(row["metadata_json"] or "{}")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    return SignalItem(
+        source=str(row["source"]),
+        item_type=str(row["item_type"]),
+        title=str(row["title"]),
+        observed_at=_parse_timestamp(str(row["last_seen_at"])),
+        url=row["url"],
+        external_id=row["external_id"],
+        content=row["content"],
+        metadata=metadata,
+    )
 
 
 def _coerce_utc(value: datetime) -> datetime:

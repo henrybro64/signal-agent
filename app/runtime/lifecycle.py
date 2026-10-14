@@ -169,7 +169,7 @@ def start_runtime(
 def stop_runtime(
     *,
     root: str | Path | None = None,
-    timeout_seconds: float = 5.0,
+    timeout_seconds: float = 20.0,
 ) -> RuntimeProcessInfo:
     """Stop the runtime if running; idempotent when already stopped."""
 
@@ -279,14 +279,36 @@ def _pid_is_our_runtime(pid: int, *, root: str | Path | None = None) -> bool:
 
 
 def _read_cmdline(pid: int) -> str | None:
+    # Prefer /proc on Linux: avoids COLUMNS truncation from ``ps`` (#99).
+    proc_cmdline = Path(f"/proc/{pid}/cmdline")
+    if proc_cmdline.is_file():
+        try:
+            raw = proc_cmdline.read_bytes()
+        except OSError:
+            raw = b""
+        if raw:
+            text = raw.replace(b"\x00", b" ").decode("utf-8", errors="replace")
+            return text.strip() or None
+
+    return _read_ps_cmdline(pid)
+
+
+def _read_ps_cmdline(pid: int) -> str | None:
+    """Read a process command line via ``ps -ww``, ignoring COLUMNS (#99)."""
+
     if not _PS_EXECUTABLE or not Path(_PS_EXECUTABLE).is_file():
         return None
+    env = os.environ.copy()
+    # ``ps`` truncates to COLUMNS when that variable is set (pytest exports
+    # COLUMNS=80). Drop it so ``-ww`` can return the full command line.
+    env.pop("COLUMNS", None)
     try:
         result = subprocess.run(  # noqa: S603 - absolute ps path
-            [_PS_EXECUTABLE, "-p", str(pid), "-o", "command="],
+            [_PS_EXECUTABLE, "-ww", "-p", str(pid), "-o", "command="],
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
     except OSError:
         return None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,12 +24,17 @@ def run_worker_tick(
     *,
     root: str | Path | None = None,
     config_path: str | Path | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> WorkerTickResult:
     """Run one maintenance pulse; never raise to the service loop.
 
     Intentionally exercises fallible paths (config load, DB health, a
     read-only tool invoke) and records failures so a single bad tick cannot
     kill the runtime process.
+
+    ``stop_requested`` must be the callback from the executing service
+    instance. Importing ``app.runtime.service`` here would load a second
+    module copy when the runtime is launched as ``python -m app.runtime.service``.
     """
 
     failures: list[str] = []
@@ -93,6 +99,7 @@ def run_worker_tick(
                 root=base,
                 config_path=cfg,
                 db_path=db,
+                stop_requested=stop_requested,
             )
             schedule_detail = (
                 f"schedules_due={tick.due},started={tick.started},failed={tick.failed}"

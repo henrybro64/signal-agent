@@ -213,6 +213,206 @@ def test_transient_retry_and_permission_rejection(tmp_path: Path) -> None:
     assert history[0].status == "permission_denied"
 
 
+def test_reclaim_orphaned_runs_ignores_age(tmp_path: Path) -> None:
+    """Startup reclaim must recover freshly-killed runs without waiting (#98)."""
+
+    db = _prepare(tmp_path)
+    store = ScheduleStore(db)
+    schedule = store.add(
+        name="fresh-orphan",
+        task_name="dummy",
+        timezone="Asia/Taipei",
+        cron="every:5",
+    )
+    recent = (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    with store._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO schedule_runs (
+                schedule_id, run_id, status, started_at, attempt, dry_run
+            ) VALUES (?, 'fresh-orphan-run', 'running', ?, 1, 0)
+            """,
+            (schedule.id, recent),
+        )
+        connection.execute(
+            "UPDATE schedules SET next_run_at = NULL, last_started_at = ?, "
+            "last_status = 'running' WHERE id = ?",
+            (recent, schedule.id),
+        )
+        connection.commit()
+
+    # Age-based reclaim still waits the default hour window.
+    assert store.reclaim_stale_runs(older_than_seconds=3600) == 0
+    stuck = store.get(schedule.id)
+    assert stuck is not None
+    assert stuck.last_status == "running"
+    assert stuck.next_run_at is None
+
+    assert store.reclaim_orphaned_runs() == 1
+    recovered = store.get(schedule.id)
+    assert recovered is not None
+    assert recovered.last_status == "failed"
+    assert recovered.next_run_at is not None
+    assert store.has_running(schedule.id) is False
+
+
+def test_reclaim_orphaned_runs_skips_live_manual_owner(tmp_path: Path) -> None:
+    """A live `schedule run` process must not be reclaimed at daemon start (#98)."""
+
+    import subprocess
+
+    db = _prepare(tmp_path)
+    store = ScheduleStore(db)
+    schedule = store.add(
+        name="manual-live",
+        task_name="dummy",
+        timezone="Asia/Taipei",
+        cron="every:5",
+    )
+    recent = (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    child = subprocess.Popen(["sleep", "60"])
+    try:
+        with store._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO schedule_runs (
+                    schedule_id, run_id, status, started_at, attempt, dry_run,
+                    owner_pid
+                ) VALUES (?, 'live-manual-run', 'running', ?, 1, 0, ?)
+                """,
+                (schedule.id, recent, child.pid),
+            )
+            connection.execute(
+                "UPDATE schedules SET next_run_at = NULL, last_started_at = ?, "
+                "last_status = 'running', last_owner_pid = ? WHERE id = ?",
+                (recent, child.pid, schedule.id),
+            )
+            connection.commit()
+
+        assert store.reclaim_orphaned_runs() == 0
+        still = store.get(schedule.id)
+        assert still is not None
+        assert still.last_status == "running"
+        assert still.next_run_at is None
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+
+    assert store.reclaim_orphaned_runs() == 1
+    recovered = store.get(schedule.id)
+    assert recovered is not None
+    assert recovered.last_status == "failed"
+    assert recovered.next_run_at is not None
+
+
+def test_retry_backoff_respects_runtime_stop(tmp_path: Path) -> None:
+    """Backoff must not block shutdown for the full retry sleep (#98)."""
+
+    from app.scheduler import service as scheduler_service
+
+    db = _prepare(tmp_path)
+    store = ScheduleStore(db)
+    schedule = store.add(
+        name="backoff-stop",
+        task_name="dummy",
+        timezone="Asia/Taipei",
+        cron="every:5",
+        max_retries=2,
+        backoff_seconds=30.0,
+    )
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE schedules SET next_run_at = ? WHERE id = ?",
+            (past, schedule.id),
+        )
+        connection.commit()
+
+    stop_state = {"requested": False}
+    attempts = {"count": 0}
+
+    def fake_stop() -> bool:
+        return stop_state["requested"]
+
+    def flaky_runner(*_args, **_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            stop_state["requested"] = True
+            raise TimeoutError("transient")
+        raise AssertionError("retry should not run after stop")
+
+    outcome = scheduler_service._execute_with_retries(
+        store,
+        store.get(schedule.id) or schedule,
+        root=tmp_path,
+        db_path=db,
+        config_path=str(tmp_path / "config.yaml"),
+        runner=flaky_runner,
+        dry_run=False,
+        force=False,
+        stop_requested=fake_stop,
+    )
+    assert outcome == "started_failed"
+    assert attempts["count"] == 1
+    finished = store.get(schedule.id)
+    assert finished is not None
+    assert finished.last_status == "failed"
+    assert finished.next_run_at is not None
+    history = store.history(schedule.id)
+    assert history
+    assert "TimeoutError" in (history[0].error or "")
+    assert "interrupted by runtime shutdown" not in (history[0].error or "")
+
+
+def test_tick_stop_skips_remaining_due_schedules(tmp_path: Path) -> None:
+    """A stop during one schedule must not count the rest as failures (#98)."""
+
+    db = _prepare(tmp_path)
+    store = ScheduleStore(db)
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    for name in ("sched-a", "sched-b", "sched-c"):
+        schedule = store.add(
+            name=name,
+            task_name="dummy",
+            timezone="Asia/Taipei",
+            cron="every:5",
+        )
+        with store._connect() as connection:
+            connection.execute(
+                "UPDATE schedules SET next_run_at = ? WHERE id = ?",
+                (past, schedule.id),
+            )
+            connection.commit()
+
+    stop_state = {"requested": False}
+
+    def runner(*_args, **_kwargs) -> None:
+        stop_state["requested"] = True
+
+    result = run_schedule_tick(
+        root=tmp_path,
+        db_path=db,
+        task_runner=runner,
+        stop_requested=lambda: stop_state["requested"],
+    )
+    assert result.due == 3
+    assert result.started == 1
+    assert result.succeeded == 1
+    assert result.failed == 0
+    assert result.skipped == 2
+    assert any("skipped_stopping" in item for item in (result.details or []))
+    due_again = store.due()
+    assert len(due_again) == 2
+
+
 def test_mid_retry_preserves_next_run_and_stale_reclaim(tmp_path: Path) -> None:
     db = _prepare(tmp_path)
     store = ScheduleStore(db)

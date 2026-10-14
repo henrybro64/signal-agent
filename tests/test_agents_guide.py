@@ -139,6 +139,7 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/sql/migrations/001_initial.sql",
         "app/sql/migrations/002_agent_memory.sql",
         "app/sql/migrations/003_schedules.sql",
+        "app/sql/migrations/004_content_hash_and_schedule_owner.sql",
         "sql/schema.sql",
         "docs/ubuntu-vm-deployment.md",
         "docs/m7-agent-platform-roadmap.md",

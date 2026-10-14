@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +32,12 @@ from .store import DEFAULT_STALE_RUNNING_SECONDS, Schedule, ScheduleStore
 _LOGGER = get_logger("scheduler.service")
 
 
+def _never_stop() -> bool:
+    """Default stop check for callers outside the local runtime (#98)."""
+
+    return False
+
+
 @dataclass(slots=True)
 class ScheduleTickResult:
     due: int = 0
@@ -48,8 +55,13 @@ def run_schedule_tick(
     db_path: str | Path | None = None,
     now: datetime | None = None,
     task_runner: Any | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> ScheduleTickResult:
-    """Run all due schedules once; never raise to the runtime loop."""
+    """Run all due schedules once; never raise to the runtime loop.
+
+    ``stop_requested`` lets the caller (the local runtime) signal shutdown so
+    the tick stops claiming new schedules instead of being SIGKILLed mid-run.
+    """
 
     base = runtime_paths.project_root(root)
     store = ScheduleStore(db_path or runtime_paths.db_path(base))
@@ -66,11 +78,23 @@ def run_schedule_tick(
             message="reclaimed stale schedule runs",
             reclaimed=reclaimed,
         )
-    due = store.due(now=moment)
-    result.due = len(due)
+    due_schedules: list[Schedule] = store.due(now=moment)
+    result.due = len(due_schedules)
     runner = task_runner or _default_task_runner
+    should_stop = stop_requested or _never_stop
     resolved_db = Path(db_path or runtime_paths.db_path(base))
-    for schedule in due:
+    for index, schedule in enumerate(due_schedules):
+        if should_stop():
+            # Shutdown pre-empts the rest of this tick. These schedules were
+            # never claimed, so they keep their due next_run_at and run on the
+            # next tick; counting them as started failures would be a lie.
+            pending: list[Schedule] = due_schedules[index:]
+            result.skipped += len(pending)
+            if result.details is not None:
+                result.details.extend(
+                    f"{item.id}:skipped_stopping" for item in pending
+                )
+            break
         outcome = _run_one(
             store,
             schedule,
@@ -78,6 +102,7 @@ def run_schedule_tick(
             db_path=resolved_db,
             config_path=str(config_path or runtime_paths.config_path(base)),
             runner=runner,
+            stop_requested=should_stop,
         )
         if outcome == "started_ok":
             result.started += 1
@@ -175,6 +200,7 @@ def _run_one(
     runner: Any,
     force: bool = False,
     dry_run_override: bool | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> str:
     if not schedule.enabled and not force:
         return "skipped_disabled"
@@ -203,6 +229,7 @@ def _run_one(
             runner=runner,
             dry_run=dry_run,
             force=force,
+            stop_requested=stop_requested or _never_stop,
         )
     finally:
         reset_permission_policy(policy_token)
@@ -264,11 +291,22 @@ def _execute_with_retries(
     runner: Any,
     dry_run: bool,
     force: bool,
+    stop_requested: Callable[[], bool] = _never_stop,
 ) -> str:
     attempt = 1
     max_attempts = max(1, schedule.max_retries + 1)
     claimed_next = schedule.next_run_at
     while attempt <= max_attempts:
+        if stop_requested():
+            # Either shutdown arrived before the first claim, or a previous
+            # attempt already finished and left last_status=retrying with
+            # next_run_at uncleared. Restore cadence in the latter case so
+            # the schedule is due again after restart (#98).
+            current = store.get(schedule.id) or schedule
+            if current.last_status in {"running", "retrying"}:
+                _finalize_interrupted_schedule(store, current)
+                return "started_failed"
+            return "skipped_stopping"
         run_id = str(uuid.uuid4())
         claimed = store.mark_started(
             schedule.id,
@@ -321,9 +359,61 @@ def _execute_with_retries(
             )
             if outcome == "started_failed":
                 return outcome
-            time.sleep(max(0.0, schedule.backoff_seconds))
+            if _interruptible_backoff(
+                schedule.backoff_seconds,
+                stop_requested=stop_requested,
+            ):
+                _finalize_interrupted_schedule(store, schedule)
+                return "started_failed"
             attempt += 1
     return "started_failed"
+
+
+def _interruptible_backoff(
+    seconds: float,
+    *,
+    stop_requested: Callable[[], bool] = _never_stop,
+) -> bool:
+    """Sleep in short slices; return True when a runtime stop is requested (#98)."""
+
+    deadline = time.monotonic() + max(0.0, seconds)
+    while time.monotonic() < deadline:
+        if stop_requested():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.2, remaining))
+    return stop_requested()
+
+
+def _finalize_interrupted_schedule(
+    store: ScheduleStore,
+    schedule: Schedule,
+) -> None:
+    """Restore cadence when shutdown interrupts a mid-retry schedule (#98).
+
+    The failed attempt is already recorded on ``schedule_runs``; rewriting that
+    row would replace the real error with a shutdown message. Only the schedule
+    row needs next_run_at restored so the task is due again after restart.
+    """
+
+    current = store.get(schedule.id) or schedule
+    if current.last_status not in {"running", "retrying"}:
+        return
+    store.mark_finished(
+        current,
+        status="failed",
+        error="interrupted by runtime shutdown",
+        schedule_next=True,
+    )
+    log_event(
+        _LOGGER,
+        event="schedule_run_interrupted",
+        message="schedule interrupted by runtime shutdown",
+        level=30,
+        schedule_id=schedule.id,
+    )
 
 
 def _finish_failed_attempt(
