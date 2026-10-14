@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import imaplib
+import re
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from pathlib import Path
 
 import pytest
@@ -29,9 +33,7 @@ def test_linkedin_email_source_from_config_reads_local_fixture_path(
     assert source.imap_mailbox == "INBOX"
 
 
-def test_linkedin_email_source_from_config_applies_sources_runtime_settings() -> (
-    None
-):
+def test_linkedin_email_source_from_config_applies_sources_runtime_settings() -> None:
     source = LinkedInEmailSource.from_config(
         _build_config(
             sources={
@@ -99,8 +101,7 @@ def test_linkedin_email_source_fetch_normalizes_fixture_email() -> None:
     assert first_item.metadata["company"] == "Appier"
     assert first_item.metadata["location"] == "Taipei, Taiwan"
     assert (
-        first_item.metadata["email_subject"]
-        == "LinkedIn Job Alerts: 2 jobs in Taiwan"
+        first_item.metadata["email_subject"] == "LinkedIn Job Alerts: 2 jobs in Taiwan"
     )
     assert "linkedin" in first_item.metadata["email_from"].casefold()
     assert second_item.title == "Staff AI Agent Engineer"
@@ -216,10 +217,14 @@ def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
         b"Not a LinkedIn job alert.\r\n"
     )
 
+    created: dict[str, object] = {}
+
     class FakeIMAPClient:
-        def __init__(self, host: str) -> None:
-            self.host = host
+        def __init__(self, host: str, *, timeout: float | None = None) -> None:
+            created["host"] = host
+            created["timeout"] = timeout
             self.selected_mailbox: str | None = None
+            self.search_criteria: object | None = None
 
         def __enter__(self) -> FakeIMAPClient:
             return self
@@ -236,15 +241,37 @@ def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
             self.selected_mailbox = mailbox
             return ("OK", [b"2"])
 
-        def search(self, *criteria: object) -> tuple[str, list[bytes | None]]:
-            assert criteria[1:] == ("SINCE", criteria[-1])
-            return ("OK", [b"1 2"])
+        def search(
+            self,
+            charset: object,
+            *criteria: object,
+        ) -> tuple[str, list[bytes | None]]:
+            assert charset is None
+            self.search_criteria = criteria[0] if len(criteria) == 1 else criteria
+            created["search"] = self.search_criteria
+            inbox = {b"1": linkedin_message, b"2": other_message}
+            blob = " ".join(str(part) for part in criteria)
+            senders = re.findall(r'FROM "([^"]+)"', blob)
+            matched: list[bytes] = []
+            for message_id, raw in inbox.items():
+                parsed = BytesParser(policy=email_policy).parsebytes(raw)
+                from_header = str(parsed.get("From") or "")
+                if senders and not any(
+                    sender.casefold() in from_header.casefold() for sender in senders
+                ):
+                    continue
+                matched.append(message_id)
+            created["search_ids"] = matched
+            return ("OK", [b" ".join(matched)])
 
         def fetch(
             self,
             message_id: bytes,
             query: str,
         ) -> tuple[str, list[tuple[bytes, bytes] | bytes | None]]:
+            fetched = created.setdefault("fetched", [])
+            assert isinstance(fetched, list)
+            fetched.append(message_id)
             if message_id == b"1":
                 return ("OK", [(b"1 (RFC822)", linkedin_message)])
             if message_id == b"2":
@@ -265,6 +292,7 @@ def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
         imap_password="app-password",
         imap_mailbox="INBOX",
         lookback_days=14,
+        timeout_seconds=12.5,
     )
 
     items = source.fetch()
@@ -272,6 +300,92 @@ def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
     assert len(items) == 2
     assert items[0].source == "linkedin_email"
     assert items[0].external_id == "linkedin-email-1234567890"
+    assert created["timeout"] == 12.5
+    search = str(created["search"])
+    assert search.startswith("(") and search.endswith(")")
+    assert "SINCE" in search
+    assert "jobs-noreply@linkedin.com" in search
+    assert "jobalerts-noreply@linkedin.com" in search
+    assert created["search_ids"] == [b"1"]
+    assert created["fetched"] == [b"1"]
+
+
+def test_linkedin_email_imap_mailbox_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeIMAPClient:
+        def __init__(self, host: str, *, timeout: float | None = None) -> None:
+            self.host = host
+            self.timeout = timeout
+
+        def __enter__(self) -> FakeIMAPClient:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def login(self, username: str, password: str) -> tuple[str, list[bytes]]:
+            return ("OK", [b"Logged in"])
+
+        def select(self, mailbox: str) -> tuple[str, list[bytes]]:
+            return ("NO", [b"Mailbox does not exist"])
+
+    monkeypatch.setattr(
+        linkedin_email_module.imaplib,
+        "IMAP4_SSL",
+        FakeIMAPClient,
+    )
+    source = LinkedInEmailSource(
+        keywords=["python"],
+        imap_host="imap.gmail.com",
+        imap_username="user@example.com",
+        imap_password="app-password",
+        imap_mailbox="MissingBox",
+    )
+    with pytest.raises(
+        linkedin_email_module.LinkedInEmailSourceError,
+        match="mailbox not found",
+    ):
+        source.fetch()
+
+
+def test_linkedin_email_imap_login_error_is_labeled_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeIMAPClient:
+        def __init__(self, host: str, *, timeout: float | None = None) -> None:
+            self.host = host
+            self.timeout = timeout
+
+        def __enter__(self) -> FakeIMAPClient:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def login(self, username: str, password: str) -> tuple[str, list[bytes]]:
+            raise imaplib.IMAP4.error("AUTHENTICATIONFAILED")
+
+        def select(self, mailbox: str) -> tuple[str, list[bytes]]:
+            raise AssertionError("select must not run after login failure")
+
+    monkeypatch.setattr(
+        linkedin_email_module.imaplib,
+        "IMAP4_SSL",
+        FakeIMAPClient,
+    )
+    source = LinkedInEmailSource(
+        keywords=["python"],
+        imap_host="imap.gmail.com",
+        imap_username="user@example.com",
+        imap_password="wrong-password",
+        imap_mailbox="INBOX",
+    )
+    with pytest.raises(
+        linkedin_email_module.LinkedInEmailSourceError,
+        match="IMAP login failed",
+    ):
+        source.fetch()
 
 
 def test_linkedin_email_source_requires_local_path_or_imap_credentials() -> None:

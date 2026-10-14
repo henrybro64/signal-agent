@@ -50,7 +50,36 @@ def test_render_user_unit_has_restart_and_no_secrets() -> None:
     )
     assert "-m app.runtime.service" in exec_start
     assert "root with spaces" in exec_start
-    assert "--root '" in exec_start or '--root "' in exec_start
+    assert '--root "' in exec_start
+    with pytest.raises(ValueError, match="WorkingDirectory"):
+        render_user_unit(
+            UserUnitSpec(
+                description="bad",
+                working_directory="/tmp/path with spaces",
+                exec_start="/usr/bin/python -m app.runtime.service",
+                environment_file=None,
+            )
+        )
+
+
+def test_default_exec_start_preserves_venv_symlink(tmp_path: Path) -> None:
+    """Keep ``.venv/bin/python`` as a symlink path, not the base interpreter (#100)."""
+
+    real_python = tmp_path / "usr" / "bin" / "python3.13"
+    real_python.parent.mkdir(parents=True)
+    real_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(real_python)
+
+    exec_start = default_exec_start(
+        python_executable=str(venv_python),
+        root=tmp_path / "project",
+        config_path=tmp_path / "project" / "config.yaml",
+    )
+    first_token = exec_start.split(" -m ", 1)[0]
+    assert ".venv/bin/python" in first_token
+    assert "usr/bin/python3.13" not in first_token
 
 
 def test_install_uninstall_idempotent(tmp_path: Path) -> None:

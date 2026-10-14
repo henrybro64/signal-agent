@@ -706,6 +706,7 @@ sources:
     lookback_days: 14
     # Optional; when omitted, LINKEDIN_EMAIL_IMAP_MAILBOX is used (default INBOX).
     imap_mailbox: INBOX
+    timeout_seconds: 30
   twse:
     timeout_seconds: 10
     max_retries: 2
@@ -778,8 +779,8 @@ env = load_env_settings()
   the same value as `notifiers.telegram.enabled`.
 - Optional top-level `sources:` tunes HTTP timeouts, retries, request delays,
   job-search `page_limit`, stock `batch_size`, and LinkedIn email
-  `lookback_days` / `imap_mailbox` without code changes. Invalid values raise
-  `ConfigError` at load time.
+  `lookback_days` / `imap_mailbox` / `timeout_seconds` without code changes.
+  Invalid values raise `ConfigError` at load time.
 - `tasks.job_search.profiles` runs multiple named searches in one task. Each
   profile has its own `sources`, `keywords`, `locations`, and optional
   `scorer_profile` Markdown path. When `profiles` is omitted, the legacy
