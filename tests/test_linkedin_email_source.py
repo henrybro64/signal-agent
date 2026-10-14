@@ -269,15 +269,15 @@ def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
 
         def fetch(
             self,
-            message_id: bytes,
+            message_id: str | bytes,
             query: str,
         ) -> tuple[str, list[tuple[bytes, bytes] | bytes | None]]:
             fetched = created.setdefault("fetched", [])
             assert isinstance(fetched, list)
             fetched.append(message_id)
-            if message_id == b"1":
+            if message_id in (b"1", "1"):
                 return ("OK", [(b"1 (RFC822)", linkedin_message)])
-            if message_id == b"2":
+            if message_id in (b"2", "2"):
                 return ("OK", [(b"2 (RFC822)", other_message)])
             raise AssertionError(f"unexpected message id: {message_id!r}")
 
@@ -310,7 +310,7 @@ def test_linkedin_email_source_fetch_from_imap_filters_job_alerts(
     assert "jobs-noreply@linkedin.com" in search
     assert "jobalerts-noreply@linkedin.com" in search
     assert created["search_ids"] == [b"1"]
-    assert created["fetched"] == [b"1"]
+    assert created["fetched"] == ["1"]
 
 
 def test_linkedin_email_imap_mailbox_not_found(

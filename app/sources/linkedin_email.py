@@ -282,7 +282,10 @@ def _fetch_linkedin_alert_bodies(
 ) -> list[bytes]:
     messages: list[bytes] = []
     for message_id in message_ids:
-        fetch_status, fetch_data = client.fetch(message_id, "(RFC822)")
+        fetch_status, fetch_data = client.fetch(
+            message_id.decode("ascii"),
+            "(RFC822)",
+        )
         if fetch_status != "OK":
             continue
         raw_message = _rfc822_payload(fetch_data)
@@ -294,7 +297,9 @@ def _fetch_linkedin_alert_bodies(
     return messages
 
 
-def _rfc822_payload(fetch_data: list[object]) -> bytes | None:
+def _rfc822_payload(fetch_data: object) -> bytes | None:
+    if not isinstance(fetch_data, list):
+        return None
     for part in fetch_data:
         if not isinstance(part, tuple) or len(part) != 2:
             continue
