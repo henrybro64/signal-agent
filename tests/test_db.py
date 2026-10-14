@@ -269,13 +269,15 @@ def test_upsert_signal_dedups_by_content_hash(tmp_path: Path) -> None:
         title="Agent Engineer",
         observed_at=OBSERVED_AT,
         content="Build reliable agent workflows.",
+        metadata={"company": "Example Labs", "location": "Taipei"},
     )
     second = SignalItem(
-        source="another-source",
+        source="manual",
         item_type="job",
         title="Agent Engineer",
         observed_at=datetime(2026, 6, 16, 11, 0, tzinfo=UTC),
         content="Build reliable agent workflows.",
+        metadata={"company": "Example Labs", "location": "Taipei"},
     )
 
     init_db(db_path)
@@ -289,6 +291,250 @@ def test_upsert_signal_dedups_by_content_hash(tmp_path: Path) -> None:
     assert _count_signals(db_path) == 1
     assert row["source"] == "manual"
     assert row["last_seen_at"] == "2026-06-16T11:00:00Z"
+
+
+def test_upsert_signal_does_not_merge_distinct_jobs_via_content_hash(
+    tmp_path: Path,
+) -> None:
+    """Distinct LinkedIn jobs sharing a title must not collapse (#97)."""
+
+    db_path = tmp_path / "signals.sqlite3"
+    first = SignalItem(
+        source="linkedin_email",
+        item_type="job",
+        title="Software Engineer",
+        observed_at=OBSERVED_AT,
+        url="https://www.linkedin.com/jobs/view/111",
+        external_id="li-111",
+        content=None,
+        metadata={"company": "Acme"},
+    )
+    second = SignalItem(
+        source="linkedin_email",
+        item_type="job",
+        title="Software Engineer",
+        observed_at=datetime(2026, 6, 16, 11, 0, tzinfo=UTC),
+        url="https://www.linkedin.com/jobs/view/222",
+        external_id="li-222",
+        content=None,
+        metadata={"company": "Globex"},
+    )
+
+    init_db(db_path)
+    first_result = upsert_signal(first, db_path=db_path)
+    update_signal_status(first_result.signal_id, "reviewed", db_path=db_path)
+    second_result = upsert_signal(second, db_path=db_path)
+
+    assert first_result.action == "inserted"
+    assert second_result.action == "inserted"
+    assert second_result.matched_on is None
+    assert second_result.signal_id != first_result.signal_id
+    assert _count_signals(db_path) == 2
+
+    first_row = _fetch_signal(db_path, first_result.signal_id)
+    second_row = _fetch_signal(db_path, second_result.signal_id)
+    assert first_row["external_id"] == "li-111"
+    assert first_row["url"] == "https://www.linkedin.com/jobs/view/111"
+    assert first_row["status"] == "reviewed"
+    assert second_row["external_id"] == "li-222"
+    assert second_row["status"] == "new"
+
+
+def test_upsert_signal_content_hash_scoped_to_source_and_company(
+    tmp_path: Path,
+) -> None:
+    """Same title across sources/companies must insert separately (#97)."""
+
+    db_path = tmp_path / "signals.sqlite3"
+    job104 = SignalItem(
+        source="job104",
+        item_type="job",
+        title="Backend Engineer",
+        observed_at=OBSERVED_AT,
+        content=None,
+        metadata={"company": "Acme", "location": "Taipei"},
+    )
+    indeed = SignalItem(
+        source="indeed",
+        item_type="job",
+        title="Backend Engineer",
+        observed_at=datetime(2026, 6, 16, 11, 0, tzinfo=UTC),
+        content=None,
+        metadata={"company": "Acme", "location": "Taipei"},
+    )
+    other_company = SignalItem(
+        source="job104",
+        item_type="job",
+        title="Backend Engineer",
+        observed_at=datetime(2026, 6, 16, 12, 0, tzinfo=UTC),
+        content=None,
+        metadata={"company": "Globex", "location": "Taipei"},
+    )
+
+    init_db(db_path)
+    results = [
+        upsert_signal(job104, db_path=db_path),
+        upsert_signal(indeed, db_path=db_path),
+        upsert_signal(other_company, db_path=db_path),
+    ]
+
+    assert all(result.action == "inserted" for result in results)
+    assert _count_signals(db_path) == 3
+
+
+def test_upsert_signal_keeps_distinct_research_candidates(tmp_path: Path) -> None:
+    """Non-job rows carrying only an external id must not collide (#97).
+
+    Mirrors app/workflows/job_research_nodes.py, which promotes jobs with
+    url=None and a derived external id. Two postings that share a generic
+    title and an empty body previously hit the unique content_hash index.
+    """
+
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+
+    results = [
+        upsert_signal(
+            SignalItem(
+                source="job_research_agent",
+                item_type="job_research_candidate",
+                title="Software Engineer",
+                observed_at=OBSERVED_AT,
+                url=None,
+                external_id=f"job-research:linkedin_email:{origin_id}",
+                content=None,
+                metadata={"origin_external_id": origin_id},
+            ),
+            db_path=db_path,
+        )
+        for origin_id in ("li-111", "li-222")
+    ]
+
+    assert all(result.action == "inserted" for result in results)
+    assert _count_signals(db_path) == 2
+
+
+def test_upsert_signal_keeps_same_external_id_across_sources(tmp_path: Path) -> None:
+    """The (source, external_id) index allows both rows, so hashes must differ (#97)."""
+
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+
+    results = [
+        upsert_signal(
+            SignalItem(
+                source=source,
+                item_type="tw_stock_mover",
+                title="2330 台積電",
+                observed_at=OBSERVED_AT,
+                external_id="2330",
+                content=None,
+                metadata={"stock_code": "2330"},
+            ),
+            db_path=db_path,
+        )
+        for source in ("twse", "tpex")
+    ]
+
+    assert all(result.action == "inserted" for result in results)
+    assert _count_signals(db_path) == 2
+
+
+def test_upsert_signal_keeps_research_candidates_with_external_ids(
+    tmp_path: Path,
+) -> None:
+    """Mirrors tw_market_assistant: url=None, distinct external ids (#97)."""
+
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+
+    results = [
+        upsert_signal(
+            SignalItem(
+                source="tw_market_assistant",
+                item_type="tw_research_candidate",
+                title="研究候選",
+                observed_at=OBSERVED_AT,
+                url=None,
+                external_id=f"tw_research_candidate-20261014-1200-{code}",
+                content=None,
+                metadata={"stock_code": code},
+            ),
+            db_path=db_path,
+        )
+        for code in ("2330", "2317")
+    ]
+
+    assert all(result.action == "inserted" for result in results)
+    assert _count_signals(db_path) == 2
+
+
+def test_upsert_signal_keeps_non_job_rows_with_distinct_urls(tmp_path: Path) -> None:
+    """Distinct URLs must stay distinct even when title and body match (#97)."""
+
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+
+    results = [
+        upsert_signal(
+            SignalItem(
+                source="tw_market_assistant",
+                item_type="tw_research_candidate",
+                title="研究候選",
+                observed_at=OBSERVED_AT,
+                url=f"https://example.com/report/{index}",
+                external_id=None,
+                content="same body",
+                metadata={},
+            ),
+            db_path=db_path,
+        )
+        for index in (1, 2)
+    ]
+
+    assert all(result.action == "inserted" for result in results)
+    assert _count_signals(db_path) == 2
+
+
+def test_upsert_signal_degrades_to_update_on_hash_collision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hash/lookup divergence must refresh the colliding row, not raise (#97)."""
+
+    from app.core import db as core_db
+
+    db_path = tmp_path / "signals.sqlite3"
+    init_db(db_path)
+    first = SignalItem(
+        source="alpha",
+        item_type="news",
+        title="First",
+        observed_at=OBSERVED_AT,
+        url="https://example.com/first",
+        content="first body",
+    )
+    second = SignalItem(
+        source="beta",
+        item_type="news",
+        title="Second",
+        observed_at=datetime(2026, 6, 16, 11, 0, tzinfo=UTC),
+        url="https://example.com/second",
+        content="second body",
+    )
+
+    # Force every item onto one hash so the insert hits the unique index while
+    # the identity lookups above it all miss.
+    monkeypatch.setattr(core_db, "_build_content_hash", lambda _item: "collide")
+
+    first_result = upsert_signal(first, db_path=db_path)
+    second_result = upsert_signal(second, db_path=db_path)
+
+    assert first_result.action == "inserted"
+    assert second_result.action == "updated"
+    assert second_result.matched_on == "content_hash"
+    assert second_result.signal_id == first_result.signal_id
+    assert _count_signals(db_path) == 1
 
 
 def test_upsert_stock_mover_snapshots_preserve_history_rows(tmp_path: Path) -> None:

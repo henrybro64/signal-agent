@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -197,6 +199,109 @@ def test_root_before_subcommand_and_config_under_root(tmp_path: Path) -> None:
     )
     assert after.root == str(tmp_path)
     assert after.config == str(tmp_path / "config.yaml")
+
+
+def test_read_cmdline_not_truncated_by_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ownership checks must survive COLUMNS truncation from ``ps`` (#99)."""
+
+    from app.runtime import lifecycle as runtime_lifecycle
+
+    _prepare(tmp_path)
+    info = start_runtime(root=tmp_path, config_path=tmp_path / "config.yaml")
+    assert info.pid is not None
+    monkeypatch.setenv("COLUMNS", "20")
+    cmdline = runtime_lifecycle._read_cmdline(info.pid)
+    assert cmdline is not None
+    assert "app.runtime.service" in cmdline
+    status = get_runtime_info(tmp_path)
+    assert status.running
+    assert status.pid == info.pid
+    stop_runtime(root=tmp_path)
+    assert not get_runtime_info(tmp_path).running
+
+
+def test_ps_cmdline_uses_unlimited_width(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ps fallback must pass -ww and drop COLUMNS so the test can fail (#99)."""
+
+    from app.runtime import lifecycle as runtime_lifecycle
+
+    captured: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args[0] if args else kwargs.get("args")
+        captured["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(
+            captured["args"],  # type: ignore[arg-type]
+            0,
+            stdout="/very/long/venv/bin/python -m app.runtime.service\n",
+            stderr="",
+        )
+
+    monkeypatch.setenv("COLUMNS", "20")
+    monkeypatch.setattr(runtime_lifecycle.subprocess, "run", fake_run)
+    text = runtime_lifecycle._read_ps_cmdline(12345)
+    assert text is not None
+    assert "app.runtime.service" in text
+    argv = captured["args"]
+    assert isinstance(argv, list)
+    assert "-ww" in argv
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert "COLUMNS" not in env
+
+
+def test_runtime_start_reclaims_orphaned_schedule(tmp_path: Path) -> None:
+    """Startup must recover a SIGKILL-orphaned schedule without waiting (#98)."""
+
+    from app.core.db import init_db
+    from app.runtime import paths as runtime_paths
+    from app.scheduler.store import ScheduleStore
+
+    _prepare(tmp_path)
+    db = runtime_paths.db_path(tmp_path)
+    init_db(db)
+    store = ScheduleStore(db)
+    schedule = store.add(
+        name="intraday-movers",
+        task_name="dummy",
+        timezone="Asia/Taipei",
+        cron="every:5",
+    )
+    recent = (datetime.now(UTC) - timedelta(seconds=3)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    with store._connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO schedule_runs (
+                schedule_id, run_id, status, started_at, attempt, dry_run
+            ) VALUES (?, 'killed-run', 'running', ?, 1, 0)
+            """,
+            (schedule.id, recent),
+        )
+        connection.execute(
+            "UPDATE schedules SET next_run_at = NULL, last_started_at = ?, "
+            "last_status = 'running' WHERE id = ?",
+            (recent, schedule.id),
+        )
+        connection.commit()
+
+    info = start_runtime(root=tmp_path, config_path=tmp_path / "config.yaml")
+    assert info.pid is not None
+    try:
+        recovered = store.get(schedule.id)
+        assert recovered is not None
+        assert recovered.last_status == "failed"
+        assert recovered.next_run_at is not None
+        log_text = log_path(tmp_path).read_text(encoding="utf-8")
+        assert "reclaimed 1 orphaned schedule run(s) at startup" in log_text
+    finally:
+        stop_runtime(root=tmp_path)
 
 
 def test_runtime_survives_briefly(tmp_path: Path) -> None:

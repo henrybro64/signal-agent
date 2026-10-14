@@ -137,42 +137,32 @@ def upsert_signal(
         )
 
         if existing_row is None:
-            cursor = connection.execute(
-                """
-                INSERT INTO signals (
-                    source,
-                    item_type,
-                    external_id,
-                    title,
-                    url,
-                    content,
-                    content_hash,
-                    metadata_json,
-                    first_seen_at,
-                    last_seen_at,
-                    status,
-                    score,
-                    reason
+            try:
+                return _insert_signal(
+                    connection,
+                    item=item,
+                    url=url,
+                    external_id=external_id,
+                    content=content,
+                    content_hash=content_hash,
+                    metadata_json=metadata_json,
+                    observed_at_text=observed_at_text,
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item.source,
-                    item.item_type,
-                    external_id,
-                    item.title,
-                    url,
-                    content,
-                    content_hash,
-                    metadata_json,
-                    observed_at_text,
-                    observed_at_text,
-                    "new",
-                    None,
-                    None,
-                ),
-            )
-            return UpsertResult(signal_id=int(cursor.lastrowid or 0), action="inserted")
+            except sqlite3.IntegrityError:
+                # Some existing signal collides on content_hash without being
+                # reachable from the lookups above. Degrade to refreshing that
+                # row rather than failing the caller's task; see
+                # _build_content_hash for the invariant this backstops.
+                # The failed INSERT leaves this connection in an aborted
+                # transaction until we roll it back.
+                connection.rollback()
+                existing_row = connection.execute(
+                    "SELECT * FROM signals WHERE content_hash = ? ORDER BY id LIMIT 1",
+                    (content_hash,),
+                ).fetchone()
+                if existing_row is None:
+                    raise
+                matched_on = "content_hash"
 
         first_seen_at = min(
             _parse_timestamp(existing_row["first_seen_at"]),
@@ -217,6 +207,57 @@ def upsert_signal(
             action="updated",
             matched_on=matched_on,
         )
+
+
+def _insert_signal(
+    connection: sqlite3.Connection,
+    *,
+    item: SignalItem,
+    url: str | None,
+    external_id: str | None,
+    content: str | None,
+    content_hash: str,
+    metadata_json: str,
+    observed_at_text: str,
+) -> UpsertResult:
+    """Insert a brand-new signal row, propagating unique-index rejections."""
+
+    cursor = connection.execute(
+        """
+        INSERT INTO signals (
+            source,
+            item_type,
+            external_id,
+            title,
+            url,
+            content,
+            content_hash,
+            metadata_json,
+            first_seen_at,
+            last_seen_at,
+            status,
+            score,
+            reason
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            item.source,
+            item.item_type,
+            external_id,
+            item.title,
+            url,
+            content,
+            content_hash,
+            metadata_json,
+            observed_at_text,
+            observed_at_text,
+            "new",
+            None,
+            None,
+        ),
+    )
+    return UpsertResult(signal_id=int(cursor.lastrowid or 0), action="inserted")
 
 
 def get_signal_status(
@@ -874,7 +915,17 @@ def _find_existing_signal(
         if row is not None:
             return row, "source_external_id"
 
-    if content_hash is not None:
+    # Content-hash is a last-resort fallback only for items that lack both a
+    # URL and an external ID. Matching by hash when either identity field is
+    # present (and merely differs from an older row) silently merges distinct
+    # jobs that share a generic title — see #97.
+    #
+    # The lookup stays unscoped on purpose: content_hash has a global UNIQUE
+    # index, so narrowing it here would reject a collision the index still
+    # enforces and turn the insert below into an IntegrityError.
+    # _build_content_hash() folds source and both identity fields in, so a hash
+    # match already implies the same source.
+    if content_hash is not None and url is None and external_id is None:
         row = connection.execute(
             "SELECT * FROM signals WHERE content_hash = ? ORDER BY id LIMIT 1",
             (content_hash,),
@@ -886,13 +937,25 @@ def _find_existing_signal(
 
 
 def _build_content_hash(item: SignalItem) -> str:
+    # content_hash carries a global UNIQUE index while _find_existing_signal only
+    # matches on it for items that have neither URL nor external id. Every
+    # identity field must therefore be part of the hash: otherwise two distinct
+    # rows collide on a hash the lookup refuses to match, and the write fails
+    # instead of deduping (#97).
     payload_data = {
         "item_type": item.item_type.strip(),
         "title": item.title.strip(),
         "content": (item.content or "").strip(),
+        "source": item.source.strip(),
+        "url": (item.url or "").strip(),
+        "external_id": (item.external_id or "").strip(),
     }
-    if item.item_type in {"tw_stock_mover", "stock_watchlist_alert"}:
-        payload_data["external_id"] = (item.external_id or "").strip()
+    if item.item_type == "job":
+        # Generic titles ("Software Engineer") repeat across employers, so
+        # identity-less postings need company/location to stay distinct.
+        metadata = item.metadata if isinstance(item.metadata, dict) else {}
+        payload_data["company"] = str(metadata.get("company") or "").strip()
+        payload_data["location"] = str(metadata.get("location") or "").strip()
 
     payload = json.dumps(
         payload_data,

@@ -87,12 +87,14 @@ def run_worker_tick(
 
         schedule_detail = "schedules=0"
         try:
+            from app.runtime.service import is_stop_requested
             from app.scheduler import run_schedule_tick
 
             tick = run_schedule_tick(
                 root=base,
                 config_path=cfg,
                 db_path=db,
+                stop_requested=is_stop_requested,
             )
             schedule_detail = (
                 f"schedules_due={tick.due},started={tick.started},failed={tick.failed}"

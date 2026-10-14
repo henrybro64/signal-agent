@@ -315,7 +315,7 @@ class ScheduleStore:
         self,
         schedule: Schedule,
         *,
-        run_id: str,
+        run_id: str | None = None,
         status: str,
         error: str | None = None,
         schedule_next: bool = True,
@@ -323,14 +323,15 @@ class ScheduleStore:
         now_dt = datetime.now(UTC)
         now = _format(now_dt)
         with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE schedule_runs
-                SET status = ?, finished_at = ?, error = ?
-                WHERE run_id = ?
-                """,
-                (status, now, error, run_id),
-            )
+            if run_id is not None:
+                connection.execute(
+                    """
+                    UPDATE schedule_runs
+                    SET status = ?, finished_at = ?, error = ?
+                    WHERE run_id = ?
+                    """,
+                    (status, now, error, run_id),
+                )
             if schedule_next:
                 next_run = None
                 if schedule.cron and status != "running":
@@ -381,6 +382,15 @@ class ScheduleStore:
         assert updated is not None
         return updated
 
+    def reclaim_orphaned_runs(self, *, now: datetime | None = None) -> int:
+        """Reclaim every running/retrying schedule regardless of age (#98).
+
+        Safe only when the caller knows no live worker is executing schedules
+        (for example, immediately after acquiring the exclusive runtime lock).
+        """
+
+        return self.reclaim_stale_runs(older_than_seconds=0.0, now=now)
+
     def reclaim_stale_runs(
         self,
         *,
@@ -390,6 +400,7 @@ class ScheduleStore:
         """Mark stuck running/retrying rows failed and restore next_run_at."""
 
         moment = now or datetime.now(UTC)
+        # older_than_seconds=0 means "any started_at <= now" (orphaned reclaim).
         cutoff = _format(moment - timedelta(seconds=older_than_seconds))
         reclaimed = 0
         with self._connect() as connection:
