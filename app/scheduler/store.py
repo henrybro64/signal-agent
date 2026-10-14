@@ -423,7 +423,6 @@ class ScheduleStore:
         moment = now or datetime.now(UTC)
         # older_than_seconds=0 means "any started_at <= now" (orphaned reclaim).
         cutoff = _format(moment - timedelta(seconds=older_than_seconds))
-        reclaimed = 0
         with self._connect() as connection:
             stuck_runs = connection.execute(
                 """
@@ -441,68 +440,60 @@ class ScheduleStore:
                 """,
                 (cutoff,),
             ).fetchall()
-        live_owned: set[str] = set()
-        if skip_live_owners:
-            self_pid = os.getpid()
-            for row in stuck_runs:
-                owner = row["owner_pid"]
-                if owner is not None and int(owner) != self_pid and _pid_is_alive(
-                    int(owner)
-                ):
-                    live_owned.add(str(row["schedule_id"]))
-            for row in stuck_schedules:
-                owner = row["last_owner_pid"]
-                if owner is not None and int(owner) != self_pid and _pid_is_alive(
-                    int(owner)
-                ):
-                    live_owned.add(str(row["id"]))
+        live_owned = (
+            _live_owned_schedule_ids(stuck_runs, stuck_schedules)
+            if skip_live_owners
+            else set()
+        )
         schedule_ids = {str(row["schedule_id"]) for row in stuck_runs}
         schedule_ids.update(str(row["id"]) for row in stuck_schedules)
         schedule_ids -= live_owned
+        reclaimed = 0
         for schedule_id in sorted(schedule_ids):
-            schedule = self.get(schedule_id)
-            if schedule is None:
-                continue
-            with self._connect() as connection:
-                connection.execute(
-                    """
-                    UPDATE schedule_runs
-                    SET status = 'failed',
-                        finished_at = ?,
-                        error = COALESCE(error, 'reclaimed stale running run')
-                    WHERE schedule_id = ? AND status = 'running'
-                    """,
-                    (_format(moment), schedule_id),
-                )
-                connection.commit()
-            # Restore cadence so the schedule becomes due again.
-            next_run = None
-            if schedule.cron:
-                nxt = compute_next_run(
-                    cron=schedule.cron,
-                    after=moment,
-                    timezone_name=schedule.timezone,
-                )
-                next_run = None if nxt is None else _format(nxt.astimezone(UTC))
-            with self._connect() as connection:
-                connection.execute(
-                    """
-                    UPDATE schedules
-                    SET last_status = ?, next_run_at = ?, updated_at = ?,
-                        last_finished_at = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        "failed",
-                        next_run,
-                        _format(moment),
-                        _format(moment),
-                        schedule_id,
-                    ),
-                )
-                connection.commit()
-            reclaimed += 1
+            if self._reclaim_one_schedule(schedule_id, moment=moment):
+                reclaimed += 1
         return reclaimed
+
+    def _reclaim_one_schedule(self, schedule_id: str, *, moment: datetime) -> bool:
+        """Fail one stuck schedule and restore its next_run_at. Return True if found."""
+
+        schedule = self.get(schedule_id)
+        if schedule is None:
+            return False
+        stamp = _format(moment)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE schedule_runs
+                SET status = 'failed',
+                    finished_at = ?,
+                    error = COALESCE(error, 'reclaimed stale running run')
+                WHERE schedule_id = ? AND status = 'running'
+                """,
+                (stamp, schedule_id),
+            )
+            connection.commit()
+        next_run = None
+        if schedule.cron:
+            nxt = compute_next_run(
+                cron=schedule.cron,
+                after=moment,
+                timezone_name=schedule.timezone,
+            )
+            if nxt is not None:
+                next_run = _format(nxt.astimezone(UTC))
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE schedules
+                SET last_status = ?, next_run_at = ?, updated_at = ?,
+                    last_finished_at = ?
+                WHERE id = ?
+                """,
+                ("failed", next_run, stamp, stamp, schedule_id),
+            )
+            connection.commit()
+        return True
 
     def history(self, schedule_id: str, *, limit: int = 20) -> list[ScheduleRun]:
         with self._connect() as connection:
@@ -570,6 +561,30 @@ def _row_to_schedule(row: sqlite3.Row) -> Schedule:
         updated_at=str(row["updated_at"]),
         metadata=metadata,
     )
+
+
+def _live_owned_schedule_ids(
+    stuck_runs: list[sqlite3.Row],
+    stuck_schedules: list[sqlite3.Row],
+) -> set[str]:
+    """Schedule ids whose owning process is still alive and not this runtime."""
+
+    self_pid = os.getpid()
+    live: set[str] = set()
+    for row in stuck_runs:
+        if _owner_is_live_foreign(row["owner_pid"], self_pid):
+            live.add(str(row["schedule_id"]))
+    for row in stuck_schedules:
+        if _owner_is_live_foreign(row["last_owner_pid"], self_pid):
+            live.add(str(row["id"]))
+    return live
+
+
+def _owner_is_live_foreign(owner: object, self_pid: int) -> bool:
+    if owner is None:
+        return False
+    pid = int(owner)
+    return pid != self_pid and _pid_is_alive(pid)
 
 
 def _pid_is_alive(pid: int) -> bool:
