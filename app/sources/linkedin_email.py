@@ -232,32 +232,10 @@ class LinkedInEmailSource(BaseSource):
                 if status != "OK":
                     raise LinkedInEmailSourceError("LinkedIn email IMAP search failed")
 
-                messages: list[bytes] = []
                 message_ids = data[0].split() if data and data[0] else []
-                for message_id in message_ids:
-                    fetch_status, fetch_data = client.fetch(message_id, "(RFC822)")
-                    if fetch_status != "OK":
-                        continue
-                    for part in fetch_data:
-                        if isinstance(part, tuple) and len(part) == 2:
-                            raw_message = part[1]
-                            if isinstance(raw_message, bytes):
-                                email_message = message_from_bytes(
-                                    raw_message,
-                                    policy=policy.default,
-                                )
-                                if _looks_like_linkedin_job_alert(email_message):
-                                    messages.append(raw_message)
-                return messages
+                return _fetch_linkedin_alert_bodies(client, message_ids)
         except imaplib.IMAP4.error as exc:
-            label = {
-                "login": "login",
-                "select": "mailbox select",
-                "search": "search",
-            }.get(phase, phase)
-            raise LinkedInEmailSourceError(
-                f"LinkedIn email IMAP {label} failed: {exc}"
-            ) from exc
+            raise _imap_phase_error(phase, exc) from exc
         except OSError as exc:
             raise LinkedInEmailSourceError(
                 f"LinkedIn email IMAP connection failed: {exc}"
@@ -296,6 +274,43 @@ class LinkedInEmailSource(BaseSource):
                 return False
 
         return True
+
+
+def _fetch_linkedin_alert_bodies(
+    client: imaplib.IMAP4,
+    message_ids: list[bytes],
+) -> list[bytes]:
+    messages: list[bytes] = []
+    for message_id in message_ids:
+        fetch_status, fetch_data = client.fetch(message_id, "(RFC822)")
+        if fetch_status != "OK":
+            continue
+        raw_message = _rfc822_payload(fetch_data)
+        if raw_message is None:
+            continue
+        email_message = message_from_bytes(raw_message, policy=policy.default)
+        if _looks_like_linkedin_job_alert(email_message):
+            messages.append(raw_message)
+    return messages
+
+
+def _rfc822_payload(fetch_data: list[object]) -> bytes | None:
+    for part in fetch_data:
+        if not isinstance(part, tuple) or len(part) != 2:
+            continue
+        raw_message = part[1]
+        if isinstance(raw_message, bytes):
+            return raw_message
+    return None
+
+
+def _imap_phase_error(phase: str, exc: BaseException) -> LinkedInEmailSourceError:
+    label = {
+        "login": "login",
+        "select": "mailbox select",
+        "search": "search",
+    }.get(phase, phase)
+    return LinkedInEmailSourceError(f"LinkedIn email IMAP {label} failed: {exc}")
 
 
 def _linkedin_imap_search_criteria(since_text: str) -> str:
