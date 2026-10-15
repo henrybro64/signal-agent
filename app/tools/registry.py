@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -253,13 +254,11 @@ class ToolRegistry:
                 "permission": str(permission) if permission is not None else None,
             },
         )
-        # Idle health probes (`query_recent_runs`) are DEBUG; other tools INFO.
-        completed_level = 10 if name == "query_recent_runs" and safe_result.ok else 20
         log_event(
             _LOGGER,
             event="tool_invoke_completed",
             message=f"Tool {name} completed",
-            level=completed_level,
+            level=_invoke_completed_level(name, safe_result.ok),
             **safe_log_fields(
                 tool_name=name,
                 status="ok" if safe_result.ok else "error",
@@ -396,6 +395,14 @@ def _invoke_with_timeout(
     if isinstance(outcome, BaseException):
         raise outcome
     return outcome
+
+
+def _invoke_completed_level(name: str, ok: bool) -> int:
+    """Idle health probes (`query_recent_runs`) stay DEBUG; others INFO (#104)."""
+
+    if name == "query_recent_runs" and ok:
+        return logging.DEBUG
+    return logging.INFO
 
 
 def _redact_text(value: str, secrets: tuple[str, ...]) -> str:

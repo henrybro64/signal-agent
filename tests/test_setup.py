@@ -224,7 +224,7 @@ def test_doctor_warns_when_tw_market_calendar_coverage_is_thin(
         "is updated from TWSE"
     )
     monkeypatch.setattr(
-        "app.core.tw_market_calendar.tw_market_calendar_coverage_warning",
+        "app.setup.validate.tw_market_calendar_coverage_warning",
         lambda **_kwargs: warning,
     )
     report = validate_local_setup(root=tmp_path)

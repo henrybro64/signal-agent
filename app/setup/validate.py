@@ -15,6 +15,10 @@ from app.core.secrets import (
     load_env_settings,
     resolve_provider_credentials,
 )
+from app.core.tw_market_calendar import (
+    latest_tw_market_calendar_year,
+    tw_market_calendar_coverage_warning,
+)
 from app.llm import supported_llm_providers
 from app.runtime import paths as runtime_paths
 from app.setup.browser import detect_browser
@@ -91,11 +95,6 @@ def _validate_tw_market_calendar(report: ValidationReport) -> None:
     """Warn before the packaged holiday calendar runs out (#103)."""
 
     try:
-        from app.core.tw_market_calendar import (
-            latest_tw_market_calendar_year,
-            tw_market_calendar_coverage_warning,
-        )
-
         warning = tw_market_calendar_coverage_warning()
         if warning:
             report.add("tw_market_calendar", warning, severity="warning")

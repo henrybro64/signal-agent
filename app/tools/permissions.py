@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -252,18 +253,11 @@ class PermissionPolicy:
         safe_args = redact_mapping(arguments, secrets=self.secrets)
         permission_value = decision.permission.value if decision.permission else None
         arg_keys = sorted(safe_args)
-        # Allowed read probes (idle runtime health) are DEBUG; denials stay WARN.
-        if decision.allowed and decision.permission == PermissionClass.READ:
-            level = 10
-        elif decision.allowed:
-            level = 20
-        else:
-            level = 30
         log_event(
             _LOGGER,
             event="tool_permission_decision",
             message=f"permission {decision.action.value} for {tool_name}",
-            level=level,
+            level=_decision_log_level(decision),
             tool_name=tool_name,
             allowed=decision.allowed,
             action=decision.action.value,
@@ -398,6 +392,16 @@ def reset_permission_policy(
     token: contextvars.Token[PermissionPolicy | None],
 ) -> None:
     _ACTIVE_PERMISSION_POLICY.reset(token)
+
+
+def _decision_log_level(decision: PermissionDecision) -> int:
+    """Allowed read probes stay DEBUG; other allows INFO; denials WARN (#104)."""
+
+    if not decision.allowed:
+        return logging.WARNING
+    if decision.permission == PermissionClass.READ:
+        return logging.DEBUG
+    return logging.INFO
 
 
 def _parse_action(raw: str, *, default: PolicyAction) -> PolicyAction:

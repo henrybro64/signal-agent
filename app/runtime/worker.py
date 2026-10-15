@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -109,13 +110,11 @@ def run_worker_tick(
 
         detail = f"health={health_status};{schedule_detail}"
         ok = not failures
-        # Successful idle ticks are DEBUG so long-running installs do not grow
-        # multi-MB logs every day (#104). Failures stay at INFO+.
         log_event(
             _LOGGER,
             event="runtime_worker_tick",
             message="runtime worker tick completed",
-            level=10 if ok else 20,
+            level=logging.DEBUG if ok else logging.INFO,
             ok=ok,
             detail=detail,
             failures=";".join(failures) if failures else None,

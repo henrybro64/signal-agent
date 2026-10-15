@@ -11,6 +11,8 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, TextIO
 
+from app.core.log_rotate import attach_rotating_file_handler
+
 _ROOT_LOGGER_NAME = "signal_agent"
 _LOGGING_CONFIGURED = False
 _RESERVED_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
@@ -107,8 +109,6 @@ def configure_logging(
         handler.setFormatter(JsonLogFormatter())
         logger.addHandler(handler)
     if log_file is not None:
-        from app.core.log_rotate import attach_rotating_file_handler
-
         attach_rotating_file_handler(
             logger,
             Path(log_file),
@@ -180,6 +180,8 @@ def log_event(
 
 
 def _normalize_exc_info(exc_info: ExcInfoArg) -> ExcInfoArg:
+    """Pass through logging exc_info values, wrapping a bare exception."""
+
     if exc_info is None or isinstance(exc_info, bool | tuple):
         return exc_info
     return (type(exc_info), exc_info, exc_info.__traceback__)
