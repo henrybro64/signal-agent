@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from app.cli import main
+from app.core.tw_market_calendar import latest_tw_market_calendar_year
 from app.setup import (
     SetupOptions,
     detect_browser,
@@ -202,6 +203,37 @@ def test_validate_warns_when_optional_deps_missing(tmp_path: Path) -> None:
     assert report.ok
     codes = {issue.code for issue in report.issues}
     assert "browser" in codes
+    calendar = next(
+        issue for issue in report.issues if issue.code == "tw_market_calendar"
+    )
+    assert calendar.severity in {"info", "warning"}
+    assert str(latest_tw_market_calendar_year()) in calendar.message
+
+
+def test_doctor_warns_when_tw_market_calendar_coverage_is_thin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_setup(
+        root=tmp_path,
+        options=SetupOptions(provider="fake", non_interactive=True, force=True),
+    )
+    warning = (
+        "Taiwan market holiday calendar has no entries for 2028; "
+        "TW stock tasks will skip until app/data/tw_market_holidays.yaml "
+        "is updated from TWSE"
+    )
+    monkeypatch.setattr(
+        "app.core.tw_market_calendar.tw_market_calendar_coverage_warning",
+        lambda **_kwargs: warning,
+    )
+    report = validate_local_setup(root=tmp_path)
+    assert any(
+        issue.code == "tw_market_calendar"
+        and issue.severity == "warning"
+        and "2028" in issue.message
+        for issue in report.issues
+    )
 
 
 def test_detect_browser_override(

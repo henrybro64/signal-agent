@@ -63,7 +63,7 @@ def test_agents_guide_lists_m7_execution_order() -> None:
         assert issue in section, f"AGENTS.md M7 order missing {issue}"
         positions.append(section.index(issue))
     assert positions == sorted(positions)
-    assert "docs/m7-agent-platform-roadmap.md" in text
+    assert "docs/roadmap/m7-agent-platform-roadmap.md" in text
 
 
 def test_architecture_paths_documented_in_guide_exist() -> None:
@@ -97,6 +97,7 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/core/tw_stock_utils.py",
         "app/data/tw_market_holidays.yaml",
         "app/core/logging.py",
+        "app/core/log_rotate.py",
         "app/core/error_handling.py",
         "app/sources/base.py",
         "app/sources/http_settings.py",
@@ -142,7 +143,10 @@ def test_architecture_paths_documented_in_guide_exist() -> None:
         "app/sql/migrations/004_content_hash_and_schedule_owner.sql",
         "sql/schema.sql",
         "docs/ubuntu-vm-deployment.md",
-        "docs/m7-agent-platform-roadmap.md",
+        "docs/index.md",
+        "docs/getting-started.md",
+        "docs/configuration.md",
+        "docs/roadmap/m7-agent-platform-roadmap.md",
         "deploy/ubuntu/crontab.example",
         "deploy/k3s/cronjob-job-search.yaml",
         ".github/workflows/ci.yml",

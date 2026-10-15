@@ -97,8 +97,8 @@ def test_is_tw_market_open_returns_false_on_announced_typhoon_closure() -> None:
 
 
 def test_is_tw_market_open_fails_closed_when_year_not_in_calendar() -> None:
-    # Packaged YAML currently covers 2026 only; uncovered years must not look open.
-    uncovered = datetime.fromisoformat("2027-01-04T10:00:00+08:00")
+    # Packaged YAML covers 2026–2027; uncovered years must not look open.
+    uncovered = datetime.fromisoformat("2028-01-04T10:00:00+08:00")
 
     assert is_tw_market_open(uncovered) is False
     assert tw_market_skip_reason(uncovered) == TW_MARKET_SKIP_CALENDAR_UNAVAILABLE

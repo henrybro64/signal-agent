@@ -252,11 +252,18 @@ class PermissionPolicy:
         safe_args = redact_mapping(arguments, secrets=self.secrets)
         permission_value = decision.permission.value if decision.permission else None
         arg_keys = sorted(safe_args)
+        # Allowed read probes (idle runtime health) are DEBUG; denials stay WARN.
+        if decision.allowed and decision.permission == PermissionClass.READ:
+            level = 10
+        elif decision.allowed:
+            level = 20
+        else:
+            level = 30
         log_event(
             _LOGGER,
             event="tool_permission_decision",
             message=f"permission {decision.action.value} for {tool_name}",
-            level=20 if decision.allowed else 30,
+            level=level,
             tool_name=tool_name,
             allowed=decision.allowed,
             action=decision.action.value,

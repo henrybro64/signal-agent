@@ -253,10 +253,13 @@ class ToolRegistry:
                 "permission": str(permission) if permission is not None else None,
             },
         )
+        # Idle health probes (`query_recent_runs`) are DEBUG; other tools INFO.
+        completed_level = 10 if name == "query_recent_runs" and safe_result.ok else 20
         log_event(
             _LOGGER,
             event="tool_invoke_completed",
             message=f"Tool {name} completed",
+            level=completed_level,
             **safe_log_fields(
                 tool_name=name,
                 status="ok" if safe_result.ok else "error",

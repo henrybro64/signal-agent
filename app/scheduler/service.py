@@ -114,10 +114,17 @@ def run_schedule_tick(
             result.skipped += 1
         if result.details is not None:
             result.details.append(f"{schedule.id}:{outcome}")
+    idle = (
+        result.due == 0
+        and result.started == 0
+        and result.failed == 0
+        and result.skipped == 0
+    )
     log_event(
         _LOGGER,
         event="scheduler_tick",
         message="scheduler tick completed",
+        level=10 if idle else 20,
         due=result.due,
         started=result.started,
         skipped=result.skipped,

@@ -63,7 +63,9 @@ from .tw_market_calendar import (
     clear_tw_market_holiday_cache,
     is_tw_market_calendar_year_covered,
     is_tw_market_holiday,
+    latest_tw_market_calendar_year,
     load_tw_market_holiday_dates,
+    tw_market_calendar_coverage_warning,
     tw_market_calendar_years,
 )
 
@@ -105,10 +107,12 @@ __all__ = [
     "is_tw_market_calendar_year_covered",
     "is_tw_market_holiday",
     "is_tw_market_open",
+    "latest_tw_market_calendar_year",
     "list_pending_digest_jobs",
     "load_config",
     "load_recent_signal_runs",
     "load_tw_market_holiday_dates",
+    "tw_market_calendar_coverage_warning",
     "mark_signals_digest_reported",
     "load_env_settings",
     "read_schema_version",

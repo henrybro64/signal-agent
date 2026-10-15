@@ -299,7 +299,8 @@ def test_runtime_start_reclaims_orphaned_schedule(tmp_path: Path) -> None:
         assert recovered.last_status == "failed"
         assert recovered.next_run_at is not None
         log_text = log_path(tmp_path).read_text(encoding="utf-8")
-        assert "reclaimed 1 orphaned schedule run(s) at startup" in log_text
+        assert "reclaimed orphaned schedule runs at runtime startup" in log_text
+        assert '"reclaimed": 1' in log_text
     finally:
         stop_runtime(root=tmp_path)
 

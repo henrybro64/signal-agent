@@ -76,6 +76,54 @@ def is_tw_market_calendar_year_covered(
     return year in tw_market_calendar_years(holiday_dates)
 
 
+def latest_tw_market_calendar_year(
+    holiday_dates: frozenset[date] | None = None,
+) -> int | None:
+    """Return the newest year present in the holiday dataset, if any."""
+
+    years = tw_market_calendar_years(holiday_dates)
+    return max(years) if years else None
+
+
+def tw_market_calendar_coverage_warning(
+    *,
+    today: date | None = None,
+    warn_within_days: int = 60,
+    holiday_dates: frozenset[date] | None = None,
+) -> str | None:
+    """Return an operator warning when calendar coverage is about to lapse (#103).
+
+    Warns when the current year is missing, or when ``today`` is within
+    ``warn_within_days`` of the end of the latest covered year.
+    """
+
+    if warn_within_days < 0:
+        raise ValueError("warn_within_days must be zero or greater")
+    current = today or date.today()
+    years = tw_market_calendar_years(holiday_dates)
+    if not years:
+        return (
+            "Taiwan market holiday calendar is empty; TW stock tasks fail closed"
+        )
+    if current.year not in years:
+        return (
+            f"Taiwan market holiday calendar has no entries for {current.year}; "
+            "TW stock tasks will skip until app/data/tw_market_holidays.yaml "
+            "is updated from TWSE"
+        )
+    latest = max(years)
+    year_end = date(latest, 12, 31)
+    days_left = (year_end - current).days
+    if days_left <= warn_within_days:
+        return (
+            f"Taiwan market holiday calendar only covers through {latest}; "
+            f"{days_left} day(s) remain before fail-closed skips begin. "
+            "Update app/data/tw_market_holidays.yaml when TWSE publishes "
+            f"{latest + 1}"
+        )
+    return None
+
+
 def is_tw_market_holiday(
     day: date | datetime,
     *,

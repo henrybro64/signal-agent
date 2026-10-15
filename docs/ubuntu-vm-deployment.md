@@ -84,6 +84,10 @@ mkdir -p data logs
 
 - SQLite persists in `./data` (mounted at `/app/data` in the container).
 - Cron wrappers append to `./logs/*.log`.
+- The local runtime (`signal-agent start` / systemd `--user`) self-rotates
+  `logs/signal-agent.log` in-process. Optional host snippet
+  `deploy/ubuntu/logrotate-signal-agent.conf` is for cron wrapper logs only
+  (`job_search.log`, …) — do not copytruncate the runtime JSON file.
 - Per-task lock files under `data/.*.lock` prevent overlapping Compose runs.
 
 ## 4. Build the Docker image

@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from types import TracebackType
 from typing import Any
 
@@ -77,11 +78,16 @@ def configure_logging(
     level: int | str = logging.INFO,
     stream=None,
     force: bool = False,
+    log_file: str | Path | None = None,
+    log_max_bytes: int | None = None,
+    log_backup_count: int | None = None,
 ) -> logging.Logger:
     """Configure the shared structured logger once and return it.
 
     Defaults to stdout. Pass ``stream=sys.stderr`` (and ``force=True`` when
     reconfiguring) so MCP stdio JSON-RPC is not interleaved with log lines.
+    When ``log_file`` is set, also attach a size-based rotating file handler
+    (#104).
     """
 
     global _LOGGING_CONFIGURED
@@ -105,6 +111,16 @@ def configure_logging(
 
     logger.handlers.clear()
     logger.addHandler(handler)
+    if log_file is not None:
+        from app.core.log_rotate import attach_rotating_file_handler
+
+        attach_rotating_file_handler(
+            logger,
+            Path(log_file),
+            formatter=JsonLogFormatter(),
+            max_bytes=log_max_bytes,
+            backup_count=log_backup_count,
+        )
     logger.propagate = False
 
     _LOGGING_CONFIGURED = True

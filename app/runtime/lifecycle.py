@@ -141,14 +141,16 @@ def start_runtime(
         "--config",
         cfg,
     ]
-    with log_file.open("a", encoding="utf-8") as handle:
-        proc = subprocess.Popen(  # noqa: S603 - controlled local launcher
-            cmd,
-            cwd=str(runtime_paths.project_root(root)),
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    # The service process owns ``log_file`` via RotatingFileHandler. Redirecting
+    # parent stdout into that path would pin an unrotated fd across rotations
+    # (#104), so discard inherited stdio and let the child write the log.
+    proc = subprocess.Popen(  # noqa: S603 - controlled local launcher
+        cmd,
+        cwd=str(runtime_paths.project_root(root)),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
     # Child owns the flock + pid file. Poll until the lock-backed runtime
     # reports alive, or fail if the child exits early.

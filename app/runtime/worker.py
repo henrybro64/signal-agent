@@ -109,10 +109,13 @@ def run_worker_tick(
 
         detail = f"health={health_status};{schedule_detail}"
         ok = not failures
+        # Successful idle ticks are DEBUG so long-running installs do not grow
+        # multi-MB logs every day (#104). Failures stay at INFO+.
         log_event(
             _LOGGER,
             event="runtime_worker_tick",
             message="runtime worker tick completed",
+            level=10 if ok else 20,
             ok=ok,
             detail=detail,
             failures=";".join(failures) if failures else None,
