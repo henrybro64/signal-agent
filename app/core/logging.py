@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal, TextIO
 
 _ROOT_LOGGER_NAME = "signal_agent"
 _LOGGING_CONFIGURED = False
@@ -55,9 +56,12 @@ class CurrentStreamHandler(logging.Handler):
 
     terminator = "\n"
 
-    def __init__(self, stream_getter=None) -> None:
+    def __init__(
+        self,
+        stream_getter: Callable[[], TextIO] | None = None,
+    ) -> None:
         super().__init__()
-        self._stream_getter = stream_getter or (lambda: sys.stdout)
+        self._stream_getter = stream_getter or _stdout_stream
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -76,7 +80,7 @@ CurrentStdoutHandler = CurrentStreamHandler
 def configure_logging(
     *,
     level: int | str = logging.INFO,
-    stream=None,
+    stream: TextIO | Literal[False] | None = None,
     force: bool = False,
     log_file: str | Path | None = None,
     log_max_bytes: int | None = None,
@@ -101,14 +105,7 @@ def configure_logging(
 
     logger.handlers.clear()
     if stream is not False:
-        if stream is sys.stderr:
-            stream_getter = lambda: sys.stderr  # noqa: E731
-        elif stream is None or stream is sys.stdout:
-            stream_getter = lambda: sys.stdout  # noqa: E731
-        else:
-            captured = stream
-            stream_getter = lambda: captured  # noqa: E731
-        handler = CurrentStreamHandler(stream_getter)
+        handler = CurrentStreamHandler(_stream_getter(stream))
         handler.setFormatter(JsonLogFormatter())
         logger.addHandler(handler)
     if log_file is not None:
@@ -125,6 +122,26 @@ def configure_logging(
 
     _LOGGING_CONFIGURED = True
     return logger
+
+
+def _stdout_stream() -> TextIO:
+    return sys.stdout
+
+
+def _stderr_stream() -> TextIO:
+    return sys.stderr
+
+
+def _stream_getter(stream: TextIO | None) -> Callable[[], TextIO]:
+    if stream is sys.stderr:
+        return _stderr_stream
+    if stream is None or stream is sys.stdout:
+        return _stdout_stream
+
+    def _captured() -> TextIO:
+        return stream
+
+    return _captured
 
 
 def get_logger(name: str | None = None) -> logging.Logger:

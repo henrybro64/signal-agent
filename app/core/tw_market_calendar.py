@@ -7,6 +7,7 @@ from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -99,7 +100,7 @@ def tw_market_calendar_coverage_warning(
 
     if warn_within_days < 0:
         raise ValueError("warn_within_days must be zero or greater")
-    current = today or date.today()
+    current = today or datetime.now(ZoneInfo("Asia/Taipei")).date()
     years = tw_market_calendar_years(holiday_dates)
     if not years:
         return (

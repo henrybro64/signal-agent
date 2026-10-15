@@ -249,7 +249,7 @@ def _spawn_detached_runtime(
     """Launch the runtime child; parent must not keep the rotating log fd."""
 
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    with stderr_path.open("w", encoding="utf-8") as handle:
+    with stderr_path.open("wb") as handle:
         return subprocess.Popen(  # noqa: S603 - controlled local launcher
             cmd,
             cwd=str(cwd),
@@ -265,6 +265,8 @@ def _wait_until_runtime_running(
     *,
     timeout_seconds: float = 3.0,
 ) -> RuntimeProcessInfo | None:
+    """Poll until the child holds the runtime lock, or it has exited."""
+
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         info = get_runtime_info(root)
@@ -278,6 +280,8 @@ def _wait_until_runtime_running(
 
 
 def _startup_stderr_snippet(path: Path, *, limit: int = 4000) -> str:
+    """Return the tail of captured child stderr for a failed start."""
+
     if not path.is_file():
         return ""
     try:

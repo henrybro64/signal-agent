@@ -101,12 +101,19 @@ def _validate_tw_market_calendar(report: ValidationReport) -> None:
             report.add("tw_market_calendar", warning, severity="warning")
             return
         latest = latest_tw_market_calendar_year()
+        if latest is None:
+            report.add(
+                "tw_market_calendar",
+                "Taiwan market holiday calendar is empty; TW stock tasks fail closed",
+                severity="warning",
+            )
+            return
         report.add(
             "tw_market_calendar",
             f"Taiwan market holiday calendar covers through {latest}",
             severity="info",
         )
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, ValueError) as exc:
         report.add(
             "tw_market_calendar",
             f"Unable to load Taiwan market holiday calendar: {exc}",
