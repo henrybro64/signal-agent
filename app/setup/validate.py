@@ -15,6 +15,10 @@ from app.core.secrets import (
     load_env_settings,
     resolve_provider_credentials,
 )
+from app.core.tw_market_calendar import (
+    latest_tw_market_calendar_year,
+    tw_market_calendar_coverage_warning,
+)
 from app.llm import supported_llm_providers
 from app.runtime import paths as runtime_paths
 from app.setup.browser import detect_browser
@@ -75,6 +79,7 @@ def validate_local_setup(
     _validate_llm_credentials(report, config, env)
     _validate_telegram(report, config, env)
     _validate_database(report, root)
+    _validate_tw_market_calendar(report)
 
     browser = detect_browser()
     report.add(
@@ -84,6 +89,35 @@ def validate_local_setup(
     )
     _validate_skills(report, root=root, config_path=cfg_path)
     return report
+
+
+def _validate_tw_market_calendar(report: ValidationReport) -> None:
+    """Warn before the packaged holiday calendar runs out (#103)."""
+
+    try:
+        warning = tw_market_calendar_coverage_warning()
+        if warning:
+            report.add("tw_market_calendar", warning, severity="warning")
+            return
+        latest = latest_tw_market_calendar_year()
+        if latest is None:
+            report.add(
+                "tw_market_calendar",
+                "Taiwan market holiday calendar is empty; TW stock tasks fail closed",
+                severity="warning",
+            )
+            return
+        report.add(
+            "tw_market_calendar",
+            f"Taiwan market holiday calendar covers through {latest}",
+            severity="info",
+        )
+    except (OSError, ValueError) as exc:
+        report.add(
+            "tw_market_calendar",
+            f"Unable to load Taiwan market holiday calendar: {exc}",
+            severity="warning",
+        )
 
 
 def _validate_skills(

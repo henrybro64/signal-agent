@@ -26,7 +26,7 @@ watchlists, investment assistants) without collapsing module boundaries.
 | M0–M5 | Issues #1–#25 (bootstrap through failure alerts) | **Complete** on `main` |
 | M6 | Hardening / extensions #49–#57 | **Complete** on `main` |
 | M7 | LangChain-ready platform evolution #60–#67 | **Complete** on `main` |
-| M8 | OpenClaw-like productization #81–#89 | **In progress** — #81–#86 on `main`; #87–#89 local (browser/service/skills) |
+| M8 | OpenClaw-like productization #81–#89 | **Complete** on `main` (#81–#89) |
 
 Deployment path already exists: local Python → Docker Compose → k3s CronJobs.
 
@@ -43,6 +43,8 @@ signal-agent/
 ├── app/browser/            # optional isolated browser service + tools (#87)
 ├── app/service/            # systemd --user install helpers (#88)
 ├── app/skills/             # built-in skill manifests (#89)
+├── app/search/             # research SearchProvider adapters (#93)
+├── app/runtimes/           # bounded coding-analysis runtimes (#93)
 ├── config.yaml             # non-secret runtime settings
 ├── .env.example            # secret names only
 ├── Dockerfile
@@ -62,6 +64,7 @@ signal-agent/
 │   │   ├── tw_market_calendar.py  # static TW holiday calendar
 │   │   ├── tw_stock_utils.py  # shared TW mover ranking / summary helpers
 │   │   ├── logging.py      # structured JSON logging
+│   │   ├── log_rotate.py   # size-based rotating file handler (#104)
 │   │   └── error_handling.py  # Telegram failure alerts + redaction
 │   ├── data/
 │   │   └── tw_market_holidays.yaml  # TWSE/TPEx no-trade dates
@@ -118,8 +121,15 @@ signal-agent/
 ├── sql/
 │   └── schema.sql          # docs pointer to app/sql/migrations/
 ├── docs/
+│   ├── index.md                 # docs map by audience
+│   ├── getting-started.md       # first install → Telegram
+│   ├── configuration.md         # config.yaml + .env reference
+│   ├── job-search.md / tw-stocks.md / scheduling.md / deployment.md
+│   ├── troubleshooting.md / development.md
 │   ├── ubuntu-vm-deployment.md  # Ubuntu VM + Compose + cron/systemd runbook
-│   └── m7-agent-platform-roadmap.md  # M7 LangChain-ready evolution map (#60–#67)
+│   ├── vendor-neutral-ai.md     # LLM / search / coding-runtime adapters
+│   └── roadmap/
+│       └── m7-agent-platform-roadmap.md  # M7 LangChain-ready evolution map (#60–#67)
 ├── deploy/
 │   ├── ubuntu/             # cron wrappers, crontab.example, optional systemd units
 │   └── k3s/                # CronJob manifests (optional)
@@ -255,7 +265,7 @@ digest (`tw_market_assistant`) on PR #69.
 
 ## Next execution order (M7)
 
-Canonical roadmap: [`docs/m7-agent-platform-roadmap.md`](docs/m7-agent-platform-roadmap.md)
+Canonical roadmap: [`docs/roadmap/m7-agent-platform-roadmap.md`](docs/roadmap/m7-agent-platform-roadmap.md)
 (coordination issue #60). Implement child issues only when explicitly requested.
 Preserve the current CLI and scheduled task model throughout.
 
@@ -302,9 +312,9 @@ OpenClaw-like productization. Preserve legacy CLI flags and deterministic tasks.
 4. #84  Tool permission policy + human approval gates — DONE (on main)
 5. #85  Scheduler + persistent task management CLI — DONE (on main)
 6. #86  Model management, health checks, fallbacks — DONE (on main)
-7. #87  Optional browser tool service — local
-8. #88  Installable systemd user service — local
-9. #89  Skill/plugin manifest system — local
+7. #87  Optional browser tool service — DONE (on main)
+8. #88  Installable systemd user service — DONE (on main)
+9. #89  Skill/plugin manifest system — DONE (on main)
 ```
 
 | Issue | Preferred packages / entry points |

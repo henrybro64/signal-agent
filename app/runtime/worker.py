@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -113,6 +114,7 @@ def run_worker_tick(
             _LOGGER,
             event="runtime_worker_tick",
             message="runtime worker tick completed",
+            level=logging.DEBUG if ok else logging.INFO,
             ok=ok,
             detail=detail,
             failures=";".join(failures) if failures else None,

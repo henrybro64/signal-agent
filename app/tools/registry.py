@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -257,6 +258,7 @@ class ToolRegistry:
             _LOGGER,
             event="tool_invoke_completed",
             message=f"Tool {name} completed",
+            level=_invoke_completed_level(name, safe_result.ok),
             **safe_log_fields(
                 tool_name=name,
                 status="ok" if safe_result.ok else "error",
@@ -393,6 +395,14 @@ def _invoke_with_timeout(
     if isinstance(outcome, BaseException):
         raise outcome
     return outcome
+
+
+def _invoke_completed_level(name: str, ok: bool) -> int:
+    """Idle health probes (`query_recent_runs`) stay DEBUG; others INFO (#104)."""
+
+    if name == "query_recent_runs" and ok:
+        return logging.DEBUG
+    return logging.INFO
 
 
 def _redact_text(value: str, secrets: tuple[str, ...]) -> str:

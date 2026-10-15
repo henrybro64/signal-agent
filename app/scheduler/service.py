@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
@@ -118,6 +119,7 @@ def run_schedule_tick(
         _LOGGER,
         event="scheduler_tick",
         message="scheduler tick completed",
+        level=_schedule_tick_level(result),
         due=result.due,
         started=result.started,
         skipped=result.skipped,
@@ -125,6 +127,14 @@ def run_schedule_tick(
         failed=result.failed,
     )
     return result
+
+
+def _schedule_tick_level(result: ScheduleTickResult) -> int:
+    """Idle ticks (nothing due/started/failed/skipped) stay DEBUG (#104)."""
+
+    if result.due or result.started or result.failed or result.skipped:
+        return logging.INFO
+    return logging.DEBUG
 
 
 def run_schedule_now(

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from app.core import (
+    TW_MARKET_SKIP_CALENDAR_UNAVAILABLE,
     SignalItem,
     finish_signal_run,
     start_signal_run,
@@ -78,6 +79,18 @@ def skip_outside_tw_market_hours(
         return False
 
     skip_label = tw_market_skip_label(skip_reason)
+    # Calendar gaps are fail-closed and easy to miss; emit a dedicated event
+    # so operators can tell them apart from ordinary market-closed skips (#103).
+    if skip_reason == TW_MARKET_SKIP_CALENDAR_UNAVAILABLE:
+        task.emit_log(
+            "calendar_unavailable",
+            message=(
+                "Taiwan market holiday calendar missing this year; "
+                "task skipped fail-closed"
+            ),
+            db_path=str(db_path),
+            skip_reason=skip_reason,
+        )
     task.emit_log(
         "task_skipped",
         message=skip_log_message,

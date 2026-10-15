@@ -26,6 +26,8 @@ class RuntimeLifecycleError(RuntimeError):
 
 @dataclass(slots=True, frozen=True)
 class RuntimeProcessInfo:
+    """Snapshot of the local runtime process from pid/lock files."""
+
     running: bool
     pid: int | None = None
     started_at: str | None = None
@@ -34,6 +36,8 @@ class RuntimeProcessInfo:
 
 
 def read_runtime_state(root: str | Path | None = None) -> dict[str, Any]:
+    """Load persisted runtime state, or ``{}`` when missing/invalid."""
+
     path = runtime_paths.state_path(root)
     if not path.is_file():
         return {}
@@ -49,6 +53,8 @@ def write_runtime_state(
     *,
     root: str | Path | None = None,
 ) -> Path:
+    """Persist runtime state JSON and return the state file path."""
+
     runtime_paths.ensure_local_dirs(root)
     path = runtime_paths.state_path(root)
     path.write_text(
@@ -59,6 +65,8 @@ def write_runtime_state(
 
 
 def get_runtime_info(root: str | Path | None = None) -> RuntimeProcessInfo:
+    """Return whether the local runtime process is alive and owned by us."""
+
     pid_file = runtime_paths.pid_path(root)
     state = read_runtime_state(root)
     if not pid_file.is_file():
@@ -141,28 +149,26 @@ def start_runtime(
         "--config",
         cfg,
     ]
-    with log_file.open("a", encoding="utf-8") as handle:
-        proc = subprocess.Popen(  # noqa: S603 - controlled local launcher
-            cmd,
-            cwd=str(runtime_paths.project_root(root)),
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    # Do not redirect parent stdio into ``log_file``: that pins an unrotated
+    # fd across RotatingFileHandler rollovers (#104). Capture child stderr to
+    # a sidecar until we know start succeeded so import/config failures are
+    # visible instead of disappearing into DEVNULL.
+    stderr_path = log_file.with_name("signal-agent.start.err")
+    proc = _spawn_detached_runtime(
+        cmd,
+        cwd=runtime_paths.project_root(root),
+        stderr_path=stderr_path,
+    )
 
-    # Child owns the flock + pid file. Poll until the lock-backed runtime
-    # reports alive, or fail if the child exits early.
-    deadline = time.time() + 3.0
-    while time.time() < deadline:
-        info = get_runtime_info(root)
-        if info.running:
-            return info
-        if proc.poll() is not None:
-            break
-        time.sleep(0.05)
+    info = _wait_until_runtime_running(root, proc)
+    if info is not None:
+        stderr_path.unlink(missing_ok=True)
+        return info
+    detail = _startup_stderr_snippet(stderr_path)
+    suffix = f": {detail}" if detail else ""
     raise RuntimeLifecycleError(
         "Runtime failed to stay alive after start "
-        f"(child_exit={proc.poll()})"
+        f"(child_exit={proc.poll()}){suffix}"
     )
 
 
@@ -238,8 +244,63 @@ def restart_runtime(
     root: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> RuntimeProcessInfo:
+    """Stop a running runtime if needed, then start a new detached child."""
+
     stop_runtime(root=root)
     return start_runtime(root=root, config_path=config_path, detach=True)
+
+
+def _spawn_detached_runtime(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    stderr_path: Path,
+) -> subprocess.Popen[bytes]:
+    """Launch the runtime child; parent must not keep the rotating log fd."""
+
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    with stderr_path.open("wb") as handle:
+        return subprocess.Popen(  # noqa: S603 - skipcq: BAN-B603
+            cmd,
+            cwd=str(cwd),
+            stdout=subprocess.DEVNULL,
+            stderr=handle,
+            start_new_session=True,
+        )
+
+
+def _wait_until_runtime_running(
+    root: str | Path | None,
+    proc: subprocess.Popen[bytes],
+    *,
+    timeout_seconds: float = 3.0,
+) -> RuntimeProcessInfo | None:
+    """Poll until the child holds the runtime lock, or it has exited."""
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        info = get_runtime_info(root)
+        if info.running:
+            return info
+        if proc.poll() is not None:
+            return None
+        time.sleep(0.05)
+    info = get_runtime_info(root)
+    return info if info.running else None
+
+
+def _startup_stderr_snippet(path: Path, *, limit: int = 4000) -> str:
+    """Return the tail of captured child stderr for a failed start."""
+
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
 
 
 def _pid_alive(pid: int) -> bool:

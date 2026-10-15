@@ -6,6 +6,19 @@ ROOT = Path(__file__).resolve().parents[1]
 K3S_DIR = ROOT / "deploy" / "k3s"
 
 
+def test_deployment_docs_apply_explicit_manifests_not_example_secret() -> None:
+    text = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    assert "python main.py --list-tasks" in text
+    assert "python main.py --task job_search" in text
+    assert "docker compose run --rm signal-agent --list-tasks" not in text
+    assert all(
+        line.strip() != "kubectl apply -f deploy/k3s/"
+        for line in text.splitlines()
+    )
+    assert "-f deploy/k3s/secret.yaml" in text
+    assert "-f deploy/k3s/secret.example.yaml" not in text
+
+
 def test_k3s_required_manifest_files_exist() -> None:
     assert {
         "configmap.yaml",

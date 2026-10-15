@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import logging
 import os
 import signal
 import sys
@@ -86,12 +87,19 @@ def run_service_forever(
     _STOP.requested = False
     runtime_paths.ensure_local_dirs(root)
     log_file = runtime_paths.log_path(root)
-    configure_logging(stream=sys.stderr, force=True)
+    # File handler only: a stderr stream would fill the parent's startup capture
+    # pipe/file after detach. Import/config failures still go to stderr.
+    configure_logging(stream=False, force=True, log_file=log_file)
 
     try:
         lock_handle = acquire_runtime_lock(root)
     except RuntimeError as exc:
-        _append_log(log_file, f"runtime start rejected: {exc}")
+        log_event(
+            _LOGGER,
+            event="runtime_start_rejected",
+            message=str(exc),
+            level=logging.ERROR,
+        )
         print(exc, file=sys.stderr)
         return 1
 
@@ -104,10 +112,6 @@ def run_service_forever(
 
     reclaimed = ScheduleStore(db).reclaim_orphaned_runs()
     if reclaimed:
-        _append_log(
-            log_file,
-            f"reclaimed {reclaimed} orphaned schedule run(s) at startup",
-        )
         log_event(
             _LOGGER,
             event="scheduler_reclaimed_orphaned",
@@ -132,7 +136,6 @@ def run_service_forever(
         },
         root=root,
     )
-    _append_log(log_file, f"runtime started pid={pid} config={cfg}")
 
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
@@ -158,10 +161,6 @@ def run_service_forever(
         if not tick.ok:
             tick_failures_total += 1
             state_payload["tick_failures_total"] = tick_failures_total
-            _append_log(
-                log_file,
-                "worker tick failed: " + ",".join(tick.failures or [tick.detail]),
-            )
         return state_payload
 
     # Immediate first tick so status/tests observe a live worker quickly.
@@ -225,11 +224,6 @@ def run_service_forever(
             lock_handle.close()
         except OSError:
             pass
-        _append_log(
-            log_file,
-            f"runtime stopped pid={pid} heartbeats={heartbeats} "
-            f"tick_failures={tick_failures_total}",
-        )
         log_event(
             _LOGGER,
             event="runtime_stopped",
@@ -243,12 +237,6 @@ def run_service_forever(
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _append_log(path: Path, line: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"{_utc_now()} {line}\n")
 
 
 def main(argv: list[str] | None = None) -> int:

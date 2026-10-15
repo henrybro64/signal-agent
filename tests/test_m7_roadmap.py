@@ -3,7 +3,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ROADMAP = ROOT / "docs" / "m7-agent-platform-roadmap.md"
+ROADMAP = ROOT / "docs" / "roadmap" / "m7-agent-platform-roadmap.md"
 AGENTS = ROOT / "AGENTS.md"
 README = ROOT / "README.md"
 
@@ -11,7 +11,7 @@ CHILD_ISSUES = ("#61", "#62", "#63", "#64", "#65", "#66", "#67")
 
 
 def _roadmap_text() -> str:
-    assert ROADMAP.is_file(), "docs/m7-agent-platform-roadmap.md must exist"
+    assert ROADMAP.is_file(), "docs/roadmap/m7-agent-platform-roadmap.md must exist"
     return ROADMAP.read_text(encoding="utf-8")
 
 
@@ -108,7 +108,7 @@ def test_m7_roadmap_warns_against_rewriting_via_issue_60() -> None:
 
 def test_agents_guide_points_to_m7_roadmap_and_order() -> None:
     text = AGENTS.read_text(encoding="utf-8")
-    assert "docs/m7-agent-platform-roadmap.md" in text
+    assert "docs/roadmap/m7-agent-platform-roadmap.md" in text
     marker = "## Next execution order (M7)"
     assert marker in text
     section = text.split(marker, 1)[1].split("## ", 1)[0]
@@ -128,5 +128,13 @@ def test_agents_guide_marks_m6_complete_and_m7_ready() -> None:
 
 def test_readme_points_to_m7_roadmap() -> None:
     readme = README.read_text(encoding="utf-8")
-    assert "docs/m7-agent-platform-roadmap.md" in readme
+    assert "docs/roadmap/m7-agent-platform-roadmap.md" in readme
     assert "M7" in readme
+
+
+def test_readme_is_short_and_links_docs_index() -> None:
+    readme = README.read_text(encoding="utf-8")
+    assert len(readme.splitlines()) <= 150
+    assert "docs/index.md" in readme
+    assert "docs/getting-started.md" in readme
+    assert "```python" not in readme

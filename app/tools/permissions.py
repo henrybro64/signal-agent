@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -256,7 +257,7 @@ class PermissionPolicy:
             _LOGGER,
             event="tool_permission_decision",
             message=f"permission {decision.action.value} for {tool_name}",
-            level=20 if decision.allowed else 30,
+            level=_decision_log_level(decision),
             tool_name=tool_name,
             allowed=decision.allowed,
             action=decision.action.value,
@@ -391,6 +392,16 @@ def reset_permission_policy(
     token: contextvars.Token[PermissionPolicy | None],
 ) -> None:
     _ACTIVE_PERMISSION_POLICY.reset(token)
+
+
+def _decision_log_level(decision: PermissionDecision) -> int:
+    """Allowed read probes stay DEBUG; other allows INFO; denials WARN (#104)."""
+
+    if not decision.allowed:
+        return logging.WARNING
+    if decision.permission == PermissionClass.READ:
+        return logging.DEBUG
+    return logging.INFO
 
 
 def _parse_action(raw: str, *, default: PolicyAction) -> PolicyAction:
