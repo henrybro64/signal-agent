@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from app.core.log_rotate import runtime_log_limits
-from app.core.logging import configure_logging, get_logger, log_event
+from app.core.log_rotate import attach_rotating_file_handler, runtime_log_limits
+from app.core.logging import JsonLogFormatter, configure_logging, get_logger, log_event
 from app.runtime.logs import read_log_tail
 
 
@@ -55,9 +55,13 @@ def test_rotating_handler_and_logs_tail_current_file(tmp_path: Path) -> None:
         level=logging.INFO,
         stream=io.StringIO(),
         force=True,
-        log_file=log_file,
-        log_max_bytes=800,
-        log_backup_count=2,
+    )
+    attach_rotating_file_handler(
+        logger,
+        log_file,
+        formatter=JsonLogFormatter(),
+        max_bytes=800,
+        backup_count=2,
     )
     for index in range(40):
         log_event(
@@ -78,15 +82,18 @@ def test_rotating_handler_and_logs_tail_current_file(tmp_path: Path) -> None:
     assert any("payload-" in line for line in tail)
 
 
-def test_debug_idle_ticks_are_dropped_at_default_info(tmp_path: Path) -> None:
+def test_debug_idle_ticks_are_dropped_at_default_info(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     log_file = tmp_path / "signal-agent.log"
+    monkeypatch.setenv("SIGNAL_AGENT_LOG_MAX_BYTES", str(64 * 1024))
+    monkeypatch.setenv("SIGNAL_AGENT_LOG_BACKUP_COUNT", "2")
     configure_logging(
         level=logging.INFO,
         stream=io.StringIO(),
         force=True,
         log_file=log_file,
-        log_max_bytes=64 * 1024,
-        log_backup_count=2,
     )
     worker = get_logger("runtime.worker")
     log_event(

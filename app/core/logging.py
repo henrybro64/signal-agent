@@ -83,8 +83,6 @@ def configure_logging(
     stream: TextIO | Literal[False] | None = None,
     force: bool = False,
     log_file: str | Path | None = None,
-    log_max_bytes: int | None = None,
-    log_backup_count: int | None = None,
 ) -> logging.Logger:
     """Configure the shared structured logger once and return it.
 
@@ -115,8 +113,6 @@ def configure_logging(
             logger,
             Path(log_file),
             formatter=JsonLogFormatter(),
-            max_bytes=log_max_bytes,
-            backup_count=log_backup_count,
         )
     logger.propagate = False
 
@@ -125,14 +121,20 @@ def configure_logging(
 
 
 def _stdout_stream() -> TextIO:
+    """Return the live stdout stream."""
+
     return sys.stdout
 
 
 def _stderr_stream() -> TextIO:
+    """Return the live stderr stream."""
+
     return sys.stderr
 
 
 def _stream_getter(stream: TextIO | None) -> Callable[[], TextIO]:
+    """Return a getter for stdout, stderr, or a captured stream."""
+
     if stream is sys.stderr:
         return _stderr_stream
     if stream is None or stream is sys.stdout:
@@ -177,7 +179,7 @@ def log_event(
     )
 
 
-def _normalize_exc_info(exc_info: ExcInfoArg):
+def _normalize_exc_info(exc_info: ExcInfoArg) -> ExcInfoArg:
     if exc_info is None or isinstance(exc_info, bool | tuple):
         return exc_info
     return (type(exc_info), exc_info, exc_info.__traceback__)

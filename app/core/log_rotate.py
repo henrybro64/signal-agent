@@ -56,6 +56,8 @@ def _resolve_limits(
     max_bytes: int | None,
     backup_count: int | None,
 ) -> tuple[int, int]:
+    """Apply explicit overrides on top of env-backed rotation limits."""
+
     resolved_max, resolved_backups = runtime_log_limits()
     if max_bytes is not None:
         resolved_max = max_bytes
@@ -65,6 +67,8 @@ def _resolve_limits(
 
 
 def _env_int(name: str, default: int) -> int:
+    """Parse a required integer env override, or return ``default``."""
+
     raw = os.environ.get(name)
     if raw is None or not str(raw).strip():
         return default
