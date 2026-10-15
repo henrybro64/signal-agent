@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal, TextIO
+from typing import Any
 
 from app.core.log_rotate import attach_rotating_file_handler
 
@@ -58,12 +57,9 @@ class CurrentStreamHandler(logging.Handler):
 
     terminator = "\n"
 
-    def __init__(
-        self,
-        stream_getter: Callable[[], TextIO] | None = None,
-    ) -> None:
+    def __init__(self, stream_getter=None) -> None:
         super().__init__()
-        self._stream_getter = stream_getter or _stdout_stream
+        self._stream_getter = stream_getter or (lambda: sys.stdout)  # noqa: E731
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -82,7 +78,7 @@ CurrentStdoutHandler = CurrentStreamHandler
 def configure_logging(
     *,
     level: int | str = logging.INFO,
-    stream: TextIO | Literal[False] | None = None,
+    stream=None,
     force: bool = False,
     log_file: str | Path | None = None,
 ) -> logging.Logger:
@@ -105,7 +101,14 @@ def configure_logging(
 
     logger.handlers.clear()
     if stream is not False:
-        handler = CurrentStreamHandler(_stream_getter(stream))
+        if stream is sys.stderr:
+            stream_getter = lambda: sys.stderr  # noqa: E731  # skipcq: PYL-E731
+        elif stream is None or stream is sys.stdout:
+            stream_getter = lambda: sys.stdout  # noqa: E731  # skipcq: PYL-E731
+        else:
+            captured = stream
+            stream_getter = lambda: captured  # noqa: E731  # skipcq: PYL-E731
+        handler = CurrentStreamHandler(stream_getter)
         handler.setFormatter(JsonLogFormatter())
         logger.addHandler(handler)
     if log_file is not None:
@@ -118,32 +121,6 @@ def configure_logging(
 
     _LOGGING_CONFIGURED = True
     return logger
-
-
-def _stdout_stream() -> TextIO:
-    """Return the live stdout stream."""
-
-    return sys.stdout
-
-
-def _stderr_stream() -> TextIO:
-    """Return the live stderr stream."""
-
-    return sys.stderr
-
-
-def _stream_getter(stream: TextIO | None) -> Callable[[], TextIO]:
-    """Return a getter for stdout, stderr, or a captured stream."""
-
-    if stream is sys.stderr:
-        return _stderr_stream
-    if stream is None or stream is sys.stdout:
-        return _stdout_stream
-
-    def _captured() -> TextIO:
-        return stream
-
-    return _captured
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
@@ -179,9 +156,7 @@ def log_event(
     )
 
 
-def _normalize_exc_info(exc_info: ExcInfoArg) -> ExcInfoArg:
-    """Pass through logging exc_info values, wrapping a bare exception."""
-
+def _normalize_exc_info(exc_info: ExcInfoArg):
     if exc_info is None or isinstance(exc_info, bool | tuple):
         return exc_info
     return (type(exc_info), exc_info, exc_info.__traceback__)

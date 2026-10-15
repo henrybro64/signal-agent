@@ -26,6 +26,8 @@ class RuntimeLifecycleError(RuntimeError):
 
 @dataclass(slots=True, frozen=True)
 class RuntimeProcessInfo:
+    """Snapshot of the local runtime process from pid/lock files."""
+
     running: bool
     pid: int | None = None
     started_at: str | None = None
@@ -34,6 +36,8 @@ class RuntimeProcessInfo:
 
 
 def read_runtime_state(root: str | Path | None = None) -> dict[str, Any]:
+    """Load persisted runtime state, or ``{}`` when missing/invalid."""
+
     path = runtime_paths.state_path(root)
     if not path.is_file():
         return {}
@@ -49,6 +53,8 @@ def write_runtime_state(
     *,
     root: str | Path | None = None,
 ) -> Path:
+    """Persist runtime state JSON and return the state file path."""
+
     runtime_paths.ensure_local_dirs(root)
     path = runtime_paths.state_path(root)
     path.write_text(
@@ -59,6 +65,8 @@ def write_runtime_state(
 
 
 def get_runtime_info(root: str | Path | None = None) -> RuntimeProcessInfo:
+    """Return whether the local runtime process is alive and owned by us."""
+
     pid_file = runtime_paths.pid_path(root)
     state = read_runtime_state(root)
     if not pid_file.is_file():
@@ -236,6 +244,8 @@ def restart_runtime(
     root: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> RuntimeProcessInfo:
+    """Stop a running runtime if needed, then start a new detached child."""
+
     stop_runtime(root=root)
     return start_runtime(root=root, config_path=config_path, detach=True)
 
@@ -250,7 +260,7 @@ def _spawn_detached_runtime(
 
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
     with stderr_path.open("wb") as handle:
-        return subprocess.Popen(  # noqa: S603 - controlled local launcher
+        return subprocess.Popen(  # noqa: S603 - skipcq: BAN-B603
             cmd,
             cwd=str(cwd),
             stdout=subprocess.DEVNULL,
