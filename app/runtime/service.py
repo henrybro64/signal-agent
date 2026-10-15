@@ -87,8 +87,9 @@ def run_service_forever(
     _STOP.requested = False
     runtime_paths.ensure_local_dirs(root)
     log_file = runtime_paths.log_path(root)
-    # Child owns the log file with rotation; parent redirects to DEVNULL (#104).
-    configure_logging(stream=sys.stderr, force=True, log_file=log_file)
+    # File handler only: a stderr stream would fill the parent's startup capture
+    # pipe/file after detach. Import/config failures still go to stderr.
+    configure_logging(stream=False, force=True, log_file=log_file)
 
     try:
         lock_handle = acquire_runtime_lock(root)

@@ -46,12 +46,19 @@ TELEGRAM_BOT_TOKEN=123456:ABC...
 TELEGRAM_CHAT_ID=123456789
 ```
 
-Enable the notifier in `config.yaml` if needed:
+Enable the notifier (non-interactive setup defaults it off). Either re-run:
+
+```bash
+signal-agent setup --non-interactive --provider fake --telegram-enabled
+```
+
+or set it in `config.yaml`:
 
 ```yaml
 notifiers:
   telegram:
     enabled: true
+    failure_alerts_enabled: true
 ```
 
 ## 4. Verify Telegram

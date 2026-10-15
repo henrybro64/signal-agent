@@ -35,7 +35,7 @@ MCP (`.[mcp]`) and the offline eval runner (`make eval`) are **not**
 | `SIGNAL_AGENT_LOG_PATH` | Runtime JSON log path | Default `logs/signal-agent.log` |
 | `SIGNAL_AGENT_RUNTIME_DIR` | Runtime state directory | Default project root |
 | `SIGNAL_AGENT_LOG_MAX_BYTES` | In-process log rotation | `5242880` (5 MiB); integer ≥ 1024 |
-| `SIGNAL_AGENT_LOG_BACKUP_COUNT` | Rotated backups to keep | `5`; integer ≥ 0 |
+| `SIGNAL_AGENT_LOG_BACKUP_COUNT` | Rotated backups to keep | `5`; integer ≥ 1 |
 | `SIGNAL_AGENT_BROWSER_PATH` | Chromium override | Unset → auto-detect |
 | `SIGNAL_AGENT_BROWSER_BACKEND` | Browser backend | Unset → Chromium; `fake` for fixtures |
 | `SIGNAL_AGENT_SYSTEMD_USER_DIR` | systemd `--user` unit dir | Unset → XDG user unit path |

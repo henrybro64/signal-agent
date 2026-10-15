@@ -35,8 +35,8 @@ they load `.env` via `EnvironmentFile=`.
 
 ```bash
 cp .env.example .env   # fill secrets
-docker compose run --rm signal-agent --list-tasks
-docker compose run --rm signal-agent --task job_search
+docker compose run --rm signal-agent python main.py --list-tasks
+docker compose run --rm signal-agent python main.py --task job_search
 ```
 
 Unattended VM scheduling: [Ubuntu VM runbook](ubuntu-vm-deployment.md)
@@ -45,9 +45,16 @@ Unattended VM scheduling: [Ubuntu VM runbook](ubuntu-vm-deployment.md)
 ## k3s (optional)
 
 ```bash
-kubectl apply -f deploy/k3s/namespace.yaml
-# copy secret.example.yaml → secret.yaml, fill values, apply
-kubectl apply -f deploy/k3s/
+cp deploy/k3s/secret.example.yaml deploy/k3s/secret.yaml
+# Edit deploy/k3s/secret.yaml and replace the placeholder values.
+kubectl apply -f deploy/k3s/namespace.yaml \
+  -f deploy/k3s/configmap.yaml \
+  -f deploy/k3s/pvc.yaml \
+  -f deploy/k3s/secret.yaml \
+  -f deploy/k3s/cronjob-job-search.yaml \
+  -f deploy/k3s/cronjob-tw-stock-movers.yaml
 ```
+
+Apply `secret.yaml` only — never `secret.example.yaml` (same Secret name, placeholder credentials).
 
 ConfigMap must stay aligned with root `config.yaml` (CI checks this).

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from app.runtime.logs import read_log_tail
 
 
 @pytest.fixture(autouse=True)
-def _restore_logging() -> None:
+def _restore_logging() -> Iterator[None]:
     """Keep file handlers from leaking into later tests."""
 
     yield
@@ -37,6 +38,14 @@ def test_runtime_log_limits_rejects_non_integer_backup_count(
 ) -> None:
     monkeypatch.setenv("SIGNAL_AGENT_LOG_BACKUP_COUNT", "1.5")
     with pytest.raises(ValueError, match="SIGNAL_AGENT_LOG_BACKUP_COUNT"):
+        runtime_log_limits()
+
+
+def test_runtime_log_limits_rejects_zero_backup_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIGNAL_AGENT_LOG_BACKUP_COUNT", "0")
+    with pytest.raises(ValueError, match="at least 1"):
         runtime_log_limits()
 
 

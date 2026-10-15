@@ -86,8 +86,9 @@ def configure_logging(
 
     Defaults to stdout. Pass ``stream=sys.stderr`` (and ``force=True`` when
     reconfiguring) so MCP stdio JSON-RPC is not interleaved with log lines.
-    When ``log_file`` is set, also attach a size-based rotating file handler
-    (#104).
+    Pass ``stream=False`` to attach only the rotating file handler (detached
+    runtime). When ``log_file`` is set, also attach a size-based rotating
+    file handler (#104).
     """
 
     global _LOGGING_CONFIGURED
@@ -98,19 +99,18 @@ def configure_logging(
     if _LOGGING_CONFIGURED and not force:
         return logger
 
-    if stream is sys.stderr:
-        stream_getter = lambda: sys.stderr  # noqa: E731
-    elif stream is None or stream is sys.stdout:
-        stream_getter = lambda: sys.stdout  # noqa: E731
-    else:
-        captured = stream
-        stream_getter = lambda: captured  # noqa: E731
-
-    handler = CurrentStreamHandler(stream_getter)
-    handler.setFormatter(JsonLogFormatter())
-
     logger.handlers.clear()
-    logger.addHandler(handler)
+    if stream is not False:
+        if stream is sys.stderr:
+            stream_getter = lambda: sys.stderr  # noqa: E731
+        elif stream is None or stream is sys.stdout:
+            stream_getter = lambda: sys.stdout  # noqa: E731
+        else:
+            captured = stream
+            stream_getter = lambda: captured  # noqa: E731
+        handler = CurrentStreamHandler(stream_getter)
+        handler.setFormatter(JsonLogFormatter())
+        logger.addHandler(handler)
     if log_file is not None:
         from app.core.log_rotate import attach_rotating_file_handler
 

@@ -31,6 +31,16 @@ def _prepare(tmp_path: Path) -> None:
     )
 
 
+def test_start_runtime_includes_child_stderr_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare(tmp_path)
+    monkeypatch.setenv("SIGNAL_AGENT_LOG_MAX_BYTES", "not-an-int")
+    with pytest.raises(RuntimeLifecycleError, match="SIGNAL_AGENT_LOG_MAX_BYTES"):
+        start_runtime(root=tmp_path, config_path=tmp_path / "config.yaml")
+
+
 def test_start_stop_status_idempotent(tmp_path: Path) -> None:
     _prepare(tmp_path)
     info = start_runtime(root=tmp_path, config_path=tmp_path / "config.yaml")

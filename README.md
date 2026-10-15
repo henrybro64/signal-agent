@@ -20,9 +20,11 @@ signal-agent doctor
 signal-agent run dummy
 ```
 
-Add Telegram credentials to `.env`, then:
+Add Telegram credentials to `.env`, then enable the notifier (non-interactive
+setup defaults to `notifiers.telegram.enabled: false`):
 
 ```bash
+signal-agent setup --non-interactive --provider fake --telegram-enabled
 python main.py --telegram-test
 signal-agent run job_search
 ```

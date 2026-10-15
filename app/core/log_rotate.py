@@ -19,8 +19,8 @@ def runtime_log_limits() -> tuple[int, int]:
     backups = _env_int("SIGNAL_AGENT_LOG_BACKUP_COUNT", DEFAULT_LOG_BACKUP_COUNT)
     if max_bytes < 1024:
         raise ValueError("SIGNAL_AGENT_LOG_MAX_BYTES must be at least 1024")
-    if backups < 0:
-        raise ValueError("SIGNAL_AGENT_LOG_BACKUP_COUNT must be zero or greater")
+    if backups < 1:
+        raise ValueError("SIGNAL_AGENT_LOG_BACKUP_COUNT must be at least 1")
     return max_bytes, backups
 
 

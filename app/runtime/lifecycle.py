@@ -141,30 +141,26 @@ def start_runtime(
         "--config",
         cfg,
     ]
-    # The service process owns ``log_file`` via RotatingFileHandler. Redirecting
-    # parent stdout into that path would pin an unrotated fd across rotations
-    # (#104), so discard inherited stdio and let the child write the log.
-    proc = subprocess.Popen(  # noqa: S603 - controlled local launcher
+    # Do not redirect parent stdio into ``log_file``: that pins an unrotated
+    # fd across RotatingFileHandler rollovers (#104). Capture child stderr to
+    # a sidecar until we know start succeeded so import/config failures are
+    # visible instead of disappearing into DEVNULL.
+    stderr_path = log_file.with_name("signal-agent.start.err")
+    proc = _spawn_detached_runtime(
         cmd,
-        cwd=str(runtime_paths.project_root(root)),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        cwd=runtime_paths.project_root(root),
+        stderr_path=stderr_path,
     )
 
-    # Child owns the flock + pid file. Poll until the lock-backed runtime
-    # reports alive, or fail if the child exits early.
-    deadline = time.time() + 3.0
-    while time.time() < deadline:
-        info = get_runtime_info(root)
-        if info.running:
-            return info
-        if proc.poll() is not None:
-            break
-        time.sleep(0.05)
+    info = _wait_until_runtime_running(root, proc)
+    if info is not None:
+        stderr_path.unlink(missing_ok=True)
+        return info
+    detail = _startup_stderr_snippet(stderr_path)
+    suffix = f": {detail}" if detail else ""
     raise RuntimeLifecycleError(
         "Runtime failed to stay alive after start "
-        f"(child_exit={proc.poll()})"
+        f"(child_exit={proc.poll()}){suffix}"
     )
 
 
@@ -242,6 +238,55 @@ def restart_runtime(
 ) -> RuntimeProcessInfo:
     stop_runtime(root=root)
     return start_runtime(root=root, config_path=config_path, detach=True)
+
+
+def _spawn_detached_runtime(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    stderr_path: Path,
+) -> subprocess.Popen[bytes]:
+    """Launch the runtime child; parent must not keep the rotating log fd."""
+
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    with stderr_path.open("w", encoding="utf-8") as handle:
+        return subprocess.Popen(  # noqa: S603 - controlled local launcher
+            cmd,
+            cwd=str(cwd),
+            stdout=subprocess.DEVNULL,
+            stderr=handle,
+            start_new_session=True,
+        )
+
+
+def _wait_until_runtime_running(
+    root: str | Path | None,
+    proc: subprocess.Popen[bytes],
+    *,
+    timeout_seconds: float = 3.0,
+) -> RuntimeProcessInfo | None:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        info = get_runtime_info(root)
+        if info.running:
+            return info
+        if proc.poll() is not None:
+            return None
+        time.sleep(0.05)
+    info = get_runtime_info(root)
+    return info if info.running else None
+
+
+def _startup_stderr_snippet(path: Path, *, limit: int = 4000) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
 
 
 def _pid_alive(pid: int) -> bool:
