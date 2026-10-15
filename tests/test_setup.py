@@ -203,9 +203,11 @@ def test_validate_warns_when_optional_deps_missing(tmp_path: Path) -> None:
     assert report.ok
     codes = {issue.code for issue in report.issues}
     assert "browser" in codes
-    calendar = next(
+    calendar_issues = [
         issue for issue in report.issues if issue.code == "tw_market_calendar"
-    )
+    ]
+    assert calendar_issues
+    calendar = calendar_issues[0]
     assert calendar.severity in {"info", "warning"}
     assert str(latest_tw_market_calendar_year()) in calendar.message
 
