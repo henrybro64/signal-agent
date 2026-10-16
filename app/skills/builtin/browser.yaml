@@ -1,17 +1,28 @@
 api_version: 1
 name: browser
-version: "1.0.0"
+version: "1.2.0"
 description: >
-  Optional isolated Chromium/Chrome browser tools with domain policy
-  (disabled by default; execute permission required).
+  Optional isolated browser tools with domain policy and interactive
+  session navigation via fake fixtures or Playwright (disabled by
+  default; per-tool ask, execute class stays disabled).
 tools:
   - browser_navigate
   - browser_read_page
   - browser_screenshot
+  - browser_open
+  - browser_snapshot
+  - browser_click
+  - browser_type
+  - browser_select
+  - browser_scroll
+  - browser_back
+  - browser_close
 tasks: []
 workflows: []
 required_permissions:
   - execute
+# Playwright is optional (backend: playwright / .[browser]); fake sessions
+# work without the extra. Doctor reports Playwright readiness separately.
 python_extras: []
 config_schema:
   type: object

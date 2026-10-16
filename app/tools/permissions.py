@@ -50,6 +50,14 @@ BUILTIN_TOOL_PERMISSIONS: dict[str, PermissionClass] = {
     "browser_navigate": PermissionClass.EXECUTE,
     "browser_read_page": PermissionClass.EXECUTE,
     "browser_screenshot": PermissionClass.EXECUTE,
+    "browser_open": PermissionClass.EXECUTE,
+    "browser_snapshot": PermissionClass.EXECUTE,
+    "browser_click": PermissionClass.EXECUTE,
+    "browser_type": PermissionClass.EXECUTE,
+    "browser_select": PermissionClass.EXECUTE,
+    "browser_scroll": PermissionClass.EXECUTE,
+    "browser_back": PermissionClass.EXECUTE,
+    "browser_close": PermissionClass.EXECUTE,
 }
 
 DANGEROUS_CAPABILITIES = frozenset(

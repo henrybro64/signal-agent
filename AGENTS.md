@@ -40,7 +40,7 @@ signal-agent/
 ├── app/setup/              # first-run wizard, doctor validation (#81)
 ├── app/chat/               # interactive bounded chat loop (#83)
 ├── app/scheduler/          # persistent schedules + worker tick (#85)
-├── app/browser/            # optional isolated browser service + tools (#87)
+├── app/browser/            # optional browser + Playwright sessions (#87/#106)
 ├── app/service/            # systemd --user install helpers (#88)
 ├── app/skills/             # built-in skill manifests (#89)
 ├── app/search/             # research SearchProvider adapters (#93)
@@ -159,7 +159,7 @@ the shared `fetch_from_sources()` helper in `app/sources/base.py`.
 | `runtime` | Local start/stop/status/logs lifecycle | Multi-node orchestration |
 | `chat` | Interactive plan-act-observe REPL | Unrestricted shell/SQL/browser tools |
 | `scheduler` | Persistent cron/one-shot schedules + overlap/retry | Reimplement task orchestration |
-| `browser` | Isolated Chromium/fake backend + bounded browse tools | Arbitrary JS, login automation, CAPTCHA bypass |
+| `browser` | Isolated Chromium/fake one-shot + Playwright/fake sessions (#106); sessions fail closed unless `backend` is `fake` or `playwright`; refs are CSS `nth` | Arbitrary JS, login automation, CAPTCHA bypass, apply/message CTAs, file upload |
 | `service` | systemd --user unit render/install for local runtime | Duplicate daemon separate from `app.runtime` |
 | `skills` | Versioned built-in manifests + enable/disable | Marketplace / untrusted plugin download |
 | `formatters` | Digest text assembly (e.g. Traditional Chinese reports) | Fetching or scoring |

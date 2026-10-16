@@ -41,6 +41,14 @@ ALL_BUILTIN_TOOLS: tuple[str, ...] = (
     "browser_navigate",
     "browser_read_page",
     "browser_screenshot",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_select",
+    "browser_scroll",
+    "browser_back",
+    "browser_close",
     "research_web",
 )
 
@@ -323,6 +331,14 @@ def _compose_allowlist_names(
             "browser_navigate",
             "browser_read_page",
             "browser_screenshot",
+            "browser_open",
+            "browser_snapshot",
+            "browser_click",
+            "browser_type",
+            "browser_select",
+            "browser_scroll",
+            "browser_back",
+            "browser_close",
         ):
             if tool_name not in names:
                 names.append(tool_name)

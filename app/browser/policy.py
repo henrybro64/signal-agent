@@ -20,6 +20,7 @@ class BrowserPolicy:
     max_page_bytes: int = 500_000
     allow_downloads: bool = False
     allow_javascript: bool = False
+    allow_subresources: bool = False
 
     def assert_url_allowed(self, url: str) -> None:
         parsed = urlparse(url)

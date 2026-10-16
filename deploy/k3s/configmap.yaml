@@ -3,14 +3,12 @@ kind: ConfigMap
 metadata:
   name: signal-agent-config
   namespace: signal-agent
-  labels:
-    app.kubernetes.io/name: signal-agent
 data:
   config.yaml: |
     agent:
       timezone: Asia/Taipei
       digest_time: "20:00"
-
+    
     tasks:
       job_search:
         enabled: true
@@ -69,7 +67,7 @@ data:
         # Optional per-workflow model override (#86); omit to inherit llm.*
         # llm_provider: fake
         # llm_model: research-model
-
+    
     # Explicit Markdown/text documents for namespaced agent memory (#65).
     # Paths are ingested at job_research start; never put .env/secrets here.
     # Leave empty in deployment-safe defaults; local runs can point at
@@ -78,7 +76,7 @@ data:
       namespaces:
         job_research:
           documents: []
-
+    
     investment:
       watchlist:
         - "2330"
@@ -110,19 +108,19 @@ data:
             - ASIC
             - CoWoS
             - HBM
-
+    
     notifiers:
       telegram:
         enabled: true
         failure_alerts_enabled: true
-
+    
     scoring:
       freshness_weight: 0.6
       priority_weight: 0.4
       llm_enabled: false
       # Kept in sync with llm.model (alias for older configs).
       llm_model: gpt-4o-mini
-
+    
     # Optional LLM gateway defaults (used when scoring.llm_enabled is true).
     # llm.model is the source of truth; provider "fake" is for offline tests;
     # "ollama" is reserved for later.
@@ -130,12 +128,14 @@ data:
       provider: openai
       model: gpt-4o-mini
       timeout_seconds: 20
+      # Applied by the OpenAI adapter; current Anthropic models reject non-default
+      # sampling values, so the Anthropic adapter never sends temperature.
       temperature: 0.2
       max_retries: 1
       # Optional ordered fallbacks used by RoutedLLMProvider (#86).
       # fallbacks:
       #   - fake/backup-model
-
+    
     # Optional agent tool registry defaults (#62/#84). Telegram stays off the
     # default allowlist; enable via include path / job_research_agent.telegram_enabled.
     tools:
@@ -150,19 +150,34 @@ data:
           notify: ask
           write: disabled
           execute: disabled
-        # Per-tool overrides (disabled/ask/allow), e.g.:
-        # tools:
-        #   send_telegram_message: allow
+        # Per-tool overrides (disabled/ask/allow). Browser tools stay ask so
+        # execute-class remains disabled for other tools (e.g. runtime_execute).
+        tools:
+          browser_navigate: ask
+          browser_read_page: ask
+          browser_screenshot: ask
+          browser_open: ask
+          browser_snapshot: ask
+          browser_click: ask
+          browser_type: ask
+          browser_select: ask
+          browser_scroll: ask
+          browser_back: ask
+          browser_close: ask
+        # Raise to at least browser.max_steps_per_session for multi-step browsing.
         max_side_effect_actions: 3
-
-    # Optional isolated browser service (#87). Disabled by default.
+    
+    # Optional isolated browser service (#87/#106). Disabled by default.
     # To use: skill enable browser → set enabled: true → browser start/test.
     # Downloads are always denied (allow_downloads=true is rejected).
-    # Fake/fixture backend only when SIGNAL_AGENT_BROWSER_BACKEND=fake (or backend: fake).
+    # Backends: chromium (one-shot), fake (CI fixtures), playwright (sessions; .[browser]).
+    # Session tools require explicit fake or playwright (chromium/omitted fail closed).
+    # Typing is search/filter only; no JS input, login, CAPTCHA, apply, or file upload.
     browser:
       enabled: false
       headless: true
-      # backend: fake   # force offline fixtures (also via SIGNAL_AGENT_BROWSER_BACKEND)
+      # backend: fake        # offline fixtures (also SIGNAL_AGENT_BROWSER_BACKEND=fake)
+      # backend: playwright  # pip install -e '.[browser]' && playwright install chromium
       allowed_domains:
         - fixture.local
         - example.com
@@ -171,14 +186,20 @@ data:
       max_page_bytes: 500000
       allow_downloads: false
       allow_javascript: false
-
+      # When false, off-allowlist images/scripts/XHR are aborted (fail closed).
+      allow_subresources: false
+      max_sessions: 1
+      session_ttl_seconds: 300
+      max_steps_per_session: 20
+      max_interactive_elements: 150
+    
     # Built-in skills (#89). Omit `enabled` to use defaults (job_search +
     # stock_monitoring). Browser stays off until explicitly enabled.
     skills:
       enabled:
         - job_search
         - stock_monitoring
-
+    
     # Optional source runtime tuning. Safe defaults apply when this section
     # (or any nested key) is omitted.
     sources:
@@ -210,7 +231,7 @@ data:
         max_retries: 2
         request_delay_seconds: 0.2
         batch_size: 100
-
+    
     # Vendor credentials are resolved from environment variable names, never literals.
     providers:
       openai:
@@ -221,14 +242,14 @@ data:
         api_key_env: PERPLEXITY_API_KEY
       codex:
         api_key_env: CODEX_API_KEY
-
+    
     # Enable the research skill to expose research_web; fake stays offline.
     search:
       provider: fake  # fake | perplexity
       model: sonar
       max_results: 5
       timeout_seconds: 20
-
+    
     # Separate from the local lifecycle daemon (app/runtime).
     # agent-run requires tools.permissions.tools.runtime_execute: ask or allow.
     runtime:

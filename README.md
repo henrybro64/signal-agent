@@ -70,6 +70,10 @@ Legacy flags still work: `python main.py --list-tasks`, `--task …`, `--health`
 - TW stock tasks fail closed when the holiday calendar lacks the current year —
   `doctor` warns before that happens.
 - Runtime logs rotate by size; idle ticks are quiet (`DEBUG`).
+- Optional browser sessions (#106): `pip install -e '.[browser]' && playwright install chromium`,
+  then set `browser.backend: playwright`. Session tools fail closed if backend is omitted or
+  `chromium`. Keep `tools.permissions.classes.execute` disabled and `tools.permissions.tools.browser_*`
+  as `ask`. CI uses `backend: fake` without the extra.
 - **k3s is optional** — start with local runtime or the Ubuntu VM Compose path.
 
 ## License / contributing
