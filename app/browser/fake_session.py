@@ -159,7 +159,8 @@ class FakeSessionBackend:
             steps_used=snap.steps_used,
         )
 
-    def session_close(self, handle: _FakeHandle) -> None:
+    @staticmethod
+    def session_close(handle: _FakeHandle) -> None:
         handle.history.clear()
         handle.typed.clear()
         handle.selected.clear()

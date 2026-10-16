@@ -38,8 +38,11 @@ class SessionSnapshot:
     blocked_reason: str | None = None
     steps_used: int = 0
 
-    def format_for_model(self, *, text_limit: int = 4000) -> str:
+    def format_for_model(self, *, text_limit: int = 400) -> str:
+        # Elements first: chat truncates the serialized tool result to 1,200
+        # characters, so refs must appear before page text.
         lines = [
+            f"session_id: {self.session_id}",
             f"url: {self.url}",
             f"title: {self.title}",
             f"status: {self.status}",
@@ -47,20 +50,20 @@ class SessionSnapshot:
         ]
         if self.blocked_reason:
             lines.append(f"blocked_reason: {self.blocked_reason}")
-        lines.append("text:")
-        lines.append(self.text[:text_limit])
         if self.elements:
             lines.append("elements:")
             lines.extend(element.format_line() for element in self.elements)
+        lines.append("text:")
+        lines.append(self.text[:text_limit])
         return "\n".join(lines)
 
-    def to_tool_data(self, *, text_limit: int = 4000) -> dict:
+    def to_tool_data(self, *, text_limit: int = 400) -> dict:
+        formatted = self.format_for_model(text_limit=text_limit)
         return {
+            "formatted": formatted,
             "session_id": self.session_id,
             "url": self.url,
             "title": self.title,
-            "text": self.text[:text_limit],
-            "text_length": len(self.text),
             "status": self.status,
             "blocked_reason": self.blocked_reason,
             "steps_used": self.steps_used,
@@ -75,5 +78,6 @@ class SessionSnapshot:
                 }
                 for element in self.elements
             ],
-            "formatted": self.format_for_model(text_limit=text_limit),
+            "text": self.text[:text_limit],
+            "text_length": len(self.text),
         }

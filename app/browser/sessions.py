@@ -139,10 +139,12 @@ class BrowserSessionManager:
                     "close an existing session first"
                 )
             policy.assert_url_allowed(url)
-            handle, snap = self.backend.session_open(
-                url,
-                policy=policy,
-                profile_dir=self.profile_dir,
+            handle, snap = _unpack_open(
+                self.backend.session_open(
+                    url,
+                    policy=policy,
+                    profile_dir=self.profile_dir,
+                )
             )
             session_id = snap.session_id or str(uuid.uuid4())
             record = _SessionRecord(
@@ -319,8 +321,8 @@ class BrowserSessionManager:
         record.last_used_at = time.monotonic()
         return record
 
+    @staticmethod
     def _resolve_element(
-        self,
         record: _SessionRecord,
         ref: int,
     ) -> InteractiveElement:
@@ -377,6 +379,15 @@ class BrowserSessionManager:
             steps_used=record.steps_used,
         )
         return apply_challenge_status(rebuilt)
+
+
+def _unpack_open(opened: Any) -> tuple[Any, SessionSnapshot]:
+    if not isinstance(opened, tuple) or len(opened) != 2:
+        raise BrowserPolicyError("session backend returned an invalid open result")
+    handle, snap = opened
+    if not isinstance(snap, SessionSnapshot):
+        raise BrowserPolicyError("session backend returned an invalid snapshot")
+    return handle, snap
 
 
 _MANAGERS: dict[str, BrowserSessionManager] = {}

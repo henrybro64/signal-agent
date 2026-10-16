@@ -22,7 +22,9 @@ class BrowserPolicy:
     allow_javascript: bool = False
     allow_subresources: bool = False
 
-    def assert_url_allowed(self, url: str) -> None:
+    def assert_url_not_denied(self, url: str) -> None:
+        """Reject invalid schemes, missing hosts, and denied_domains."""
+
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"}:
             raise BrowserPolicyError(
@@ -34,6 +36,11 @@ class BrowserPolicy:
         for denied in self.denied_domains:
             if _host_matches(host, denied.lower()):
                 raise BrowserPolicyError(f"Domain {host!r} is denied by policy")
+
+    def assert_url_allowlisted(self, url: str) -> None:
+        """Reject hosts that are not in allowed_domains."""
+
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
         if not self.allowed_domains:
             raise BrowserPolicyError(
                 "No allowed_domains configured; refusing navigation"
@@ -45,6 +52,10 @@ class BrowserPolicy:
             raise BrowserPolicyError(
                 f"Domain {host!r} is not in browser.allowed_domains"
             )
+
+    def assert_url_allowed(self, url: str) -> None:
+        self.assert_url_not_denied(url)
+        self.assert_url_allowlisted(url)
 
 
 def _host_matches(host: str, pattern: str) -> bool:

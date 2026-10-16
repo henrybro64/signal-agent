@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -98,6 +99,10 @@ def test_password_and_apply_refused(tmp_path: Path) -> None:
         manager.type_text(snap.session_id, password.ref, "secret")
     with pytest.raises(BrowserPolicyError, match="apply"):
         manager.click(snap.session_id, apply_btn.ref)
+    messages = [el for el in snap.elements if "Message recruiter" in el.label]
+    assert messages
+    with pytest.raises(BrowserPolicyError, match="message recruiter"):
+        manager.click(snap.session_id, messages[0].ref)
     manager.close(snap.session_id)
 
 
@@ -290,6 +295,98 @@ def test_config_parses_session_limits(tmp_path: Path) -> None:
     assert loaded.browser.allow_subresources is False
 
 
+def test_snapshot_puts_elements_before_text_for_chat() -> None:
+    from app.browser.models import InteractiveElement, SessionSnapshot
+
+    snap = SessionSnapshot(
+        session_id="sess-1",
+        url="https://fixture.local/jobs",
+        title="Jobs",
+        text="Job results " + ("word " * 400),
+        elements=[
+            InteractiveElement(
+                ref=1,
+                role="link",
+                label="Next page",
+                url="https://fixture.local/jobs?page=2",
+            )
+        ],
+    )
+    data = snap.to_tool_data()
+    assert list(data.keys())[0] == "formatted"
+    formatted = str(data["formatted"])
+    assert formatted.index("elements:") < formatted.index("\ntext:")
+    payload = json.dumps({"ok": True, "data": data}, ensure_ascii=False)[:1200]
+    assert "[1]" in payload
+    assert "Next page" in payload
+
+
+def test_allow_subresources_does_not_bypass_denylist() -> None:
+    policy = BrowserPolicy(
+        allowed_domains=["example.com"],
+        denied_domains=["tracker.example"],
+        allow_subresources=True,
+    )
+    policy.assert_url_not_denied("https://cdn.other/style.css")
+    with pytest.raises(BrowserPolicyError, match="denied"):
+        policy.assert_url_not_denied("https://tracker.example/pixel.js")
+    with pytest.raises(BrowserPolicyError, match="scheme"):
+        policy.assert_url_not_denied("file:///etc/passwd")
+    with pytest.raises(BrowserPolicyError, match="allowed_domains"):
+        policy.assert_url_allowlisted("https://cdn.other/style.css")
+
+
+def test_browser_close_after_side_effect_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIGNAL_AGENT_BROWSER_BACKEND", "fake")
+    run_setup(
+        root=tmp_path,
+        options=SetupOptions(provider="fake", non_interactive=True, force=True),
+    )
+    cfg_path = tmp_path / "config.yaml"
+    payload = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    browser = payload.setdefault("browser", {})
+    browser["enabled"] = True
+    browser["allowed_domains"] = ["fixture.local"]
+    cfg_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    from app.skills import enable_skill
+
+    enable_skill("browser", root=tmp_path, config_path=cfg_path)
+    drop_session_manager(tmp_path)
+    close_all_session_managers()
+    registry = build_tool_registry(
+        allowlist=["browser_open", "browser_close"],
+        include_browser=True,
+        enabled_skill_tools={"browser_open", "browser_close"},
+        root=tmp_path,
+        config_path=cfg_path,
+    )
+    config = load_config(cfg_path)
+    ctx = ToolContext(
+        config=config,
+        db_path=tmp_path / "data" / "signals.sqlite3",
+        root=tmp_path,
+        config_path=cfg_path,
+        permission_policy=build_permission_policy(
+            PermissionPolicyConfig(
+                classes={"execute": "allow"},
+                max_side_effect_actions=1,
+            )
+        ),
+    )
+    opened = registry.invoke("browser_open", {"url": JOBS_PAGE_1}, context=ctx)
+    assert opened.ok is True
+    closed = registry.invoke(
+        "browser_close",
+        {"session_id": opened.data["session_id"]},
+        context=ctx,
+    )
+    assert closed.ok is True
+    close_all_session_managers()
+
+
 def test_select_screenshot_file_and_non_search_type(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     snap = manager.open(JOBS_PAGE_1, policy=_policy())
@@ -337,13 +434,13 @@ def test_session_backend_chromium_fails_closed(
 
 def test_playwright_locator_uses_nth_for_ref() -> None:
     from app.browser.models import InteractiveElement
-    from app.browser.playwright_backend import ELEMENT_SELECTOR, PlaywrightBackend
+    from app.browser.playwright_backend import ELEMENT_SELECTOR, nth_locator
 
     class _Locator:
         def __init__(self) -> None:
             self.nth_calls: list[int] = []
 
-        def nth(self, index: int) -> _Locator:
+        def nth(self, index: int):
             self.nth_calls.append(index)
             return self
 
@@ -352,13 +449,13 @@ def test_playwright_locator_uses_nth_for_ref() -> None:
             self.selector: str | None = None
             self.locator_obj = _Locator()
 
-        def locator(self, selector: str) -> _Locator:
+        def locator(self, selector: str):
             self.selector = selector
             return self.locator_obj
 
     page = _Page()
     element = InteractiveElement(ref=3, role="button", label="Same")
-    PlaywrightBackend()._locator(page, element)
+    nth_locator(page, element)
     assert page.selector == ELEMENT_SELECTOR
     assert page.locator_obj.nth_calls == [2]
 

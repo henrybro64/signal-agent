@@ -199,7 +199,7 @@ class ToolRegistry:
         policy = _policy_from_context(ctx)
         permission = getattr(tool, "permission", None)
         if policy is not None:
-            policy.record_side_effect(permission)
+            policy.record_side_effect(permission, tool_name=name)
 
         try:
             validate_tool_arguments(args, tool.input_schema, tool_name=name)

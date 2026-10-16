@@ -256,21 +256,16 @@ class BrowserClickTool:
     ) -> ToolResult:
         _ = self._tool_name
         session_id = str(arguments.get("session_id") or "").strip()
-        try:
-            ref = int(arguments.get("ref"))
-        except (TypeError, ValueError):
-            return ToolResult(
-                ok=False,
-                error="ref must be an integer",
-                metadata={"code": "invalid_argument"},
-            )
+        parsed = _parse_ref(arguments)
+        if isinstance(parsed, ToolResult):
+            return parsed
         if not session_id:
             return ToolResult(
                 ok=False,
                 error="session_id is required",
                 metadata={"code": "invalid_argument"},
             )
-        return _session_call(context, lambda manager: manager.click(session_id, ref))
+        return _session_call(context, lambda manager: manager.click(session_id, parsed))
 
 
 class BrowserTypeTool:
@@ -304,14 +299,9 @@ class BrowserTypeTool:
         session_id = str(arguments.get("session_id") or "").strip()
         text = str(arguments.get("text") or "")
         submit = bool(arguments.get("submit", False))
-        try:
-            ref = int(arguments.get("ref"))
-        except (TypeError, ValueError):
-            return ToolResult(
-                ok=False,
-                error="ref must be an integer",
-                metadata={"code": "invalid_argument"},
-            )
+        parsed = _parse_ref(arguments)
+        if isinstance(parsed, ToolResult):
+            return parsed
         if not session_id:
             return ToolResult(
                 ok=False,
@@ -320,7 +310,7 @@ class BrowserTypeTool:
             )
         return _session_call(
             context,
-            lambda manager: manager.type_text(session_id, ref, text, submit=submit),
+            lambda manager: manager.type_text(session_id, parsed, text, submit=submit),
         )
 
 
@@ -351,14 +341,9 @@ class BrowserSelectTool:
         _ = self._tool_name
         session_id = str(arguments.get("session_id") or "").strip()
         value = str(arguments.get("value") or "")
-        try:
-            ref = int(arguments.get("ref"))
-        except (TypeError, ValueError):
-            return ToolResult(
-                ok=False,
-                error="ref must be an integer",
-                metadata={"code": "invalid_argument"},
-            )
+        parsed = _parse_ref(arguments)
+        if isinstance(parsed, ToolResult):
+            return parsed
         if not session_id:
             return ToolResult(
                 ok=False,
@@ -366,7 +351,7 @@ class BrowserSelectTool:
                 metadata={"code": "invalid_argument"},
             )
         return _session_call(
-            context, lambda manager: manager.select(session_id, ref, value)
+            context, lambda manager: manager.select(session_id, parsed, value)
         )
 
 
@@ -492,6 +477,24 @@ def browser_tools() -> dict[str, Any]:
         BrowserCloseTool(),
     ]
     return {tool.name: tool for tool in tools}
+
+
+def _parse_ref(arguments: dict[str, Any]) -> int | ToolResult:
+    raw = arguments.get("ref")
+    if raw is None:
+        return ToolResult(
+            ok=False,
+            error="ref must be an integer",
+            metadata={"code": "invalid_argument"},
+        )
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return ToolResult(
+            ok=False,
+            error="ref must be an integer",
+            metadata={"code": "invalid_argument"},
+        )
 
 
 def _open_page(

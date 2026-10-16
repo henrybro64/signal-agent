@@ -5,9 +5,12 @@ Requires ``pip install -e '.[browser]'`` and ``playwright install chromium``.
 
 from __future__ import annotations
 
+import queue
 import shutil
 import tempfile
+import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,6 +26,45 @@ ELEMENT_SELECTOR = (
     "a[href], button, input, select, textarea, "
     '[role="button"], [role="link"], [role="textbox"]'
 )
+
+_CONTINUE = object()
+
+
+class _SerialExecutor:
+    """Run Playwright sync API calls on one thread (handles are thread-affine)."""
+
+    def __init__(self) -> None:
+        self._calls: queue.Queue[
+            tuple[Callable[[], Any], queue.Queue[tuple[Any, BaseException | None]]]
+            | None
+        ] = queue.Queue()
+        self.thread = threading.Thread(
+            target=self._loop,
+            name="playwright-session",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def call(self, fn: Callable[[], Any]) -> Any:
+        if threading.get_ident() == self.thread.ident:
+            return fn()
+        done: queue.Queue[tuple[Any, BaseException | None]] = queue.Queue()
+        self._calls.put((fn, done))
+        result, exc = done.get()
+        if exc is not None:
+            raise exc
+        return result
+
+    def _loop(self) -> None:
+        while True:
+            item = self._calls.get()
+            if item is None:
+                return
+            fn, done = item
+            try:
+                done.put((fn(), None))
+            except BaseException as exc:  # noqa: BLE001 - surface to caller
+                done.put((None, exc))
 
 
 @dataclass(slots=True)
@@ -40,14 +82,28 @@ class PlaywrightBackend:
     headless: bool = True
     profile_dir: Path | None = None
     _handles: list[_PlaywrightHandle] = field(default_factory=list)
+    _owner: _SerialExecutor = field(default_factory=_SerialExecutor, repr=False)
+
+    def _dispatch(self, fn: Callable[[], Any]) -> Any:
+        if threading.get_ident() == self._owner.thread.ident:
+            return _CONTINUE
+        return self._owner.call(fn)
 
     def open(self, url: str, *, policy: BrowserPolicy) -> PageSnapshot:
         """One-shot convenience wrapper used when ``backend: playwright``."""
 
+        dispatched = self._dispatch(lambda: self.open(url, policy=policy))
+        if dispatched is not _CONTINUE:
+            return dispatched
         root = self.profile_dir or Path(
             tempfile.mkdtemp(prefix="signal-agent-oneshot-")
         )
-        handle, snap = self.session_open(url, policy=policy, profile_dir=root)
+        handle, snap = self.session_open(
+            url,
+            policy=policy,
+            profile_dir=root,
+            enforce_max_bytes=True,
+        )
         try:
             return PageSnapshot(url=snap.url, title=snap.title, text=snap.text)
         finally:
@@ -60,6 +116,11 @@ class PlaywrightBackend:
         policy: BrowserPolicy,
         output_path: Path,
     ) -> PageSnapshot:
+        dispatched = self._dispatch(
+            lambda: self.screenshot(url, policy=policy, output_path=output_path)
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
         root = self.profile_dir or Path(
             tempfile.mkdtemp(prefix="signal-agent-oneshot-")
         )
@@ -87,13 +148,30 @@ class PlaywrightBackend:
         *,
         policy: BrowserPolicy,
         profile_dir: Path,
+        enforce_max_bytes: bool = False,
     ) -> tuple[_PlaywrightHandle, SessionSnapshot]:
+        dispatched = self._dispatch(
+            lambda: self.session_open(
+                url,
+                policy=policy,
+                profile_dir=profile_dir,
+                enforce_max_bytes=enforce_max_bytes,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
         handle = self._launch(policy, profile_dir)
         try:
-            self._goto(handle.page, url, policy=policy)
+            _goto_page(handle.page, url, policy=policy)
             self._handles.append(handle)
             session_id = str(uuid.uuid4())
-            return handle, self._snapshot(handle, session_id=session_id, steps=1)
+            return handle, snapshot_page(
+                handle,
+                session_id=session_id,
+                steps=1,
+                policy=policy,
+                enforce_max_bytes=enforce_max_bytes,
+            )
         except Exception:
             self.session_close(handle)
             raise
@@ -106,8 +184,22 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        _ = policy
-        return self._snapshot(handle, session_id=session_id, steps=steps_used)
+        dispatched = self._dispatch(
+            lambda: self.session_snapshot(
+                handle,
+                policy=policy,
+                session_id=session_id,
+                steps_used=steps_used,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
+        return snapshot_page(
+            handle,
+            session_id=session_id,
+            steps=steps_used,
+            policy=policy,
+        )
 
     def session_click(
         self,
@@ -118,15 +210,31 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        locator = self._locator(handle.page, element)
+        dispatched = self._dispatch(
+            lambda: self.session_click(
+                handle,
+                element,
+                policy=policy,
+                session_id=session_id,
+                steps_used=steps_used,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
+        locator = nth_locator(handle.page, element)
         timeout_ms = int(policy.navigation_timeout_seconds * 1000)
-        self._run_playwright(
+        _run_playwright(
             lambda: locator.click(timeout=timeout_ms),
             action="click",
         )
-        self._wait_settled(handle.page, timeout_ms)
-        self._assert_page_domain(handle.page, policy)
-        return self._snapshot(handle, session_id=session_id, steps=steps_used)
+        _wait_settled(handle.page, timeout_ms)
+        _assert_page_domain(handle.page, policy)
+        return snapshot_page(
+            handle,
+            session_id=session_id,
+            steps=steps_used,
+            policy=policy,
+        )
 
     def session_type(
         self,
@@ -139,17 +247,35 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        locator = self._locator(handle.page, element)
+        dispatched = self._dispatch(
+            lambda: self.session_type(
+                handle,
+                element,
+                text,
+                submit=submit,
+                policy=policy,
+                session_id=session_id,
+                steps_used=steps_used,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
+        locator = nth_locator(handle.page, element)
         timeout_ms = int(policy.navigation_timeout_seconds * 1000)
-        self._run_playwright(
+        _run_playwright(
             lambda: locator.fill(text, timeout=timeout_ms),
             action="type",
         )
         if submit:
-            self._run_playwright(lambda: locator.press("Enter"), action="submit")
-            self._wait_settled(handle.page, timeout_ms)
-        self._assert_page_domain(handle.page, policy)
-        return self._snapshot(handle, session_id=session_id, steps=steps_used)
+            _run_playwright(lambda: locator.press("Enter"), action="submit")
+            _wait_settled(handle.page, timeout_ms)
+        _assert_page_domain(handle.page, policy)
+        return snapshot_page(
+            handle,
+            session_id=session_id,
+            steps=steps_used,
+            policy=policy,
+        )
 
     def session_select(
         self,
@@ -161,13 +287,39 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        locator = self._locator(handle.page, element)
-        self._run_playwright(
+        dispatched = self._dispatch(
+            lambda: self.session_select(
+                handle,
+                element,
+                value,
+                policy=policy,
+                session_id=session_id,
+                steps_used=steps_used,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
+        locator = nth_locator(handle.page, element)
+        tag = _run_playwright(
+            lambda: locator.evaluate("el => (el.tagName || '').toLowerCase()"),
+            action="select",
+        )
+        if tag != "select":
+            raise BrowserPolicyError(
+                "select is only supported on native <select> elements; "
+                "use browser_type or browser_click for ARIA comboboxes"
+            )
+        _run_playwright(
             lambda: locator.select_option(value),
             action="select",
         )
-        self._assert_page_domain(handle.page, policy)
-        return self._snapshot(handle, session_id=session_id, steps=steps_used)
+        _assert_page_domain(handle.page, policy)
+        return snapshot_page(
+            handle,
+            session_id=session_id,
+            steps=steps_used,
+            policy=policy,
+        )
 
     def session_scroll(
         self,
@@ -178,6 +330,17 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
+        dispatched = self._dispatch(
+            lambda: self.session_scroll(
+                handle,
+                direction,
+                policy=policy,
+                session_id=session_id,
+                steps_used=steps_used,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
         _ = policy
         script = {
             "up": "window.scrollBy(0, -Math.max(400, window.innerHeight * 0.8))",
@@ -185,11 +348,16 @@ class PlaywrightBackend:
             "top": "window.scrollTo(0, 0)",
             "bottom": "window.scrollTo(0, document.body.scrollHeight)",
         }[direction]
-        self._run_playwright(
+        _run_playwright(
             lambda: handle.page.evaluate(script),
             action="scroll",
         )
-        return self._snapshot(handle, session_id=session_id, steps=steps_used)
+        return snapshot_page(
+            handle,
+            session_id=session_id,
+            steps=steps_used,
+            policy=policy,
+        )
 
     def session_back(
         self,
@@ -199,12 +367,27 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        self._run_playwright(
+        dispatched = self._dispatch(
+            lambda: self.session_back(
+                handle,
+                policy=policy,
+                session_id=session_id,
+                steps_used=steps_used,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
+        _run_playwright(
             lambda: handle.page.go_back(wait_until="domcontentloaded"),
             action="back",
         )
-        self._assert_page_domain(handle.page, policy)
-        return self._snapshot(handle, session_id=session_id, steps=steps_used)
+        _assert_page_domain(handle.page, policy)
+        return snapshot_page(
+            handle,
+            session_id=session_id,
+            steps=steps_used,
+            policy=policy,
+        )
 
     def session_screenshot(
         self,
@@ -215,13 +398,28 @@ class PlaywrightBackend:
         steps_used: int,
         output_path: Path,
     ) -> SessionSnapshot:
-        _ = policy
+        dispatched = self._dispatch(
+            lambda: self.session_screenshot(
+                handle,
+                policy=policy,
+                session_id=session_id,
+                steps_used=steps_used,
+                output_path=output_path,
+            )
+        )
+        if dispatched is not _CONTINUE:
+            return dispatched
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._run_playwright(
+        _run_playwright(
             lambda: handle.page.screenshot(path=str(output_path), full_page=False),
             action="screenshot",
         )
-        snap = self._snapshot(handle, session_id=session_id, steps=steps_used)
+        snap = snapshot_page(
+            handle,
+            session_id=session_id,
+            steps=steps_used,
+            policy=policy,
+        )
         return SessionSnapshot(
             session_id=snap.session_id,
             url=snap.url,
@@ -235,6 +433,9 @@ class PlaywrightBackend:
         )
 
     def session_close(self, handle: _PlaywrightHandle) -> None:
+        dispatched = self._dispatch(lambda: self.session_close(handle))
+        if dispatched is not _CONTINUE:
+            return
         try:
             handle.context.close()
         except Exception:  # noqa: BLE001
@@ -286,7 +487,7 @@ class PlaywrightBackend:
             page=page,
             profile_dir=session_dir,
         )
-        self._install_routes(context, policy)
+        _install_context_routes(context, policy)
 
         def _close_popup(new_page: Any) -> None:  # noqa: ANN401
             if new_page is handle.page:
@@ -299,94 +500,112 @@ class PlaywrightBackend:
         context.on("page", _close_popup)
         return handle
 
-    def _install_routes(self, context: Any, policy: BrowserPolicy) -> None:
-        def _route_handler(route: Any) -> None:  # noqa: ANN401
-            request = route.request
-            is_document = request.resource_type == "document"
-            try:
-                policy.assert_url_allowed(request.url)
-            except BrowserPolicyError:
-                if not is_document and policy.allow_subresources:
-                    route.continue_()
-                    return
-                route.abort()
-                return
-            route.continue_()
 
-        context.route("**/*", _route_handler)
-
-    def _goto(self, page: Any, url: str, *, policy: BrowserPolicy) -> None:
-        policy.assert_url_allowed(url)
-        response = self._run_playwright(
-            lambda: page.goto(url, wait_until="domcontentloaded"),
-            action="goto",
-        )
-        self._assert_page_domain(page, policy)
-        if response is not None and getattr(response, "status", 0) >= 400:
-            raise BrowserPolicyError(
-                f"Navigation failed for {url!r}: HTTP {response.status}"
-            )
-
-    def _assert_page_domain(self, page: Any, policy: BrowserPolicy) -> None:
-        policy.assert_url_allowed(page.url)
-
-    def _locator(self, page: Any, element: InteractiveElement) -> Any:
-        if element.ref < 1:
-            raise BrowserPolicyError(f"Invalid element ref={element.ref}")
-        return page.locator(ELEMENT_SELECTOR).nth(element.ref - 1)
-
-    def _wait_settled(self, page: Any, timeout_ms: int) -> None:
+def _install_context_routes(context: Any, policy: BrowserPolicy) -> None:
+    def _route_handler(route: Any) -> None:  # noqa: ANN401
+        request = route.request
+        is_document = request.resource_type == "document"
         try:
-            page.wait_for_load_state(
-                "domcontentloaded",
-                timeout=min(5_000, timeout_ms),
-            )
-        except Exception:
-            # Non-navigating controls (buttons that only expand UI).
-            pass
-
-    def _run_playwright(self, fn: Any, *, action: str) -> Any:
-        try:
-            return fn()
+            policy.assert_url_not_denied(request.url)
         except BrowserPolicyError:
-            raise
-        except Exception as exc:
-            message = str(exc)
-            lowered = message.casefold()
-            if "net::err_aborted" in lowered or "interrupted" in lowered:
-                raise BrowserPolicyError("Navigation blocked by domain policy") from exc
-            raise BrowserPolicyError(
-                f"Browser {action} failed: {message}"[:200]
-            ) from exc
+            route.abort()
+            return
+        try:
+            policy.assert_url_allowlisted(request.url)
+        except BrowserPolicyError:
+            if not is_document and policy.allow_subresources:
+                route.continue_()
+                return
+            route.abort()
+            return
+        route.continue_()
 
-    def _snapshot(
-        self,
-        handle: _PlaywrightHandle,
-        *,
-        session_id: str,
-        steps: int,
-    ) -> SessionSnapshot:
-        page = handle.page
-        title = page.title() or page.url
-        text = page.inner_text("body") if page.locator("body").count() else ""
-        html = page.content()
-        if len(text.encode("utf-8")) > 2_000_000:
-            text = text[:500_000]
-        challenge = detect_challenge(title=title, text=text, html=html)
-        elements = [] if challenge else self._collect_elements(page)
-        return SessionSnapshot(
-            session_id=session_id,
-            url=page.url,
-            title=title,
-            text=text,
-            elements=elements,
-            status="blocked_by_challenge" if challenge else "ok",
-            blocked_reason=challenge,
-            steps_used=steps,
+    context.route("**/*", _route_handler)
+
+
+def _goto_page(page: Any, url: str, *, policy: BrowserPolicy) -> None:
+    policy.assert_url_allowed(url)
+    response = _run_playwright(
+        lambda: page.goto(url, wait_until="domcontentloaded"),
+        action="goto",
+    )
+    _assert_page_domain(page, policy)
+    if response is not None and getattr(response, "status", 0) >= 400:
+        raise BrowserPolicyError(
+            f"Navigation failed for {url!r}: HTTP {response.status}"
         )
 
-    def _collect_elements(self, page: Any) -> list[InteractiveElement]:
-        script = f"""
+
+def _assert_page_domain(page: Any, policy: BrowserPolicy) -> None:
+    policy.assert_url_allowed(page.url)
+
+
+def nth_locator(page: Any, element: InteractiveElement) -> Any:
+    if element.ref < 1:
+        raise BrowserPolicyError(f"Invalid element ref={element.ref}")
+    return page.locator(ELEMENT_SELECTOR).nth(element.ref - 1)
+
+
+def _wait_settled(page: Any, timeout_ms: int) -> None:
+    try:
+        page.wait_for_load_state(
+            "domcontentloaded",
+            timeout=min(5_000, timeout_ms),
+        )
+    except Exception:
+        # Non-navigating controls (buttons that only expand UI).
+        pass
+
+
+def _run_playwright(fn: Any, *, action: str) -> Any:
+    try:
+        return fn()
+    except BrowserPolicyError:
+        raise
+    except Exception as exc:
+        message = str(exc)
+        lowered = message.casefold()
+        if "net::err_aborted" in lowered or "interrupted" in lowered:
+            raise BrowserPolicyError("Navigation blocked by domain policy") from exc
+        raise BrowserPolicyError(f"Browser {action} failed: {message}"[:200]) from exc
+
+
+def snapshot_page(
+    handle: _PlaywrightHandle,
+    *,
+    session_id: str,
+    steps: int,
+    policy: BrowserPolicy,
+    enforce_max_bytes: bool = False,
+) -> SessionSnapshot:
+    page = handle.page
+    title = page.title() or page.url
+    text = page.inner_text("body") if page.locator("body").count() else ""
+    html = page.content()
+    max_bytes = int(policy.max_page_bytes)
+    encoded = text.encode("utf-8")
+    if len(encoded) > max_bytes:
+        if enforce_max_bytes:
+            raise BrowserPolicyError("Page exceeds max_page_bytes")
+        text = encoded[:max_bytes].decode("utf-8", errors="ignore")
+    if len(html.encode("utf-8")) > max_bytes:
+        html = html.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+    challenge = detect_challenge(title=title, text=text, html=html)
+    elements = [] if challenge else _collect_elements(page)
+    return SessionSnapshot(
+        session_id=session_id,
+        url=page.url,
+        title=title,
+        text=text,
+        elements=elements,
+        status="blocked_by_challenge" if challenge else "ok",
+        blocked_reason=challenge,
+        steps_used=steps,
+    )
+
+
+def _collect_elements(page: Any) -> list[InteractiveElement]:
+    script = f"""
 () => {{
   const sel = {ELEMENT_SELECTOR!r};
   const nodes = Array.from(document.querySelectorAll(sel));
@@ -394,10 +613,10 @@ class PlaywrightBackend:
     const tag = (el.tagName || '').toLowerCase();
     const type = (el.getAttribute('type') || '').toLowerCase();
     let role = (el.getAttribute('role') || '').toLowerCase();
-    if (!role) {{
+    if (tag === 'select') role = 'select';
+    else if (!role) {{
       if (tag === 'a') role = 'link';
       else if (tag === 'button') role = 'button';
-      else if (tag === 'select') role = 'combobox';
       else if (tag === 'textarea') role = 'textarea';
       else if (tag === 'input') {{
         role = (type === 'submit' || type === 'button') ? 'button'
@@ -417,25 +636,26 @@ class PlaywrightBackend:
       role,
       label: label || role,
       url: tag === 'a' ? el.href : null,
-      input_type: tag === 'input' ? (type || 'text')
+      input_type: tag === 'select' ? 'select'
+        : tag === 'input' ? (type || 'text')
         : (tag === 'textarea' ? 'textarea' : null),
     }};
   }});
 }}
 """
-        raw = page.evaluate(script) or []
-        elements: list[InteractiveElement] = []
-        for item in raw[:_MAX_ELEMENTS]:
-            elements.append(
-                InteractiveElement(
-                    ref=int(item.get("ref") or 0),
-                    role=str(item.get("role") or "generic"),
-                    label=str(item.get("label") or ""),
-                    url=item.get("url"),
-                    input_type=item.get("input_type"),
-                )
+    raw = page.evaluate(script) or []
+    elements: list[InteractiveElement] = []
+    for item in raw[:_MAX_ELEMENTS]:
+        elements.append(
+            InteractiveElement(
+                ref=int(item.get("ref") or 0),
+                role=str(item.get("role") or "generic"),
+                label=str(item.get("label") or ""),
+                url=item.get("url"),
+                input_type=item.get("input_type"),
             )
-        return elements
+        )
+    return elements
 
 
 def playwright_available() -> tuple[bool, str]:

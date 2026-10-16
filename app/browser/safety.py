@@ -8,7 +8,7 @@ from app.browser.policy import BrowserPolicyError
 _ALLOWED_ROLES = frozenset(
     {"link", "button", "textbox", "searchbox", "combobox", "checkbox", "select"}
 )
-_TYPABLE_ROLES = frozenset({"textbox", "searchbox"})
+_TYPABLE_ROLES = frozenset({"textbox", "searchbox", "combobox"})
 _SELECTABLE_ROLES = frozenset({"combobox", "select"})
 _SCROLL_DIRECTIONS = frozenset({"up", "down", "top", "bottom"})
 _FILE_INPUT_TYPES = frozenset({"file"})
@@ -56,6 +56,11 @@ _BLOCKED_LABEL_HINTS = (
     "password",
     "credit card",
     "ssn",
+    "message recruiter",
+    "send message",
+    "contact recruiter",
+    "message hiring",
+    "inmail",
 )
 
 
@@ -151,7 +156,11 @@ def _is_search_or_filter_field(element: InteractiveElement) -> bool:
     label = (element.label or "").casefold()
     if role == "searchbox" or input_type == "search":
         return True
-    return role == "textbox" and any(token in label for token in _SEARCH_LABEL_TOKENS)
+    if role in {"textbox", "combobox"} and any(
+        token in label for token in _SEARCH_LABEL_TOKENS
+    ):
+        return True
+    return False
 
 
 def assert_select_allowed(element: InteractiveElement) -> None:

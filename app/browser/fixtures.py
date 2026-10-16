@@ -105,6 +105,11 @@ def interactive_fixture_pages() -> dict[str, FixturePage]:
                     label="Resume upload",
                     input_type="file",
                 ),
+                InteractiveElement(
+                    ref=10,
+                    role="button",
+                    label="Message recruiter",
+                ),
             ],
         ),
         JOBS_PAGE_2: FixturePage(
