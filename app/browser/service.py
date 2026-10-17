@@ -68,49 +68,9 @@ def browser_status(
     profile = browser_profile_dir(root)
     cfg = _load_browser_config(root=root, config_path=config_path)
     enabled = bool(cfg.get("enabled", False))
-    prefer_fake = _explicit_fake(cfg)
-    prefer_playwright = _explicit_playwright(cfg)
-    if prefer_fake:
-        backend_name = "fake"
-    elif prefer_playwright:
-        backend_name = "playwright"
-    else:
-        backend_name = "chromium"
     running = bool(state.get("running"))
-    # Ready means the service is running *and* its chosen backend can operate.
-    if prefer_fake:
-        backend_ok = True
-        detail = "fake fixture backend"
-    elif prefer_playwright:
-        from app.browser.playwright_backend import playwright_available
-
-        # Import-only check for status (avoid launching Chromium on every poll).
-        try:
-            import playwright  # noqa: F401
-
-            backend_ok = True
-            detail = "playwright package installed"
-        except ImportError:
-            backend_ok = False
-            detail = playwright_available()[1]
-    else:
-        backend_ok = bool(detection.ready)
-        detail = detection.detail
+    backend_name, backend_ok, detail = _status_backend(cfg, detection)
     ready = bool(enabled and running and backend_ok)
-    if not enabled:
-        detail = f"disabled in config; {detail}"
-    elif not running:
-        detail = f"service stopped; {detail}"
-    elif not backend_ok and prefer_playwright:
-        detail = (
-            f"playwright unavailable; {detail}. "
-            "Install with: pip install -e '.[browser]' && playwright install chromium"
-        )
-    elif not backend_ok:
-        detail = (
-            f"chromium unavailable; {detail}. "
-            "Install Chromium/Chrome or set SIGNAL_AGENT_BROWSER_BACKEND=fake"
-        )
     return BrowserStatus(
         running=running,
         ready=ready,
@@ -118,7 +78,13 @@ def browser_status(
         profile_dir=str(profile),
         headless=bool(cfg.get("headless", True)),
         backend=backend_name,
-        detail=detail,
+        detail=_status_detail(
+            enabled=enabled,
+            running=running,
+            backend_ok=backend_ok,
+            playwright=backend_name == "playwright",
+            detail=detail,
+        ),
         enabled=enabled,
         last_test_at=str(state.get("last_test_at") or "") or None,
         last_test_ok=(
@@ -126,6 +92,50 @@ def browser_status(
             if state.get("last_test_ok") is None
             else bool(state.get("last_test_ok"))
         ),
+    )
+
+
+def _status_backend(cfg: dict[str, Any], detection: Any) -> tuple[str, bool, str]:
+    if _explicit_fake(cfg):
+        return "fake", True, "fake fixture backend"
+    if _explicit_playwright(cfg):
+        ok, detail = _playwright_package_status()
+        return "playwright", ok, detail
+    return "chromium", bool(detection.ready), detection.detail
+
+
+def _playwright_package_status() -> tuple[bool, str]:
+    from app.browser.playwright_backend import playwright_available
+
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        return False, playwright_available()[1]
+    return True, "playwright package installed"
+
+
+def _status_detail(
+    *,
+    enabled: bool,
+    running: bool,
+    backend_ok: bool,
+    playwright: bool,
+    detail: str,
+) -> str:
+    if not enabled:
+        return f"disabled in config; {detail}"
+    if not running:
+        return f"service stopped; {detail}"
+    if backend_ok:
+        return detail
+    if playwright:
+        return (
+            f"playwright unavailable; {detail}. "
+            "Install with: pip install -e '.[browser]' && playwright install chromium"
+        )
+    return (
+        f"chromium unavailable; {detail}. "
+        "Install Chromium/Chrome or set SIGNAL_AGENT_BROWSER_BACKEND=fake"
     )
 
 

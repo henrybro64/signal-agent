@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from app.browser.backend import resolve_allowed_url
 from app.browser.fixtures import FixturePage, interactive_fixture_pages
 from app.browser.models import InteractiveElement, SessionSnapshot
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
@@ -36,8 +35,9 @@ class FakeSessionBackend:
         profile_dir: Path,
     ) -> tuple[_FakeHandle, SessionSnapshot]:
         _ = profile_dir
-        final = resolve_allowed_url(url, policy=policy, network=False)
-        handle = _FakeHandle(url=final, history=[final])
+        policy.assert_url_allowed(url)
+        policy.assert_downloads_denied()
+        handle = _FakeHandle(url=url, history=[url])
         return handle, self._snapshot(handle, session_id=str(uuid.uuid4()), steps=1)
 
     def session_snapshot(

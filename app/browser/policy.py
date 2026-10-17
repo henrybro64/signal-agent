@@ -57,6 +57,13 @@ class BrowserPolicy:
         self.assert_url_not_denied(url)
         self.assert_url_allowlisted(url)
 
+    def assert_downloads_denied(self) -> None:
+        if self.allow_downloads:
+            raise BrowserPolicyError(
+                "browser.allow_downloads=true is not supported; "
+                "downloads remain disabled"
+            )
+
 
 def _host_matches(host: str, pattern: str) -> bool:
     pattern = pattern.strip().lower().lstrip(".")

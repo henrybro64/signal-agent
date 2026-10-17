@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urljoin, urlparse
 
+from app.browser.models import PageSnapshot
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
 
 _MAX_REDIRECTS = 5
@@ -27,15 +28,6 @@ class _ProbeResult:
 
 class _ProbeNetworkError(Exception):
     """Transport failure while probing a URL (offline, DNS, timeout, …)."""
-
-
-@dataclass(slots=True, frozen=True)
-class PageSnapshot:
-    url: str
-    title: str
-    text: str
-    status: str = "ok"
-    screenshot_path: str | None = None
 
 
 class BrowserBackend(Protocol):
@@ -446,10 +438,7 @@ def _read_chromium_stderr(proc: subprocess.Popen[str]) -> str:
 
 
 def _assert_downloads_denied(policy: BrowserPolicy) -> None:
-    if policy.allow_downloads:
-        raise BrowserPolicyError(
-            "browser.allow_downloads=true is not supported; downloads remain disabled"
-        )
+    policy.assert_downloads_denied()
 
 
 def _html_to_text(html: str) -> str:

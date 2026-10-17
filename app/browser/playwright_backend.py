@@ -15,8 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.browser.backend import PageSnapshot
-from app.browser.models import InteractiveElement, SessionSnapshot
+from app.browser.models import InteractiveElement, PageSnapshot, SessionSnapshot
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
 from app.browser.safety import detect_challenge
 
@@ -70,7 +69,7 @@ def _on_owner_thread(method: Callable[..., Any]) -> Callable[..., Any]:
     """Run a PlaywrightBackend method on the backend's serial worker."""
 
     def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
-        return self._owner.call(lambda: method(self, *args, **kwargs))
+        return self.owner.call(lambda: method(self, *args, **kwargs))
 
     wrapped.__name__ = method.__name__
     wrapped.__doc__ = method.__doc__
@@ -92,7 +91,7 @@ class PlaywrightBackend:
     headless: bool = True
     profile_dir: Path | None = None
     _handles: list[_PlaywrightHandle] = field(default_factory=list)
-    _owner: _SerialExecutor = field(default_factory=_SerialExecutor, repr=False)
+    owner: _SerialExecutor = field(default_factory=_SerialExecutor, repr=False)
 
     @_on_owner_thread
     def open(self, url: str, *, policy: BrowserPolicy) -> PageSnapshot:

@@ -6,6 +6,17 @@ from dataclasses import dataclass, field
 
 
 @dataclass(slots=True, frozen=True)
+class PageSnapshot:
+    """One-shot page capture used by fake/Chromium/Playwright backends."""
+
+    url: str
+    title: str
+    text: str
+    status: str = "ok"
+    screenshot_path: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class InteractiveElement:
     """One actionable element exposed to the model."""
 
