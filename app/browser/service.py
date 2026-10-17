@@ -311,8 +311,10 @@ def policy_from_config(cfg: dict[str, Any]) -> BrowserPolicy:
     return BrowserPolicy(
         allowed_domains=[str(x) for x in cfg.get("allowed_domains") or []],
         denied_domains=[str(x) for x in cfg.get("denied_domains") or []],
-        navigation_timeout_seconds=float(cfg.get("navigation_timeout_seconds") or 15.0),
-        max_page_bytes=int(cfg.get("max_page_bytes") or 500_000),
+        navigation_timeout_seconds=float(
+            str(cfg.get("navigation_timeout_seconds") or 15.0)
+        ),
+        max_page_bytes=int(str(cfg.get("max_page_bytes") or 500_000)),
         allow_downloads=bool(cfg.get("allow_downloads", False)),
         allow_javascript=bool(cfg.get("allow_javascript", False)),
         allow_subresources=bool(cfg.get("allow_subresources", False)),

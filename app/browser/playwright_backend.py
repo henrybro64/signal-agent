@@ -27,16 +27,13 @@ ELEMENT_SELECTOR = (
     '[role="button"], [role="link"], [role="textbox"]'
 )
 
-_CONTINUE = object()
-
 
 class _SerialExecutor:
     """Run Playwright sync API calls on one thread (handles are thread-affine)."""
 
     def __init__(self) -> None:
         self._calls: queue.Queue[
-            tuple[Callable[[], Any], queue.Queue[tuple[Any, BaseException | None]]]
-            | None
+            tuple[Callable[[], Any], queue.Queue[tuple[str, Any]]] | None
         ] = queue.Queue()
         self.thread = threading.Thread(
             target=self._loop,
@@ -48,12 +45,14 @@ class _SerialExecutor:
     def call(self, fn: Callable[[], Any]) -> Any:
         if threading.get_ident() == self.thread.ident:
             return fn()
-        done: queue.Queue[tuple[Any, BaseException | None]] = queue.Queue()
+        done: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._calls.put((fn, done))
-        result, exc = done.get()
-        if exc is not None:
-            raise exc
-        return result
+        kind, payload = done.get()
+        if kind == "err":
+            if isinstance(payload, Exception):
+                raise payload
+            raise BrowserPolicyError(str(payload))
+        return payload
 
     def _loop(self) -> None:
         while True:
@@ -62,9 +61,20 @@ class _SerialExecutor:
                 return
             fn, done = item
             try:
-                done.put((fn(), None))
-            except BaseException as exc:  # noqa: BLE001 - surface to caller
-                done.put((None, exc))
+                done.put(("ok", fn()))
+            except Exception as exc:  # noqa: BLE001 - surface to caller
+                done.put(("err", exc))
+
+
+def _on_owner_thread(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Run a PlaywrightBackend method on the backend's serial worker."""
+
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        return self._owner.call(lambda: method(self, *args, **kwargs))
+
+    wrapped.__name__ = method.__name__
+    wrapped.__doc__ = method.__doc__
+    return wrapped
 
 
 @dataclass(slots=True)
@@ -84,17 +94,10 @@ class PlaywrightBackend:
     _handles: list[_PlaywrightHandle] = field(default_factory=list)
     _owner: _SerialExecutor = field(default_factory=_SerialExecutor, repr=False)
 
-    def _dispatch(self, fn: Callable[[], Any]) -> Any:
-        if threading.get_ident() == self._owner.thread.ident:
-            return _CONTINUE
-        return self._owner.call(fn)
-
+    @_on_owner_thread
     def open(self, url: str, *, policy: BrowserPolicy) -> PageSnapshot:
         """One-shot convenience wrapper used when ``backend: playwright``."""
 
-        dispatched = self._dispatch(lambda: self.open(url, policy=policy))
-        if dispatched is not _CONTINUE:
-            return dispatched
         root = self.profile_dir or Path(
             tempfile.mkdtemp(prefix="signal-agent-oneshot-")
         )
@@ -109,6 +112,7 @@ class PlaywrightBackend:
         finally:
             self.session_close(handle)
 
+    @_on_owner_thread
     def screenshot(
         self,
         url: str,
@@ -116,11 +120,6 @@ class PlaywrightBackend:
         policy: BrowserPolicy,
         output_path: Path,
     ) -> PageSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.screenshot(url, policy=policy, output_path=output_path)
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
         root = self.profile_dir or Path(
             tempfile.mkdtemp(prefix="signal-agent-oneshot-")
         )
@@ -142,6 +141,7 @@ class PlaywrightBackend:
         finally:
             self.session_close(handle)
 
+    @_on_owner_thread
     def session_open(
         self,
         url: str,
@@ -150,16 +150,6 @@ class PlaywrightBackend:
         profile_dir: Path,
         enforce_max_bytes: bool = False,
     ) -> tuple[_PlaywrightHandle, SessionSnapshot]:
-        dispatched = self._dispatch(
-            lambda: self.session_open(
-                url,
-                policy=policy,
-                profile_dir=profile_dir,
-                enforce_max_bytes=enforce_max_bytes,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
         handle = self._launch(policy, profile_dir)
         try:
             _goto_page(handle.page, url, policy=policy)
@@ -176,7 +166,8 @@ class PlaywrightBackend:
             self.session_close(handle)
             raise
 
-    def session_snapshot(
+    @_on_owner_thread
+    def session_snapshot(  # skipcq: PYL-R0201
         self,
         handle: _PlaywrightHandle,
         *,
@@ -184,16 +175,7 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.session_snapshot(
-                handle,
-                policy=policy,
-                session_id=session_id,
-                steps_used=steps_used,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
+        _ = self._handles
         return snapshot_page(
             handle,
             session_id=session_id,
@@ -201,7 +183,8 @@ class PlaywrightBackend:
             policy=policy,
         )
 
-    def session_click(
+    @_on_owner_thread
+    def session_click(  # skipcq: PYL-R0201
         self,
         handle: _PlaywrightHandle,
         element: InteractiveElement,
@@ -210,17 +193,7 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.session_click(
-                handle,
-                element,
-                policy=policy,
-                session_id=session_id,
-                steps_used=steps_used,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
+        _ = self._handles
         locator = nth_locator(handle.page, element)
         timeout_ms = int(policy.navigation_timeout_seconds * 1000)
         _run_playwright(
@@ -236,7 +209,8 @@ class PlaywrightBackend:
             policy=policy,
         )
 
-    def session_type(
+    @_on_owner_thread
+    def session_type(  # skipcq: PYL-R0201
         self,
         handle: _PlaywrightHandle,
         element: InteractiveElement,
@@ -247,19 +221,7 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.session_type(
-                handle,
-                element,
-                text,
-                submit=submit,
-                policy=policy,
-                session_id=session_id,
-                steps_used=steps_used,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
+        _ = self._handles
         locator = nth_locator(handle.page, element)
         timeout_ms = int(policy.navigation_timeout_seconds * 1000)
         _run_playwright(
@@ -277,7 +239,8 @@ class PlaywrightBackend:
             policy=policy,
         )
 
-    def session_select(
+    @_on_owner_thread
+    def session_select(  # skipcq: PYL-R0201
         self,
         handle: _PlaywrightHandle,
         element: InteractiveElement,
@@ -287,18 +250,7 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.session_select(
-                handle,
-                element,
-                value,
-                policy=policy,
-                session_id=session_id,
-                steps_used=steps_used,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
+        _ = self._handles
         locator = nth_locator(handle.page, element)
         tag = _run_playwright(
             lambda: locator.evaluate("el => (el.tagName || '').toLowerCase()"),
@@ -321,7 +273,8 @@ class PlaywrightBackend:
             policy=policy,
         )
 
-    def session_scroll(
+    @_on_owner_thread
+    def session_scroll(  # skipcq: PYL-R0201
         self,
         handle: _PlaywrightHandle,
         direction: str,
@@ -330,17 +283,7 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.session_scroll(
-                handle,
-                direction,
-                policy=policy,
-                session_id=session_id,
-                steps_used=steps_used,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
+        _ = self._handles
         _ = policy
         script = {
             "up": "window.scrollBy(0, -Math.max(400, window.innerHeight * 0.8))",
@@ -359,7 +302,8 @@ class PlaywrightBackend:
             policy=policy,
         )
 
-    def session_back(
+    @_on_owner_thread
+    def session_back(  # skipcq: PYL-R0201
         self,
         handle: _PlaywrightHandle,
         *,
@@ -367,16 +311,7 @@ class PlaywrightBackend:
         session_id: str,
         steps_used: int,
     ) -> SessionSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.session_back(
-                handle,
-                policy=policy,
-                session_id=session_id,
-                steps_used=steps_used,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
+        _ = self._handles
         _run_playwright(
             lambda: handle.page.go_back(wait_until="domcontentloaded"),
             action="back",
@@ -389,7 +324,8 @@ class PlaywrightBackend:
             policy=policy,
         )
 
-    def session_screenshot(
+    @_on_owner_thread
+    def session_screenshot(  # skipcq: PYL-R0201
         self,
         handle: _PlaywrightHandle,
         *,
@@ -398,17 +334,7 @@ class PlaywrightBackend:
         steps_used: int,
         output_path: Path,
     ) -> SessionSnapshot:
-        dispatched = self._dispatch(
-            lambda: self.session_screenshot(
-                handle,
-                policy=policy,
-                session_id=session_id,
-                steps_used=steps_used,
-                output_path=output_path,
-            )
-        )
-        if dispatched is not _CONTINUE:
-            return dispatched
+        _ = self._handles
         output_path.parent.mkdir(parents=True, exist_ok=True)
         _run_playwright(
             lambda: handle.page.screenshot(path=str(output_path), full_page=False),
@@ -432,10 +358,8 @@ class PlaywrightBackend:
             steps_used=snap.steps_used,
         )
 
-    def session_close(self, handle: _PlaywrightHandle) -> None:
-        dispatched = self._dispatch(lambda: self.session_close(handle))
-        if dispatched is not _CONTINUE:
-            return
+    @_on_owner_thread
+    def session_close(self, handle: _PlaywrightHandle) -> None:  # skipcq: PYL-R0201
         try:
             handle.context.close()
         except Exception:  # noqa: BLE001
@@ -648,7 +572,7 @@ def _collect_elements(page: Any) -> list[InteractiveElement]:
     for item in raw[:_MAX_ELEMENTS]:
         elements.append(
             InteractiveElement(
-                ref=int(item.get("ref") or 0),
+                ref=int(str(item.get("ref") or 0)),
                 role=str(item.get("role") or "generic"),
                 label=str(item.get("label") or ""),
                 url=item.get("url"),

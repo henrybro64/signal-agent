@@ -7,7 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from app.browser.models import InteractiveElement, SessionSnapshot
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
@@ -19,96 +19,11 @@ from app.browser.safety import (
 )
 
 
-class SessionBackend(Protocol):
-    """Backend that can drive a multi-step browsing session."""
-
-    def session_open(
-        self,
-        url: str,
-        *,
-        policy: BrowserPolicy,
-        profile_dir: Path,
-    ) -> tuple[Any, SessionSnapshot]: ...
-
-    def session_snapshot(
-        self,
-        handle: Any,
-        *,
-        policy: BrowserPolicy,
-        session_id: str,
-        steps_used: int,
-    ) -> SessionSnapshot: ...
-
-    def session_click(
-        self,
-        handle: Any,
-        element: InteractiveElement,
-        *,
-        policy: BrowserPolicy,
-        session_id: str,
-        steps_used: int,
-    ) -> SessionSnapshot: ...
-
-    def session_type(
-        self,
-        handle: Any,
-        element: InteractiveElement,
-        text: str,
-        *,
-        submit: bool,
-        policy: BrowserPolicy,
-        session_id: str,
-        steps_used: int,
-    ) -> SessionSnapshot: ...
-
-    def session_select(
-        self,
-        handle: Any,
-        element: InteractiveElement,
-        value: str,
-        *,
-        policy: BrowserPolicy,
-        session_id: str,
-        steps_used: int,
-    ) -> SessionSnapshot: ...
-
-    def session_scroll(
-        self,
-        handle: Any,
-        direction: str,
-        *,
-        policy: BrowserPolicy,
-        session_id: str,
-        steps_used: int,
-    ) -> SessionSnapshot: ...
-
-    def session_back(
-        self,
-        handle: Any,
-        *,
-        policy: BrowserPolicy,
-        session_id: str,
-        steps_used: int,
-    ) -> SessionSnapshot: ...
-
-    def session_screenshot(
-        self,
-        handle: Any,
-        *,
-        policy: BrowserPolicy,
-        session_id: str,
-        steps_used: int,
-        output_path: Path,
-    ) -> SessionSnapshot: ...
-
-    def session_close(self, handle: Any) -> None: ...
-
-
 @dataclass(slots=True)
 class _SessionRecord:
     session_id: str
     handle: Any
-    backend: SessionBackend
+    backend: Any
     policy: BrowserPolicy
     created_at: float
     last_used_at: float
@@ -121,7 +36,7 @@ class _SessionRecord:
 class BrowserSessionManager:
     """Bounded session table shared by browser tools."""
 
-    backend: SessionBackend
+    backend: Any
     profile_dir: Path
     max_sessions: int = 1
     session_ttl_seconds: float = 300.0
@@ -179,7 +94,7 @@ class BrowserSessionManager:
     def click(self, session_id: str, ref: int) -> SessionSnapshot:
         with self._lock:
             record = self._require(session_id, consume_step=True)
-            element = self._resolve_element(record, ref)
+            element = _element_by_ref(record, ref)
             assert_element_allowed(element)
             if element.role == "link" and element.url:
                 record.policy.assert_url_allowed(element.url)
@@ -202,7 +117,7 @@ class BrowserSessionManager:
     ) -> SessionSnapshot:
         with self._lock:
             record = self._require(session_id, consume_step=True)
-            element = self._resolve_element(record, ref)
+            element = _element_by_ref(record, ref)
             assert_type_allowed(element, text)
             if len(text) > 200:
                 raise BrowserPolicyError(
@@ -222,7 +137,7 @@ class BrowserSessionManager:
     def select(self, session_id: str, ref: int, value: str) -> SessionSnapshot:
         with self._lock:
             record = self._require(session_id, consume_step=True)
-            element = self._resolve_element(record, ref)
+            element = _element_by_ref(record, ref)
             assert_select_allowed(element)
             snap = record.backend.session_select(
                 record.handle,
@@ -321,22 +236,6 @@ class BrowserSessionManager:
         record.last_used_at = time.monotonic()
         return record
 
-    @staticmethod
-    def _resolve_element(
-        record: _SessionRecord,
-        ref: int,
-    ) -> InteractiveElement:
-        snap = record.backend.session_snapshot(
-            record.handle,
-            policy=record.policy,
-            session_id=record.session_id,
-            steps_used=record.steps_used,
-        )
-        for element in snap.elements:
-            if element.ref == ref:
-                return element
-        raise BrowserPolicyError(f"No interactive element with ref={ref}")
-
     def _after_navigation(
         self,
         record: _SessionRecord,
@@ -381,6 +280,19 @@ class BrowserSessionManager:
         return apply_challenge_status(rebuilt)
 
 
+def _element_by_ref(record: _SessionRecord, ref: int) -> InteractiveElement:
+    snap = record.backend.session_snapshot(
+        record.handle,
+        policy=record.policy,
+        session_id=record.session_id,
+        steps_used=record.steps_used,
+    )
+    for element in snap.elements:
+        if element.ref == ref:
+            return element
+    raise BrowserPolicyError(f"No interactive element with ref={ref}")
+
+
 def _unpack_open(opened: Any) -> tuple[Any, SessionSnapshot]:
     if not isinstance(opened, tuple) or len(opened) != 2:
         raise BrowserPolicyError("session backend returned an invalid open result")
@@ -397,7 +309,7 @@ _MANAGERS_LOCK = threading.Lock()
 def get_session_manager(
     *,
     root: Path,
-    backend: SessionBackend,
+    backend: Any,
     profile_dir: Path,
     max_sessions: int,
     session_ttl_seconds: float,

@@ -257,7 +257,7 @@ class BrowserClickTool:
         _ = self._tool_name
         session_id = str(arguments.get("session_id") or "").strip()
         parsed = _parse_ref(arguments)
-        if isinstance(parsed, ToolResult):
+        if not isinstance(parsed, int):
             return parsed
         if not session_id:
             return ToolResult(
@@ -300,7 +300,7 @@ class BrowserTypeTool:
         text = str(arguments.get("text") or "")
         submit = bool(arguments.get("submit", False))
         parsed = _parse_ref(arguments)
-        if isinstance(parsed, ToolResult):
+        if not isinstance(parsed, int):
             return parsed
         if not session_id:
             return ToolResult(
@@ -342,7 +342,7 @@ class BrowserSelectTool:
         session_id = str(arguments.get("session_id") or "").strip()
         value = str(arguments.get("value") or "")
         parsed = _parse_ref(arguments)
-        if isinstance(parsed, ToolResult):
+        if not isinstance(parsed, int):
             return parsed
         if not session_id:
             return ToolResult(
@@ -481,20 +481,24 @@ def browser_tools() -> dict[str, Any]:
 
 def _parse_ref(arguments: dict[str, Any]) -> int | ToolResult:
     raw = arguments.get("ref")
-    if raw is None:
-        return ToolResult(
-            ok=False,
-            error="ref must be an integer",
-            metadata={"code": "invalid_argument"},
-        )
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return ToolResult(
-            ok=False,
-            error="ref must be an integer",
-            metadata={"code": "invalid_argument"},
-        )
+    if isinstance(raw, bool):
+        return _ref_error()
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError:
+            return _ref_error()
+    return _ref_error()
+
+
+def _ref_error() -> ToolResult:
+    return ToolResult(
+        ok=False,
+        error="ref must be an integer",
+        metadata={"code": "invalid_argument"},
+    )
 
 
 def _open_page(
@@ -574,10 +578,10 @@ def _session_manager_for_context(context: ToolContext) -> Any:
         root=root,
         backend=backend,
         profile_dir=browser_profile_dir(root),
-        max_sessions=int(cfg.get("max_sessions") or 1),
-        session_ttl_seconds=float(cfg.get("session_ttl_seconds") or 300.0),
-        max_steps_per_session=int(cfg.get("max_steps_per_session") or 20),
-        max_interactive_elements=int(cfg.get("max_interactive_elements") or 150),
+        max_sessions=int(str(cfg.get("max_sessions") or 1)),
+        session_ttl_seconds=float(str(cfg.get("session_ttl_seconds") or 300.0)),
+        max_steps_per_session=int(str(cfg.get("max_steps_per_session") or 20)),
+        max_interactive_elements=int(str(cfg.get("max_interactive_elements") or 150)),
     )
 
 
