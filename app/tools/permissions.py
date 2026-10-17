@@ -50,6 +50,14 @@ BUILTIN_TOOL_PERMISSIONS: dict[str, PermissionClass] = {
     "browser_navigate": PermissionClass.EXECUTE,
     "browser_read_page": PermissionClass.EXECUTE,
     "browser_screenshot": PermissionClass.EXECUTE,
+    "browser_open": PermissionClass.EXECUTE,
+    "browser_snapshot": PermissionClass.EXECUTE,
+    "browser_click": PermissionClass.EXECUTE,
+    "browser_type": PermissionClass.EXECUTE,
+    "browser_select": PermissionClass.EXECUTE,
+    "browser_scroll": PermissionClass.EXECUTE,
+    "browser_back": PermissionClass.EXECUTE,
+    "browser_close": PermissionClass.EXECUTE,
 }
 
 DANGEROUS_CAPABILITIES = frozenset(
@@ -61,6 +69,9 @@ DANGEROUS_CAPABILITIES = frozenset(
         "browser_automation",
     }
 )
+
+# Cleanup must still run after max_side_effect_actions is exhausted.
+SIDE_EFFECT_EXEMPT_TOOLS = frozenset({"browser_close"})
 
 
 @dataclass(slots=True)
@@ -190,6 +201,7 @@ class PermissionPolicy:
 
         if (
             permission != PermissionClass.READ
+            and tool_name not in SIDE_EFFECT_EXEMPT_TOOLS
             and self._side_effect_count >= self.config.max_side_effect_actions
         ):
             decision = PermissionDecision(
@@ -239,7 +251,14 @@ class PermissionPolicy:
         self._audit(tool_name, args, decision, safe_summary)
         return decision
 
-    def record_side_effect(self, permission: PermissionClass | None) -> None:
+    def record_side_effect(
+        self,
+        permission: PermissionClass | None,
+        *,
+        tool_name: str | None = None,
+    ) -> None:
+        if tool_name in SIDE_EFFECT_EXEMPT_TOOLS:
+            return
         if permission is not None and permission != PermissionClass.READ:
             self._side_effect_count += 1
 

@@ -224,6 +224,12 @@ def run_service_forever(
             lock_handle.close()
         except OSError:
             pass
+        try:
+            from app.browser.sessions import close_all_session_managers
+
+            close_all_session_managers()
+        except Exception:  # noqa: BLE001 - teardown must not mask stop
+            pass
         log_event(
             _LOGGER,
             event="runtime_stopped",

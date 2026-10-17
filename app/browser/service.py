@@ -9,9 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.browser.backend import select_backend
+from app.browser.backend import select_backend, select_session_backend
 from app.browser.fixtures import FIXTURE_URL
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
+from app.browser.sessions import close_all_session_managers, drop_session_manager
 from app.core.config import load_config
 from app.runtime import paths as runtime_paths
 from app.setup.browser import detect_browser
@@ -67,35 +68,23 @@ def browser_status(
     profile = browser_profile_dir(root)
     cfg = _load_browser_config(root=root, config_path=config_path)
     enabled = bool(cfg.get("enabled", False))
-    prefer_fake = _explicit_fake(cfg)
-    backend_name = "fake" if prefer_fake else "chromium"
     running = bool(state.get("running"))
-    # Ready means the service is running *and* its chosen backend can operate.
-    if prefer_fake:
-        backend_ok = True
-    else:
-        backend_ok = bool(detection.ready)
+    backend_name, backend_ok, detail = _status_backend(cfg, detection)
     ready = bool(enabled and running and backend_ok)
-    detail = detection.detail
-    if not enabled:
-        detail = f"disabled in config; {detail}"
-    elif not running:
-        detail = f"service stopped; {detail}"
-    elif not backend_ok:
-        detail = (
-            f"chromium unavailable; {detail}. "
-            "Install Chromium/Chrome or set SIGNAL_AGENT_BROWSER_BACKEND=fake"
-        )
     return BrowserStatus(
         running=running,
         ready=ready,
         executable=detection.executable,
         profile_dir=str(profile),
         headless=bool(cfg.get("headless", True)),
-        backend=backend_name
-        if running or prefer_fake
-        else ("fake" if prefer_fake else "chromium"),
-        detail=detail,
+        backend=backend_name,
+        detail=_status_detail(
+            enabled=enabled,
+            running=running,
+            backend_ok=backend_ok,
+            playwright=backend_name == "playwright",
+            detail=detail,
+        ),
         enabled=enabled,
         last_test_at=str(state.get("last_test_at") or "") or None,
         last_test_ok=(
@@ -103,6 +92,50 @@ def browser_status(
             if state.get("last_test_ok") is None
             else bool(state.get("last_test_ok"))
         ),
+    )
+
+
+def _status_backend(cfg: dict[str, Any], detection: Any) -> tuple[str, bool, str]:
+    if _explicit_fake(cfg):
+        return "fake", True, "fake fixture backend"
+    if _explicit_playwright(cfg):
+        ok, detail = _playwright_package_status()
+        return "playwright", ok, detail
+    return "chromium", bool(detection.ready), detection.detail
+
+
+def _playwright_package_status() -> tuple[bool, str]:
+    from app.browser.playwright_backend import playwright_available
+
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        return False, playwright_available()[1]
+    return True, "playwright package installed"
+
+
+def _status_detail(
+    *,
+    enabled: bool,
+    running: bool,
+    backend_ok: bool,
+    playwright: bool,
+    detail: str,
+) -> str:
+    if not enabled:
+        return f"disabled in config; {detail}"
+    if not running:
+        return f"service stopped; {detail}"
+    if backend_ok:
+        return detail
+    if playwright:
+        return (
+            f"playwright unavailable; {detail}. "
+            "Install with: pip install -e '.[browser]' && playwright install chromium"
+        )
+    return (
+        f"chromium unavailable; {detail}. "
+        "Install Chromium/Chrome or set SIGNAL_AGENT_BROWSER_BACKEND=fake"
     )
 
 
@@ -123,12 +156,28 @@ def start_browser(
         )
     detection = detect_browser()
     prefer_fake = _explicit_fake(cfg)
-    if not prefer_fake and not detection.ready:
+    prefer_playwright = _explicit_playwright(cfg)
+    if prefer_playwright and not prefer_fake:
+        from app.browser.playwright_backend import playwright_available
+
+        ok, detail = playwright_available()
+        if not ok:
+            raise BrowserServiceError(
+                f"Browser dependencies missing: {detail}. "
+                "Install with: pip install -e '.[browser]' && "
+                "playwright install chromium"
+            )
+        backend_label = "playwright"
+    elif prefer_fake:
+        backend_label = "fake"
+    elif not detection.ready:
         raise BrowserServiceError(
             "Browser dependencies missing: "
             f"{detection.detail}. Install Chromium/Chrome or set "
             "SIGNAL_AGENT_BROWSER_BACKEND=fake for offline fixtures."
         )
+    else:
+        backend_label = "chromium"
     profile = browser_profile_dir(root)
     profile.mkdir(parents=True, exist_ok=True)
     # Refuse to reuse a path that looks like a normal Chrome user profile.
@@ -145,7 +194,7 @@ def start_browser(
         {
             "running": True,
             "started_at": _now(),
-            "backend": "fake" if prefer_fake else "chromium",
+            "backend": backend_label,
             "executable": detection.executable,
             "profile_dir": str(profile),
             "headless": bool(cfg.get("headless", True)),
@@ -156,6 +205,9 @@ def start_browser(
 
 
 def stop_browser(*, root: str | Path | None = None) -> BrowserStatus:
+    close_all_session_managers()
+    if root is not None:
+        drop_session_manager(Path(root))
     state = _read_state(root)
     state.update({"running": False, "stopped_at": _now()})
     _write_state(state, root=root)
@@ -178,6 +230,7 @@ def run_browser_test(
     cfg = _load_browser_config(root=root, config_path=config_path)
     policy = policy_from_config(cfg)
     prefer_fake = status.backend == "fake" or _explicit_fake(cfg)
+    prefer_playwright = status.backend == "playwright" or _explicit_playwright(cfg)
     local_server = None
     target = url
     if target is None and prefer_fake:
@@ -185,18 +238,40 @@ def run_browser_test(
             policy.allowed_domains = [*policy.allowed_domains, "fixture.local"]
         target = FIXTURE_URL
     elif target is None:
-        # Chromium cannot resolve fixture.local; serve a real loopback page.
+        # Chromium/Playwright cannot resolve fixture.local; serve loopback.
         local_server, target = _start_local_fixture_server()
         if "127.0.0.1" not in policy.allowed_domains:
             policy.allowed_domains = [*policy.allowed_domains, "127.0.0.1"]
+    snap_title: str | None = None
+    snap_text: str | None = None
     try:
-        backend = select_backend(
-            executable=status.executable,
-            profile_dir=Path(status.profile_dir),
-            headless=status.headless,
-            force_fake=prefer_fake,
-        )
-        snap = backend.open(target, policy=policy)
+        if prefer_playwright and not prefer_fake:
+            session_backend = select_session_backend(
+                headless=status.headless,
+                force_fake=False,
+                backend_name="playwright",
+            )
+            handle, snap = session_backend.session_open(
+                target,
+                policy=policy,
+                profile_dir=Path(status.profile_dir),
+            )
+            try:
+                snap_title = snap.title
+                snap_text = snap.text
+            finally:
+                session_backend.session_close(handle)
+        else:
+            backend = select_backend(
+                executable=status.executable,
+                profile_dir=Path(status.profile_dir),
+                headless=status.headless,
+                force_fake=prefer_fake,
+                backend_name=status.backend,
+            )
+            snap = backend.open(target, policy=policy)
+            snap_title = snap.title
+            snap_text = snap.text
         ok = True
         error = None
     except (
@@ -205,7 +280,6 @@ def run_browser_test(
         OSError,  # includes TimeoutError on modern Python
         subprocess.TimeoutExpired,
     ) as exc:
-        snap = None
         ok = False
         error = str(exc)[:200]
     finally:
@@ -217,8 +291,8 @@ def run_browser_test(
     return {
         "ok": ok,
         "url": target,
-        "title": None if snap is None else snap.title,
-        "text_preview": None if snap is None else snap.text[:160],
+        "title": snap_title,
+        "text_preview": None if snap_text is None else snap_text[:160],
         "backend": status.backend,
         "error": error,
     }
@@ -247,10 +321,13 @@ def policy_from_config(cfg: dict[str, Any]) -> BrowserPolicy:
     return BrowserPolicy(
         allowed_domains=[str(x) for x in cfg.get("allowed_domains") or []],
         denied_domains=[str(x) for x in cfg.get("denied_domains") or []],
-        navigation_timeout_seconds=float(cfg.get("navigation_timeout_seconds") or 15.0),
-        max_page_bytes=int(cfg.get("max_page_bytes") or 500_000),
+        navigation_timeout_seconds=float(
+            str(cfg.get("navigation_timeout_seconds") or 15.0)
+        ),
+        max_page_bytes=int(str(cfg.get("max_page_bytes") or 500_000)),
         allow_downloads=bool(cfg.get("allow_downloads", False)),
         allow_javascript=bool(cfg.get("allow_javascript", False)),
+        allow_subresources=bool(cfg.get("allow_subresources", False)),
     )
 
 
@@ -263,6 +340,17 @@ def _explicit_fake(cfg: dict[str, Any]) -> bool:
     if env in {"fake", "fixture", "mock"}:
         return True
     return cfg.get("backend") in {"fake", "fixture", "mock"}
+
+
+def _explicit_playwright(cfg: dict[str, Any]) -> bool:
+    """Return True when Playwright session backend is selected."""
+
+    import os
+
+    env = (os.getenv("SIGNAL_AGENT_BROWSER_BACKEND") or "").strip().lower()
+    if env == "playwright":
+        return True
+    return cfg.get("backend") == "playwright"
 
 
 def _load_browser_config(
@@ -287,6 +375,11 @@ def _load_browser_config(
                 "max_page_bytes": browser.max_page_bytes,
                 "allow_downloads": browser.allow_downloads,
                 "allow_javascript": browser.allow_javascript,
+                "allow_subresources": browser.allow_subresources,
+                "max_sessions": browser.max_sessions,
+                "session_ttl_seconds": browser.session_ttl_seconds,
+                "max_steps_per_session": browser.max_steps_per_session,
+                "max_interactive_elements": browser.max_interactive_elements,
             }
     except Exception:  # noqa: BLE001
         pass

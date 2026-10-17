@@ -251,6 +251,7 @@ def missing_python_extras(manifest: SkillManifest) -> tuple[str, ...]:
         module = {
             "langchain": "langchain_core",
             "mcp": "mcp",
+            "browser": "playwright",
         }.get(extra, extra.replace("-", "_"))
         if importlib.util.find_spec(module) is None:
             missing.append(extra)
@@ -305,8 +306,13 @@ def next_steps_for_skill(name: str) -> list[str]:
         return [
             "Set browser.enabled: true in config.yaml",
             "browser_* tools are added to the effective allowlist via "
-            "skills-state; ensure tools.permissions.classes.execute is "
-            "ask/allow for interactive use",
+            "skills-state; keep classes.execute disabled and set "
+            "tools.permissions.tools.browser_* to ask (see config.yaml)",
+            "For interactive sessions: backend fake (CI) or playwright "
+            "(pip install -e '.[browser]' && playwright install chromium). "
+            "Omitted/chromium backends fail closed for session tools.",
+            "Raise tools.permissions.max_side_effect_actions to at least "
+            "browser.max_steps_per_session for multi-step browsing",
             "Run: signal-agent browser start && signal-agent browser test",
         ]
     return []

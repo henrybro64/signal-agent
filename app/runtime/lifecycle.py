@@ -167,8 +167,7 @@ def start_runtime(
     detail = _startup_stderr_snippet(stderr_path)
     suffix = f": {detail}" if detail else ""
     raise RuntimeLifecycleError(
-        "Runtime failed to stay alive after start "
-        f"(child_exit={proc.poll()}){suffix}"
+        f"Runtime failed to stay alive after start (child_exit={proc.poll()}){suffix}"
     )
 
 
@@ -226,6 +225,14 @@ def stop_runtime(
                 pass
 
     _cleanup_pid(root)
+    try:
+        # Best-effort for in-process sessions (chat). Runtime-child sessions
+        # are closed in run_service_forever's finally, not here.
+        from app.browser.sessions import close_all_session_managers
+
+        close_all_session_managers()
+    except Exception:  # noqa: BLE001 - stop must not fail on session cleanup
+        pass
     state = read_runtime_state(root)
     state.update(
         {

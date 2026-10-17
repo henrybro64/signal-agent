@@ -87,8 +87,46 @@ def validate_local_setup(
         browser.detail,
         severity="info" if browser.ready else "warning",
     )
+    _validate_playwright(report, config)
     _validate_skills(report, root=root, config_path=cfg_path)
     return report
+
+
+def _validate_playwright(report: ValidationReport, config: AppConfig) -> None:
+    """Warn when backend=playwright but the extra/Chromium is missing."""
+
+    backend = getattr(getattr(config, "browser", None), "backend", None)
+    wants_playwright = backend == "playwright"
+    if not wants_playwright:
+        try:
+            import playwright  # noqa: F401
+
+            report.add(
+                "browser_playwright",
+                "playwright package installed "
+                "(optional; use browser.backend: playwright)",
+                severity="info",
+            )
+        except ImportError:
+            report.add(
+                "browser_playwright",
+                "playwright not installed (optional: pip install -e '.[browser]')",
+                severity="info",
+            )
+        return
+    from app.browser.playwright_backend import playwright_available
+
+    ok, detail = playwright_available()
+    report.add(
+        "browser_playwright",
+        detail
+        if ok
+        else (
+            f"{detail}. Install with: pip install -e '.[browser]' "
+            "&& playwright install chromium"
+        ),
+        severity="info" if ok else "warning",
+    )
 
 
 def _validate_tw_market_calendar(report: ValidationReport) -> None:

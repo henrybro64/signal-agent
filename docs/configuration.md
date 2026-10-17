@@ -138,17 +138,22 @@ MCP (`.[mcp]`) and the offline eval runner (`make eval`) are **not**
 | `tools.allowlist` | `search_jobs`, `get_tw_stock_movers`, `query_recent_runs` | Agent-callable tools |
 | `tools.timeout_seconds` | `30` | Per-tool timeout |
 | `tools.permissions.classes` | `read=allow`, `notify=ask`, `write=disabled`, `execute=disabled` | Permission class policy |
-| `tools.permissions.tools` | `{}` | Per-tool overrides (`disabled`/`ask`/`allow`) |
-| `tools.permissions.max_side_effect_actions` | `3` | Cap on notify/write/execute actions |
-| `browser.enabled` | `false` | Optional Chromium tool service |
-| `browser.headless` | `true` | Headless Chromium |
-| `browser.backend` | omitted | `fake` forces fixtures; else env / Chromium |
-| `browser.allowed_domains` | `[]` | Navigation allowlist |
+| `tools.permissions.tools` | `browser_*=ask` | Per-tool overrides (`disabled`/`ask`/`allow`); browser tools default to `ask` |
+| `tools.permissions.max_side_effect_actions` | `3` | Cap on notify/write/execute actions (raise to `browser.max_steps_per_session` for sessions) |
+| `browser.enabled` | `false` | Optional browser tool service |
+| `browser.headless` | `true` | Headless Chromium / Playwright |
+| `browser.backend` | omitted | `fake` / `chromium` (one-shot) / `playwright` (sessions; needs `.[browser]`). Session tools require `fake` or `playwright` |
+| `browser.allowed_domains` | `[]` | Navigation allowlist (checked on every hop, including session clicks) |
 | `browser.denied_domains` | `[]` | Navigation denylist |
 | `browser.navigation_timeout_seconds` | `15` | Page load timeout |
 | `browser.max_page_bytes` | `500000` | Captured page size cap |
 | `browser.allow_downloads` | `false` | Downloads always denied (`true` is rejected) |
-| `browser.allow_javascript` | `false` | JS execution |
+| `browser.allow_javascript` | `false` | Whether site scripts run (tools never take JS) |
+| `browser.allow_subresources` | `false` | When false, off-allowlist images/scripts/XHR abort |
+| `browser.max_sessions` | `1` | Concurrent interactive sessions (#106) |
+| `browser.session_ttl_seconds` | `300` | Idle session TTL |
+| `browser.max_steps_per_session` | `20` | Actions per session before close |
+| `browser.max_interactive_elements` | `150` | Snapshot element cap |
 | `skills.enabled` | omitted → builtin defaults | Explicit skill enable list (`job_search`, `stock_monitoring`, …) |
 
 ### Sources
@@ -209,7 +214,8 @@ scoring:
 
 - A missing LLM key does **not** abort `job_search`: scoring falls open to rules.
 - `signal-agent doctor` checks providers, Telegram, DB, browser, skills, and
-  Taiwan market holiday calendar coverage.
+  Taiwan market holiday calendar coverage. `browser.backend: playwright`
+  without `.[browser]` / Chromium is a warning, not a silent fake fallback.
 - The local runtime writes JSON to `logs/signal-agent.log` via one
   `RotatingFileHandler`. Do not also copytruncate that same file with host
   logrotate; use `deploy/ubuntu/logrotate-signal-agent.conf` for cron wrapper

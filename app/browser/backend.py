@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urljoin, urlparse
 
+from app.browser.models import PageSnapshot
 from app.browser.policy import BrowserPolicy, BrowserPolicyError
 
 _MAX_REDIRECTS = 5
@@ -27,15 +28,6 @@ class _ProbeResult:
 
 class _ProbeNetworkError(Exception):
     """Transport failure while probing a URL (offline, DNS, timeout, …)."""
-
-
-@dataclass(slots=True, frozen=True)
-class PageSnapshot:
-    url: str
-    title: str
-    text: str
-    status: str = "ok"
-    screenshot_path: str | None = None
 
 
 class BrowserBackend(Protocol):
@@ -170,16 +162,19 @@ def select_backend(
     profile_dir: Path,
     headless: bool,
     force_fake: bool | None = None,
+    backend_name: str | None = None,
 ) -> BrowserBackend:
-    """Choose fake or Chromium backend.
+    """Choose fake, Chromium, or Playwright one-shot backend.
 
     Fake is used only when explicitly requested (``force_fake``,
     ``SIGNAL_AGENT_BROWSER_BACKEND=fake``, etc.). Missing Chromium does
-    **not** silently fall back to fixtures.
+    **not** silently fall back to fixtures. ``playwright`` uses a temporary
+    session via the optional ``.[browser]`` extra.
     """
 
     env_flag = (os.getenv("SIGNAL_AGENT_BROWSER_BACKEND") or "").strip().lower()
-    explicit_fake = force_fake is True or env_flag in {
+    configured = (backend_name or env_flag or "").strip().lower()
+    explicit_fake = force_fake is True or configured in {
         "fake",
         "fixture",
         "mock",
@@ -188,6 +183,10 @@ def select_backend(
         from app.browser.fixtures import default_fixtures
 
         return FakeBrowserBackend(fixtures=default_fixtures())
+    if configured == "playwright":
+        from app.browser.playwright_backend import PlaywrightBackend
+
+        return PlaywrightBackend(headless=headless, profile_dir=profile_dir)
     if not executable:
         raise BrowserPolicyError(
             "Chromium/Chrome executable not available. Install a browser or "
@@ -197,6 +196,38 @@ def select_backend(
         executable=executable,
         profile_dir=profile_dir,
         headless=headless,
+    )
+
+
+def select_session_backend(
+    *,
+    headless: bool = True,
+    force_fake: bool | None = None,
+    backend_name: str | None = None,
+    profile_dir: Path | None = None,
+):
+    """Return a session-capable backend (fake fixtures or Playwright).
+
+    Interactive sessions require an explicit ``fake`` or ``playwright``
+    backend. Omitted / ``chromium`` fail closed — the one-shot Chromium
+    launcher has no page handle.
+    """
+
+    from app.browser.fake_session import FakeSessionBackend
+
+    env_flag = (os.getenv("SIGNAL_AGENT_BROWSER_BACKEND") or "").strip().lower()
+    configured = (backend_name or env_flag or "").strip().lower()
+    if force_fake is True or configured in {"fake", "fixture", "mock"}:
+        return FakeSessionBackend()
+    if configured == "playwright":
+        from app.browser.playwright_backend import PlaywrightBackend
+
+        return PlaywrightBackend(headless=headless, profile_dir=profile_dir)
+    raise BrowserPolicyError(
+        "Interactive sessions require browser.backend=playwright "
+        "(pip install -e '.[browser]' && playwright install chromium) "
+        "or browser.backend=fake for offline fixtures. "
+        f"Got {configured or 'chromium/omitted'!r}."
     )
 
 
@@ -259,16 +290,12 @@ def _probe_with_get(url: str, *, policy: BrowserPolicy) -> str:
         return url
     if 300 <= result.status < 400:
         if not result.location:
-            raise BrowserPolicyError(
-                f"Redirect from {url!r} missing Location header"
-            )
+            raise BrowserPolicyError(f"Redirect from {url!r} missing Location header")
         final = urljoin(url, result.location)
         policy.assert_url_allowed(final)
         return final
     if result.status >= 400:
-        raise BrowserPolicyError(
-            f"URL probe failed for {url!r}: HTTP {result.status}"
-        )
+        raise BrowserPolicyError(f"URL probe failed for {url!r}: HTTP {result.status}")
     policy.assert_url_allowed(url)
     return url
 
@@ -326,6 +353,7 @@ def _http_probe(
         raise _ProbeNetworkError(str(exc)) from exc
     finally:
         conn.close()
+
 
 def _run_chromium_bounded(
     cmd: list[str],
@@ -410,10 +438,7 @@ def _read_chromium_stderr(proc: subprocess.Popen[str]) -> str:
 
 
 def _assert_downloads_denied(policy: BrowserPolicy) -> None:
-    if policy.allow_downloads:
-        raise BrowserPolicyError(
-            "browser.allow_downloads=true is not supported; downloads remain disabled"
-        )
+    policy.assert_downloads_denied()
 
 
 def _html_to_text(html: str) -> str:

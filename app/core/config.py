@@ -143,7 +143,7 @@ class ToolsConfig:
 
 @dataclass(slots=True)
 class BrowserConfig:
-    """Optional isolated browser service (#87)."""
+    """Optional isolated browser service (#87/#106)."""
 
     enabled: bool = False
     headless: bool = True
@@ -154,6 +154,12 @@ class BrowserConfig:
     max_page_bytes: int = 500_000
     allow_downloads: bool = False
     allow_javascript: bool = False
+    allow_subresources: bool = False
+    # Session browsing (#106); used by playwright / fake session backends.
+    max_sessions: int = 1
+    session_ttl_seconds: float = 300.0
+    max_steps_per_session: int = 20
+    max_interactive_elements: int = 150
 
 
 @dataclass(slots=True)
@@ -798,6 +804,65 @@ def _parse_browser_config(
         ).strip()
         or None
     )
+    if backend is not None and backend not in {
+        "fake",
+        "fixture",
+        "mock",
+        "chromium",
+        "playwright",
+    }:
+        raise ConfigError(
+            f"Config value '{parent}.backend' must be one of "
+            f"fake|chromium|playwright in {source_name}"
+        )
+    max_sessions = _optional_int(
+        data,
+        "max_sessions",
+        default=defaults.max_sessions,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    _require_positive_int(
+        max_sessions,
+        config_path=f"{parent}.max_sessions",
+        source_name=source_name,
+    )
+    session_ttl = _optional_float(
+        data,
+        "session_ttl_seconds",
+        default=defaults.session_ttl_seconds,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    _require_positive_number(
+        session_ttl,
+        config_path=f"{parent}.session_ttl_seconds",
+        source_name=source_name,
+    )
+    max_steps = _optional_int(
+        data,
+        "max_steps_per_session",
+        default=defaults.max_steps_per_session,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    _require_positive_int(
+        max_steps,
+        config_path=f"{parent}.max_steps_per_session",
+        source_name=source_name,
+    )
+    max_elements = _optional_int(
+        data,
+        "max_interactive_elements",
+        default=defaults.max_interactive_elements,
+        parent_path=parent,
+        source_name=source_name,
+    )
+    _require_positive_int(
+        max_elements,
+        config_path=f"{parent}.max_interactive_elements",
+        source_name=source_name,
+    )
     return BrowserConfig(
         enabled=_optional_bool(
             data,
@@ -844,6 +909,17 @@ def _parse_browser_config(
             parent_path=parent,
             source_name=source_name,
         ),
+        allow_subresources=_optional_bool(
+            data,
+            "allow_subresources",
+            default=False,
+            parent_path=parent,
+            source_name=source_name,
+        ),
+        max_sessions=max_sessions,
+        session_ttl_seconds=session_ttl,
+        max_steps_per_session=max_steps,
+        max_interactive_elements=max_elements,
     )
 
 

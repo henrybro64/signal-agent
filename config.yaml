@@ -143,19 +143,34 @@ tools:
       notify: ask
       write: disabled
       execute: disabled
-    # Per-tool overrides (disabled/ask/allow), e.g.:
-    # tools:
-    #   send_telegram_message: allow
+    # Per-tool overrides (disabled/ask/allow). Browser tools stay ask so
+    # execute-class remains disabled for other tools (e.g. runtime_execute).
+    tools:
+      browser_navigate: ask
+      browser_read_page: ask
+      browser_screenshot: ask
+      browser_open: ask
+      browser_snapshot: ask
+      browser_click: ask
+      browser_type: ask
+      browser_select: ask
+      browser_scroll: ask
+      browser_back: ask
+      browser_close: ask
+    # Raise to at least browser.max_steps_per_session for multi-step browsing.
     max_side_effect_actions: 3
 
-# Optional isolated browser service (#87). Disabled by default.
+# Optional isolated browser service (#87/#106). Disabled by default.
 # To use: skill enable browser → set enabled: true → browser start/test.
 # Downloads are always denied (allow_downloads=true is rejected).
-# Fake/fixture backend only when SIGNAL_AGENT_BROWSER_BACKEND=fake (or backend: fake).
+# Backends: chromium (one-shot), fake (CI fixtures), playwright (sessions; .[browser]).
+# Session tools require explicit fake or playwright (chromium/omitted fail closed).
+# Typing is search/filter only; no JS input, login, CAPTCHA, apply, or file upload.
 browser:
   enabled: false
   headless: true
-  # backend: fake   # force offline fixtures (also via SIGNAL_AGENT_BROWSER_BACKEND)
+  # backend: fake        # offline fixtures (also SIGNAL_AGENT_BROWSER_BACKEND=fake)
+  # backend: playwright  # pip install -e '.[browser]' && playwright install chromium
   allowed_domains:
     - fixture.local
     - example.com
@@ -164,6 +179,12 @@ browser:
   max_page_bytes: 500000
   allow_downloads: false
   allow_javascript: false
+  # When false, off-allowlist images/scripts/XHR are aborted (fail closed).
+  allow_subresources: false
+  max_sessions: 1
+  session_ttl_seconds: 300
+  max_steps_per_session: 20
+  max_interactive_elements: 150
 
 # Built-in skills (#89). Omit `enabled` to use defaults (job_search +
 # stock_monitoring). Browser stays off until explicitly enabled.

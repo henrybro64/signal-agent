@@ -71,6 +71,10 @@ def test_load_config_reads_sample_file() -> None:
     assert_close(config.sources.linkedin_email.timeout_seconds, 30.0)
     assert config.sources.twse.batch_size == 100
     assert_close(config.sources.tpex.request_delay_seconds, 0.2)
+    assert config.browser.allow_subresources is False
+    assert config.tools.permissions.classes["execute"] == "disabled"
+    assert config.tools.permissions.tools["browser_open"] == "ask"
+    assert config.tools.permissions.tools["browser_click"] == "ask"
 
 
 def test_load_config_missing_file_raises() -> None:
